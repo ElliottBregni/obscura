@@ -204,7 +204,8 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
         if not f.endswith(".py") or not os.path.isfile(f):
             continue
         try:
-            source = open(f, encoding="utf-8").read()
+            with open(f, encoding="utf-8") as fp:
+                source = fp.read()
             _ast.parse(source, filename=f)
         except SyntaxError as exc:
             logger.debug(

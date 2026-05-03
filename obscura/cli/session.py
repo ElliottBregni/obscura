@@ -810,7 +810,6 @@ class ObscuraSession:
                 _log.debug("suppressed exception in send", exc_info=True)
 
         # Auto-title
-        global _session_state
         if not _session_state["titled"] and len(ctx.message_history) >= 2:
             _session_state["titled"] = True
             try:

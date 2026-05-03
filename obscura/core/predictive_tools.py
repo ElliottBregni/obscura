@@ -147,7 +147,6 @@ _PREDICTION_PATTERNS: list[_PatternEntry] = []
 
 def _init_patterns() -> None:
     """Build the pattern table once at import time."""
-    global _PREDICTION_PATTERNS
 
     def _path_arg(m: re.Match[str]) -> dict[str, Any]:
         return {"path": m.group("path").strip("`'\"")}

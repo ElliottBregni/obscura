@@ -283,7 +283,7 @@ class ContextStatus:
     """True if available_tokens < CONTEXT_WINDOW_HARD_MIN_TOKENS (16K)."""
 
     usage_pct: float
-    """Fraction of context window used (0.0–1.0+)."""
+    """Fraction of context window used (0.0-1.0+)."""
 
     compact_tier: str = "ok"
     """Current compaction tier: 'ok', 'snip', 'compact', or 'critical'."""

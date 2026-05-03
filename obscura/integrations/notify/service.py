@@ -46,7 +46,6 @@ def get_storage_sync(db_url: str | None = None) -> Storage:
 
     It will create an event loop to run init_storage once.
     """
-    global _storage
     if _storage is not None:
         return _storage
     loop = asyncio.new_event_loop()

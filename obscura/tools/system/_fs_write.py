@@ -27,12 +27,12 @@ class FsWrite:
     def normalize_quotes(text: str) -> str:
         """Normalize curly/smart quotes to straight ASCII quotes."""
         replacements = {
-            "‘": "'",
-            "’": "'",  # Single curly quotes
-            "“": '"',
-            "”": '"',  # Double curly quotes
-            "′": "'",
-            "″": '"',  # Prime marks
+            "‘": "'",  # noqa: RUF001 - left single quote
+            "’": "'",  # noqa: RUF001 - right single quote
+            "“": '"',  # left double quote
+            "”": '"',  # right double quote
+            "′": "'",  # noqa: RUF001 - prime
+            "″": '"',  # double prime
         }
         for old, new in replacements.items():
             text = text.replace(old, new)

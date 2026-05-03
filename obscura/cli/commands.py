@@ -4584,8 +4584,7 @@ async def _running_detail(
                     "[bold]Recent activity:[/]",
                 ),
             )
-            shown = 0
-            for e in reversed(entries):
+            for shown, e in enumerate(reversed(entries)):
                 if shown >= 15:
                     break
                 kind = e.get("kind", "?")
@@ -4602,7 +4601,6 @@ async def _running_detail(
                 if preview:
                     line += f" [dim]{preview}[/]"
                 parts.append(Text.from_markup(line))
-                shown += 1
     except Exception:
         logger.debug("suppressed exception in _running_detail", exc_info=True)
 

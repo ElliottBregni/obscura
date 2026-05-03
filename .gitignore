@@ -131,3 +131,9 @@ package.json
 package-lock.json
 .claude/
 .claude/
+CLAUDE.md
+statrt_a2a.sh
+CLAUDE.md
+README.playwright.md
+SETUP.md
+docker-compose.yml

@@ -6,13 +6,12 @@ Provides backwards-compatible database initialization based on environment confi
 from __future__ import annotations
 
 import os
-from typing import Union
 
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.postgres_event_store import PostgreSQLEventStore
 
-EventStore = Union[SQLiteEventStore, PostgreSQLEventStore]
+EventStore = SQLiteEventStore | PostgreSQLEventStore
 
 
 class DatabaseFactory:

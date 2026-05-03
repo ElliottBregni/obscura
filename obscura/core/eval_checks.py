@@ -42,7 +42,8 @@ def check_python_syntax(
     if not path or not path.endswith(".py") or not os.path.isfile(path):
         return None
     try:
-        source = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
         ast.parse(source, filename=path)
     except SyntaxError as exc:
         logger.debug("suppressed exception in check_python_syntax", exc_info=True)
@@ -142,7 +143,8 @@ def check_python_imports(
     if not path or not path.endswith(".py") or not os.path.isfile(path):
         return None
     try:
-        source = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
         tree = ast.parse(source, filename=path)
     except SyntaxError:
         logger.debug("suppressed exception in check_python_imports", exc_info=True)
