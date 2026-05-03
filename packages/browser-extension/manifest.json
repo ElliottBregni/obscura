@@ -22,7 +22,10 @@
     "storage",
     "activeTab",
     "scripting",
-    "tabs"
+    "tabs",
+    "clipboardRead",
+    "clipboardWrite",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -872,6 +872,87 @@ async function execInTab(tabId, func, args = []) {
   return res?.[0]?.result;
 }
 
+const cdpState = {
+  attached: new Set(),
+  consoleLogs: new Map(),
+  networkLog: new Map(),
+};
+
+const CDP_LOG_LIMIT = 250;
+
+function _cdpModifiers(modifiers) {
+  let flags = 0;
+  for (const m of modifiers || []) {
+    if (m === "Alt") flags |= 1;
+    else if (m === "Control" || m === "Ctrl") flags |= 2;
+    else if (m === "Meta" || m === "Command") flags |= 4;
+    else if (m === "Shift") flags |= 8;
+  }
+  return flags;
+}
+
+function _keyToCode(key) {
+  if (key.length === 1) {
+    const c = key.toUpperCase();
+    if (c >= "A" && c <= "Z") return `Key${c}`;
+    if (c >= "0" && c <= "9") return `Digit${c}`;
+  }
+  return key;
+}
+
+async function ensureCdpAttached(tabId) {
+  if (cdpState.attached.has(tabId)) return;
+  await chrome.debugger.attach({ tabId }, "1.3");
+  cdpState.attached.add(tabId);
+  cdpState.consoleLogs.set(tabId, []);
+  cdpState.networkLog.set(tabId, []);
+  await chrome.debugger.sendCommand({ tabId }, "Runtime.enable");
+  await chrome.debugger.sendCommand({ tabId }, "Network.enable");
+}
+
+if (typeof chrome !== "undefined" && chrome.debugger) {
+  chrome.debugger.onDetach.addListener((source) => {
+    if (source.tabId !== undefined) {
+      cdpState.attached.delete(source.tabId);
+      cdpState.consoleLogs.delete(source.tabId);
+      cdpState.networkLog.delete(source.tabId);
+    }
+  });
+
+  chrome.debugger.onEvent.addListener((source, method, params) => {
+    const tabId = source.tabId;
+    if (tabId === undefined) return;
+    if (method === "Runtime.consoleAPICalled") {
+      const buf = cdpState.consoleLogs.get(tabId);
+      if (!buf) return;
+      const text = (params.args || [])
+        .map((a) => a.value ?? a.description ?? a.unserializableValue ?? "")
+        .map((s) => String(s).slice(0, 400))
+        .join(" ");
+      buf.push({ level: params.type || "log", text, ts: Date.now() });
+      if (buf.length > CDP_LOG_LIMIT) buf.splice(0, buf.length - CDP_LOG_LIMIT);
+    } else if (method === "Network.requestWillBeSent") {
+      const buf = cdpState.networkLog.get(tabId);
+      if (!buf) return;
+      buf.push({
+        requestId: params.requestId,
+        method: params.request.method,
+        url: params.request.url,
+        ts: Date.now(),
+      });
+      if (buf.length > CDP_LOG_LIMIT) buf.splice(0, buf.length - CDP_LOG_LIMIT);
+    } else if (method === "Network.responseReceived") {
+      const buf = cdpState.networkLog.get(tabId);
+      if (!buf) return;
+      const rec = buf.find((e) => e.requestId === params.requestId);
+      if (rec) {
+        rec.status = params.response.status;
+        rec.mime = params.response.mimeType;
+      }
+    }
+  });
+}
+
 async function handleBrowserTool(msg) {
   const { id: reqId, op, args = {} } = msg;
   try {
@@ -1075,6 +1156,172 @@ async function runBrowserOp(op, args) {
     }
     case "go_forward": {
       await chrome.tabs.goForward(tab.id);
+      return { ok: true };
+    }
+    case "press_key": {
+      const { key, modifiers = [], selector = null } = args;
+      return await execInTab(tab.id, (k, mods, sel) => {
+        let target;
+        if (sel) {
+          target = document.querySelector(sel);
+          if (!target) return { ok: false, error: "no match" };
+          target.focus?.();
+        } else {
+          target = document.activeElement || document.body;
+        }
+        const ctrl = mods.includes("Control") || mods.includes("Ctrl");
+        const shift = mods.includes("Shift");
+        const alt = mods.includes("Alt");
+        const meta = mods.includes("Meta") || mods.includes("Command");
+        const init = {
+          key: k,
+          code: k.length === 1 ? `Key${k.toUpperCase()}` : k,
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          ctrlKey: ctrl,
+          shiftKey: shift,
+          altKey: alt,
+          metaKey: meta,
+        };
+        target.dispatchEvent(new KeyboardEvent("keydown", init));
+        if (k.length === 1 && !ctrl && !meta) {
+          target.dispatchEvent(new KeyboardEvent("keypress", init));
+        }
+        target.dispatchEvent(new KeyboardEvent("keyup", init));
+        return {
+          ok: true,
+          target: {
+            tag: target.tagName?.toLowerCase() || "",
+            id: target.id || "",
+          },
+        };
+      }, [key, modifiers, selector]);
+    }
+    case "clipboard_read": {
+      try {
+        const text = await navigator.clipboard.readText();
+        return { text };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+    case "clipboard_write": {
+      const { text } = args;
+      try {
+        await navigator.clipboard.writeText(String(text ?? ""));
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    }
+    case "type_text": {
+      const { text, selector = null } = args;
+      if (selector) {
+        await execInTab(tab.id, (sel) => {
+          document.querySelector(sel)?.focus?.();
+        }, [selector]);
+      }
+      await ensureCdpAttached(tab.id);
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Input.insertText",
+        { text: String(text ?? "") },
+      );
+      return { ok: true };
+    }
+    case "native_press_key": {
+      const { key, modifiers = [], selector = null } = args;
+      if (selector) {
+        await execInTab(tab.id, (sel) => {
+          document.querySelector(sel)?.focus?.();
+        }, [selector]);
+      }
+      await ensureCdpAttached(tab.id);
+      const mods = _cdpModifiers(modifiers);
+      const code = _keyToCode(key);
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
+        type: "rawKeyDown", key, code, modifiers: mods,
+      });
+      if (key.length === 1 && (mods & 6) === 0) {
+        await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
+          type: "char", key, code, text: key, unmodifiedText: key, modifiers: mods,
+        });
+      }
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchKeyEvent", {
+        type: "keyUp", key, code, modifiers: mods,
+      });
+      return { ok: true };
+    }
+    case "native_click": {
+      const { selector } = args;
+      const rect = await execInTab(tab.id, (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        el.scrollIntoView({ block: "center", inline: "center" });
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, [selector]);
+      if (!rect) return { ok: false, error: "no match" };
+      await ensureCdpAttached(tab.id);
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
+        type: "mouseMoved", x: rect.x, y: rect.y, button: "none",
+      });
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
+        type: "mousePressed", x: rect.x, y: rect.y, button: "left", clickCount: 1,
+      });
+      await chrome.debugger.sendCommand({ tabId: tab.id }, "Input.dispatchMouseEvent", {
+        type: "mouseReleased", x: rect.x, y: rect.y, button: "left", clickCount: 1,
+      });
+      return { ok: true };
+    }
+    case "upload_file": {
+      const { selector, paths } = args;
+      if (!Array.isArray(paths) || paths.length === 0) {
+        return { ok: false, error: "paths must be a non-empty array of absolute paths" };
+      }
+      await ensureCdpAttached(tab.id);
+      const doc = await chrome.debugger.sendCommand({ tabId: tab.id }, "DOM.getDocument", {});
+      const found = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "DOM.querySelector",
+        { nodeId: doc.root.nodeId, selector },
+      );
+      if (!found?.nodeId) return { ok: false, error: "no match" };
+      await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "DOM.setFileInputFiles",
+        { nodeId: found.nodeId, files: paths.map(String) },
+      );
+      return { ok: true, file_count: paths.length };
+    }
+    case "console_logs": {
+      const { limit = 50 } = args;
+      await ensureCdpAttached(tab.id);
+      const buf = cdpState.consoleLogs.get(tab.id) || [];
+      return { logs: buf.slice(-Number(limit)) };
+    }
+    case "network_log": {
+      const { limit = 50, url_contains = null } = args;
+      await ensureCdpAttached(tab.id);
+      let buf = cdpState.networkLog.get(tab.id) || [];
+      if (url_contains) {
+        const needle = String(url_contains);
+        buf = buf.filter((e) => e.url?.includes(needle));
+      }
+      return { entries: buf.slice(-Number(limit)) };
+    }
+    case "cdp_detach": {
+      if (cdpState.attached.has(tab.id)) {
+        try {
+          await chrome.debugger.detach({ tabId: tab.id });
+        } catch {
+          // already detached — fine.
+        }
+      }
+      cdpState.attached.delete(tab.id);
+      cdpState.consoleLogs.delete(tab.id);
+      cdpState.networkLog.delete(tab.id);
       return { ok: true };
     }
     default:
