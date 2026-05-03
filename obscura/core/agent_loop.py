@@ -368,7 +368,12 @@ PARAMETER_ALIASES: dict[str, dict[str, str]] = {
         "newText": "new_text",
     },
     "run_shell": {
+        "cmd": "script",
+        "workdir": "cwd",
         "timeout": "timeout_seconds",
+    },
+    "todo_write": {
+        "plan": "todos",
     },
     "find_files": {
         "head_limit": "max_results",
@@ -423,6 +428,31 @@ def _bridge_run_shell_input(inputs: dict[str, Any]) -> dict[str, Any]:
     return inputs
 
 
+def _bridge_todo_write_input(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Map Codex update_plan payloads to todo_write items."""
+    todos = inputs.get("todos")
+    if not isinstance(todos, list):
+        return inputs
+
+    normalized: list[dict[str, str]] = []
+    for raw in todos:
+        if not isinstance(raw, dict):
+            continue
+        content = raw.get("content") or raw.get("step") or raw.get("task") or ""
+        status = raw.get("status") or "pending"
+        active = raw.get("activeForm") or raw.get("active_form") or content
+        normalized.append(
+            {
+                "content": str(content),
+                "status": str(status),
+                "activeForm": str(active),
+            },
+        )
+    inputs["todos"] = normalized
+    inputs.pop("explanation", None)
+    return inputs
+
+
 # Registry: canonical_tool_name → (input_transform, output_transform)
 # output_transform receives the raw result string and returns a new string.
 TOOL_BRIDGES: dict[
@@ -435,6 +465,7 @@ TOOL_BRIDGES: dict[
     "grep_files": (_bridge_grep_input, None),
     "task": (_bridge_task_input, None),
     "run_shell": (_bridge_run_shell_input, None),
+    "todo_write": (_bridge_todo_write_input, None),
 }
 
 

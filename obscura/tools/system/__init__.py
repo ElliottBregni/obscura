@@ -49,11 +49,43 @@ from obscura.tools.system.intelligence import (
     policy_probe,
 )
 
+_tool_registry_ref: Any = None
+
 
 # ---------------------------------------------------------------------------
 # Orphan tools — small enough not to warrant their own class. Each uses the
 # Policy class for sandbox/error formatting.
 # ---------------------------------------------------------------------------
+
+
+@tool(
+    "file_change",
+    (
+        "Record a provider file-change notification. This is informational and "
+        "does not modify files."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "changes": {"type": "string"},
+            "path": {"type": "string"},
+            "summary": {"type": "string"},
+        },
+    },
+)
+async def file_change(
+    changes: str = "",
+    path: str = "",
+    summary: str = "",
+) -> str:
+    return json.dumps(
+        {
+            "ok": True,
+            "recorded": True,
+            "changes": changes or summary,
+            "path": path,
+        },
+    )
 
 
 @tool(
@@ -556,7 +588,9 @@ class Registry:
     @classmethod
     def set_tool_registry(cls, registry: Any) -> None:
         """Set the global ToolRegistry reference for tool_search."""
+        global _tool_registry_ref
         cls.tool_registry_ref = registry
+        _tool_registry_ref = registry
 
     @staticmethod
     @tool(
@@ -608,6 +642,8 @@ class Registry:
         registry: Any = ctx.registry if ctx is not None else None
         if registry is None:
             registry = Registry.tool_registry_ref
+        if registry is None:
+            registry = _tool_registry_ref
         if registry is None:
             return Policy.json_error(
                 "no_registry",
@@ -687,6 +723,8 @@ def get_system_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", Web.web_search).spec),
         # Delegation
         cast("ToolSpec", cast("Any", task).spec),
+        # Provider notifications
+        cast("ToolSpec", cast("Any", file_change).spec),
         # System discovery
         cast("ToolSpec", cast("Any", Shell.which_command).spec),
         # Filesystem — basic

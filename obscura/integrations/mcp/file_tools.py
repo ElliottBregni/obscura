@@ -41,6 +41,18 @@ def _is_blocked(path: Path) -> bool:
     return False
 
 
+def _is_within_allowed_roots(path: Path, roots: list[str]) -> bool:
+    """Return whether ``path`` is equal to or below one of ``roots``."""
+    for root in roots:
+        root_path = Path(root).expanduser().resolve()
+        try:
+            path.relative_to(root_path)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
 def _resolve_safe(
     path_str: str,
     allowed_roots: list[str] | None = None,
@@ -55,7 +67,7 @@ def _resolve_safe(
     resolved = Path(path_str).expanduser().resolve()
 
     # Check allowed roots
-    in_allowed = any(str(resolved).startswith(str(Path(r).resolve())) for r in roots)
+    in_allowed = _is_within_allowed_roots(resolved, roots)
     if not in_allowed:
         msg = f"Path {path_str!r} is outside allowed directories"
         raise ValueError(msg)
@@ -166,7 +178,7 @@ def search_files(
 
     # Validate search root
     roots = allowed_roots or _DEFAULT_ALLOWED_ROOTS
-    in_allowed = any(str(search_root).startswith(str(Path(r).resolve())) for r in roots)
+    in_allowed = _is_within_allowed_roots(search_root, roots)
     if not in_allowed:
         return {"error": f"Search root {root!r} is outside allowed directories"}
 

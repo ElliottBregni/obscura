@@ -42,6 +42,7 @@ class ToolRegistry:
             "execute_shell": "run_shell",
             "run_script": "run_shell",
             "shell_command": "run_shell",
+            "exec_command": "run_shell",
             "shellcommand": "run_shell",
             "execute_command": "run_command",
             "exec": "run_command",
@@ -86,6 +87,12 @@ class ToolRegistry:
             "find_replace": "edit_text_file",
             "filesystem_edit_file": "edit_text_file",
             "filesystem_edit_text_file": "edit_text_file",
+            # provider status/event tools
+            "file_change": "file_change",
+            "filechange": "file_change",
+            "file_changes": "file_change",
+            "filechanges": "file_change",
+            "record_file_change": "file_change",
             # directory
             "ls": "list_directory",
             "list_dir": "list_directory",
@@ -259,10 +266,12 @@ class ToolRegistry:
             "todo": "todo_write",
             "update_todos": "todo_write",
             "write_todos": "todo_write",
+            "update_plan": "todo_write",
             "notebookedit": "notebook_edit",
             "askuserquestion": "user_ask",
             "ask_question": "user_ask",
             "ask_user_question": "user_ask",
+            "request_user_input": "user_ask",
             "prompt_user": "user_ask",
             "agent": "task",
             "skill": "task",
@@ -277,6 +286,8 @@ class ToolRegistry:
             "taskget": "task_get",
             "tasklist": "task_list",
             "taskupdate": "task_update",
+            "wait_agent": "task_output",
+            "close_agent": "task_stop",
             # tool discovery (Claude SDK CamelCase → canonical)
             "toolsearch": "tool_search",
             "search_tools": "tool_search",
@@ -340,6 +351,26 @@ class ToolRegistry:
             direct = self._tools.get(stripped)
             if direct is not None:
                 return direct
+        # Strip provider namespace prefixes such as functions.exec_command or
+        # multi_tool_use.parallel before direct and alias lookup.
+        for prefix in (
+            "functions.",
+            "functions_",
+            "multi_tool_use.",
+            "multi_tool_use_",
+        ):
+            if stripped.startswith(prefix):
+                without_prefix = stripped[len(prefix) :]
+                direct = self._tools.get(without_prefix)
+                if direct is not None:
+                    return direct
+                canonical = self._alias_targets.get(
+                    _normalize_tool_name(without_prefix),
+                )
+                if canonical is not None:
+                    found = self._tools.get(canonical)
+                    if found is not None:
+                        return found
         # Try dot ↔ underscore variants (Claude SDK sanitizes dots to underscores)
         underscore_variant = ""
         if "." in stripped:
