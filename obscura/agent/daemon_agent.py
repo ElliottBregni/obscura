@@ -87,12 +87,11 @@ def _get_phantom_message_preamble() -> str:
     name = "the user"
     style_hint = ""
     try:
-        from obscura.auth.context import current_user
+        from obscura.auth.cli_user import local_cli_user
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        user = current_user()
-        store = ProfileStore.for_user(user)
+        store = ProfileStore.for_user(local_cli_user())
 
         identity = store.get_facts_by_category(ProfileCategory.IDENTITY)
         for f in identity:
