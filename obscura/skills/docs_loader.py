@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.frontmatter import parse_frontmatter
 from obscura.core.paths import resolve_obscura_skills_dir
@@ -73,7 +73,8 @@ def load_markdown_skill_documents(
         raw_tools: Any = meta.get("allowed-tools", meta.get("allowed_tools"))
         allowed: tuple[str, ...] = ()
         if isinstance(raw_tools, list):
-            allowed = tuple(str(t) for t in raw_tools)
+            tools_seq = cast(list[Any], raw_tools)
+            allowed = tuple(str(t) for t in tools_seq)
 
         documents.append(
             MarkdownSkillDocument(

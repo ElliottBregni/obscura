@@ -58,7 +58,7 @@ class SkillCapability:
     parameters: list[CapabilityParameter]
     returns: CapabilityReturn
     capability_type: CapabilityType = CapabilityType.ACTION
-    examples: list[dict[str, Any]] = field(default_factory=list)
+    examples: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
     def to_dict(self) -> dict[str, Any]:
         """Convert capability to dictionary for serialization."""
@@ -94,7 +94,7 @@ class SkillMetadata:
     license: str = "MIT"
     homepage: str | None = None
     repository: str | None = None
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list[str])
     category: str = "general"  # web, filesystem, communication, etc.
     icon: str | None = None  # Icon name or URL
 
@@ -107,7 +107,7 @@ class SkillHealth:
     message: str
     last_check: str | None = None
     latency_ms: float | None = None
-    details: dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -65,7 +65,7 @@ class EvalEngine:
         session_id = f"eval-{run_id}-{case.id}"
 
         # Register tools with the backend so it can offer them to the model
-        if self._tool_registry is not None:
+        if self._tool_registry is not None:  # pyright: ignore[reportUnnecessaryComparison]
             try:
                 for spec in self._tool_registry.all():
                     self._backend.register_tool(spec)
@@ -75,7 +75,7 @@ class EvalEngine:
         # Start the backend (with timeout to protect against blocking backends)
         try:
             await asyncio.wait_for(
-                self._backend.start(),  # type: ignore[union-attr]
+                self._backend.start(),
                 timeout=10.0,
             )
         except (TimeoutError, Exception):

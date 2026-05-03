@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 import base64
@@ -16,7 +18,7 @@ async def handshake(req: HandshakeReq):
 
 class InvokeReq(BaseModel):
     function_name: str
-    full_payload: dict
+    full_payload: dict[str, Any]
 
 @app.post('/internal/invoke')
 async def invoke(req: InvokeReq):

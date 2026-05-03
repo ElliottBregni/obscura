@@ -49,7 +49,7 @@ class BackendRoutingPolicy:
         },
     )
     fallback_order: tuple[str, ...] = ("claude", "copilot", "openai", "localllm")
-    fallback_routes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    fallback_routes: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
 
     def select_model(self, task_type: str) -> str:
         normalized = task_type.strip().lower()
@@ -97,7 +97,7 @@ class RunAgentRequest:
     """Request payload for POST /api/v1/agents/{id}/run."""
 
     prompt: str
-    context: dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict[str, Any])
     timeout_seconds: float | None = None
     cancellation_token: str = ""
 
@@ -143,8 +143,8 @@ class WorkflowRunRequest:
 
     task_type: str
     goal: str
-    context: dict[str, Any] = field(default_factory=dict)
-    constraints: list[str] = field(default_factory=list)
+    context: dict[str, Any] = field(default_factory=dict[str, Any])
+    constraints: list[str] = field(default_factory=list[str])
     expected_output: str = ""
     model: str | None = None
     name: str = "openclaw-workflow"

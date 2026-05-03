@@ -88,7 +88,7 @@ class AnthropicEvalBackend:
             kwargs["auth_token"] = self._auth_token
         else:
             kwargs["api_key"] = self._api_key
-        self._client = anthropic.AsyncAnthropic(**kwargs)
+        self._client = anthropic.AsyncAnthropic(**kwargs)  # pyright: ignore[reportUnknownMemberType]
 
     async def stop(self) -> None:
         if self._client is not None:

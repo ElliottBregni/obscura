@@ -127,7 +127,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # can register additional channels (or override env-var channels) at startup.
     try:
         from obscura.integrations.messaging.store import ChannelConfigStore
-        from obscura.routes.channels import _get_router as _get_channel_router
+        from obscura.routes.channels import _get_router as _get_channel_router  # pyright: ignore[reportPrivateUsage]
 
         _db_config_store = ChannelConfigStore()
         _enabled_configs = _db_config_store.list_all(enabled_only=True)
