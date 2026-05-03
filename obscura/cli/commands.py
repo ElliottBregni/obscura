@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import sys
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -6954,7 +6955,7 @@ async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
 
                 proc = subprocess.run(
                     ["pbcopy"]
-                    if os.sys.platform == "darwin"
+                    if sys.platform == "darwin"
                     else ["xclip", "-selection", "clipboard"],
                     input=text.encode("utf-8"),
                     capture_output=True,
