@@ -3,15 +3,47 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 BASE_URL = "https://www.alphavantage.co/query"
 
+__all__ = [
+    "_handler_ad",
+    "_handler_adx",
+    "_handler_aroon",
+    "_handler_balance_sheet",
+    "_handler_bbands",
+    "_handler_cash_flow",
+    "_handler_cci",
+    "_handler_currency_exchange_rate",
+    "_handler_daily",
+    "_handler_earnings",
+    "_handler_ema",
+    "_handler_income_statement",
+    "_handler_intraday",
+    "_handler_macd",
+    "_handler_monthly",
+    "_handler_obv",
+    "_handler_overview",
+    "_handler_quote",
+    "_handler_rsi",
+    "_handler_sma",
+    "_handler_stoch",
+    "_handler_weekly",
+    "healthcheck",
+]
+
 
 def _api_key() -> str:
     return os.environ["ALPHAVANTAGE_API_KEY"]
+
+
+def _coerce_dict(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return {"data": value}
 
 
 async def _get(params: dict[str, Any]) -> dict[str, Any]:
@@ -20,7 +52,7 @@ async def _get(params: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient() as client:
             resp = await client.get(BASE_URL, params=params)
             resp.raise_for_status()
-            return resp.json()  # type: ignore[no-any-return]
+            return _coerce_dict(resp.json())
     except Exception as e:
         return {"error": str(e)}
 
@@ -35,8 +67,8 @@ async def _handler_quote(symbol: str, **kwargs: Any) -> dict[str, Any]:
 async def _handler_intraday(
     symbol: str,
     interval: str = "5min",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "TIME_SERIES_INTRADAY",
@@ -66,8 +98,8 @@ async def _handler_sma(
     interval: str = "daily",
     time_period: int = 20,
     series_type: str = "close",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "SMA",
@@ -84,8 +116,8 @@ async def _handler_ema(
     interval: str = "daily",
     time_period: int = 20,
     series_type: str = "close",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "EMA",
@@ -102,8 +134,8 @@ async def _handler_rsi(
     interval: str = "daily",
     time_period: int = 14,
     series_type: str = "close",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "RSI",
@@ -119,8 +151,8 @@ async def _handler_macd(
     symbol: str,
     interval: str = "daily",
     series_type: str = "close",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "MACD",
@@ -136,8 +168,8 @@ async def _handler_bbands(
     interval: str = "daily",
     time_period: int = 20,
     series_type: str = "close",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "BBANDS",
@@ -152,8 +184,8 @@ async def _handler_bbands(
 async def _handler_stoch(
     symbol: str,
     interval: str = "daily",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "STOCH",
@@ -167,8 +199,8 @@ async def _handler_adx(
     symbol: str,
     interval: str = "daily",
     time_period: int = 14,
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "ADX",
@@ -183,8 +215,8 @@ async def _handler_cci(
     symbol: str,
     interval: str = "daily",
     time_period: int = 20,
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "CCI",
@@ -199,8 +231,8 @@ async def _handler_aroon(
     symbol: str,
     interval: str = "daily",
     time_period: int = 14,
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "AROON",
@@ -214,8 +246,8 @@ async def _handler_aroon(
 async def _handler_ad(
     symbol: str,
     interval: str = "daily",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "AD",
@@ -228,8 +260,8 @@ async def _handler_ad(
 async def _handler_obv(
     symbol: str,
     interval: str = "daily",
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "OBV",
@@ -268,8 +300,8 @@ async def _handler_earnings(symbol: str, **kwargs: Any) -> dict[str, Any]:
 async def _handler_currency_exchange_rate(
     from_currency: str,
     to_currency: str,
-    **kwargs: object,
-) -> dict:
+    **kwargs: Any,
+) -> dict[str, Any]:
     return await _get(
         {
             "function": "CURRENCY_EXCHANGE_RATE",
