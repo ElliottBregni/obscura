@@ -20,6 +20,8 @@ Usage::
 from __future__ import annotations
 
 import json
+import logging
+import re as _re
 import shutil
 import sys
 from dataclasses import dataclass, field
@@ -49,6 +51,8 @@ from obscura.cli.render import (
     _sanitize_text,  # pyright: ignore[reportPrivateUsage]
     console,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "AttentionWidgetRequest",
@@ -652,12 +656,6 @@ async def ask_multi_select(request: MultiSelectRequest) -> WidgetResult:
 # ---------------------------------------------------------------------------
 # Auto-detection: numbered-list questions in model text
 # ---------------------------------------------------------------------------
-
-import re as _re
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 # Matches lines like "1. Option A", "2) Option B", "- Option C"
 _NUMBERED_ITEM_RE = _re.compile(

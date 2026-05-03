@@ -67,7 +67,7 @@ def _fake_vault(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         def is_locked(self) -> bool:
             return False
 
-    monkeypatch.setattr(_vault, "get_client", lambda: _FakeVault())
+    monkeypatch.setattr(_vault, "get_client", _FakeVault)
     return store
 
 
@@ -366,7 +366,7 @@ class TestSupabaseVaultTier:
             def is_locked(self) -> bool:
                 return False
 
-        monkeypatch.setattr(_vault, "get_client", lambda: _TrapClient())
+        monkeypatch.setattr(_vault, "get_client", _TrapClient)
 
         _clear_env(monkeypatch)
         _set_dotenv_env(monkeypatch, "SUPABASE_URL", "https://real.example")

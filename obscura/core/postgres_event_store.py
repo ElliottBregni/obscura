@@ -9,6 +9,9 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.event_store import EventRecord, SessionRecord, SessionStatus
+from obscura.core.types import AgentEventKind
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -32,9 +35,6 @@ except ImportError:
 
 # Public re-export for callers checking availability before construction.
 HAS_PSYCOPG2 = _has_psycopg2
-
-from obscura.core.event_store import EventRecord, SessionRecord, SessionStatus
-from obscura.core.types import AgentEventKind
 
 
 class PostgreSQLEventStore:

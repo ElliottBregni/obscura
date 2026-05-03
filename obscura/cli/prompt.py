@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import html as _html
+import logging
 import os
 import subprocess
 from dataclasses import dataclass, field
@@ -37,10 +38,24 @@ from obscura.cli.render import (
     get_active_text,
     get_model_space_delta,
 )
+from obscura.cli.renderer.modern.theme import (
+    BLUE as _C_BLUE,
+    GREEN as _C_GREEN,
+    LAVENDER as _C_LAVENDER,
+    OVERLAY0 as _C_OVERLAY0,
+    PEACH as _C_PEACH,
+    RED as _C_RED,
+    SUBTEXT0 as _C_SUBTEXT0,
+    SURFACE1 as _C_SURFACE1,
+    TEAL as _C_TEAL,
+    TEXT as _C_TEXT,
+)
 from obscura.cli.ui_primitives import (
     random_thinking_message as random_thinking_message,
 )
 from obscura.core.paths import resolve_obscura_home
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -401,24 +416,6 @@ class SlashCommandCompleter(Completer):
 # ---------------------------------------------------------------------------
 # Styling
 # ---------------------------------------------------------------------------
-
-# Import Catppuccin Mocha hex values from the single source of truth.
-from obscura.cli.renderer.modern.theme import (
-    BLUE as _C_BLUE,
-    GREEN as _C_GREEN,
-    LAVENDER as _C_LAVENDER,
-    OVERLAY0 as _C_OVERLAY0,
-    PEACH as _C_PEACH,
-    RED as _C_RED,
-    SUBTEXT0 as _C_SUBTEXT0,
-    SURFACE1 as _C_SURFACE1,
-    TEAL as _C_TEAL,
-    TEXT as _C_TEXT,
-)
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 PROMPT_STYLE = Style.from_dict(
     {
@@ -850,9 +847,3 @@ def _render_menu_line(width: int, hud: PromptHUDState, cfg: PromptLayoutConfig) 
     if len(line) > width:
         return line[:width]
     return line
-
-
-# expose aliases expected by tests
-_build_prompt_message_html = _build_prompt_message_html
-_render_model_status_line = _render_model_status_line
-_render_menu_line = _render_menu_line

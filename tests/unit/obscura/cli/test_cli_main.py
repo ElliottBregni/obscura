@@ -379,7 +379,7 @@ class TestDiscoverMCP:
         # If the MCP module can't be imported, should return empty
         import obscura.cli as cli_mod
 
-        cli_mod._discover_mcp
+        assert hasattr(cli_mod, "_discover_mcp")
         # Force import error by patching
         with patch.dict(
             "sys.modules",

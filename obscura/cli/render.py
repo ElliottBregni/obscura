@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
+import os as _os
+import platform as _platform
 import re
 import sys
+import sys as _sys
 import time
 from pathlib import Path
-from typing import IO, Any, cast
-
-from typing import override
+from typing import IO, Any, cast, override
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -20,17 +23,27 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
+from obscura import config
 from obscura.cli.app.diff_engine import DiffEngine
+from obscura.cli.renderer.modern.theme import (
+    BLUE,
+    ERROR_HEX,
+    OK_HEX,
+    SAPPHIRE,
+    THINKING_HEX,
+    TOOL_HEX,
+    WARN_HEX,
+)
 from obscura.cli.tool_summaries import summarize_tool_call
 from obscura.cli.ui_primitives import random_thinking_message
 from obscura.core.feature_flags import FLAGS, BannerTheme
 from obscura.core.types import AgentEvent, AgentEventKind
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Figures (matching Claude Code's visual language)
 # ---------------------------------------------------------------------------
-
-import platform as _platform
 
 BLACK_CIRCLE = "⏺" if _platform.system() == "Darwin" else "●"
 BULLET = "∙"
@@ -44,16 +57,6 @@ LIGHTNING_BOLT = "↯"
 # ---------------------------------------------------------------------------
 # Theme constants — sourced from Catppuccin Mocha palette
 # ---------------------------------------------------------------------------
-
-from obscura.cli.renderer.modern.theme import (
-    ERROR_HEX,
-    OK_HEX,
-    THINKING_HEX,
-    TOOL_HEX,
-    WARN_HEX,
-    BLUE,
-    SAPPHIRE,
-)
 
 ACCENT = BLUE.hex
 ACCENT_DIM = SAPPHIRE.hex
@@ -241,10 +244,6 @@ class OutputManager:
         return list(self._buffer)
 
 
-import contextlib
-
-from obscura import config
-
 output = OutputManager(env=config.OUTPUT_MODE, verbose_internals=config.VERBOSE)
 
 if config.CAPTURE_PRINTS:
@@ -264,13 +263,6 @@ if config.CAPTURE_PRINTS:
 # StdoutProxy that positions output above the prompt and redraws.  By writing
 # through sys.stdout (instead of a dup'd raw fd), Rich console output no
 # longer overwrites the prompt while the agent is streaming.
-import os as _os
-import sys as _sys
-import logging
-
-logger = logging.getLogger(__name__)
-
-
 _real_stdout_fd = _os.dup(_sys.stdout.fileno())  # keep for fileno() queries
 
 

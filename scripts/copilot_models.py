@@ -1,7 +1,6 @@
 """Test-compatible copilot_models registry with minimal entries."""
 from dataclasses import dataclass
 import os
-from typing import Dict
 
 AUTOMATION = "automation"
 INTERACTIVE = "interactive"
@@ -17,7 +16,7 @@ class ModelConfig:
     max_requests_per_run: int | None = None
 
 # Minimal alias registry used by tests
-_ALIAS_REGISTRY: Dict[str, ModelConfig] = {
+_ALIAS_REGISTRY: dict[str, ModelConfig] = {
     "copilot_batch_diagrammer": ModelConfig(
         alias="copilot_batch_diagrammer",
         model_id="gpt-5-mini",
@@ -65,14 +64,14 @@ def resolve(alias: str) -> ModelConfig:
     # reject raw model ids
     if alias.startswith('gpt-') or alias.startswith('o3'):
         raise ValueError("Raw model IDs are not allowed. Use an alias.")
-    raise ValueError("Unknown copilot alias: %s" % (alias,))
+    raise ValueError(f"Unknown copilot alias: {alias}")
 
 
 def get_model_id(alias: str) -> str:
     return resolve(alias).model_id
 
 
-def list_aliases() -> Dict[str, ModelConfig]:
+def list_aliases() -> dict[str, ModelConfig]:
     return dict(_ALIAS_REGISTRY)
 
 

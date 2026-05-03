@@ -319,7 +319,7 @@ def test_retry_succeeds_on_first_attempt() -> None:
 
     slept: list[float] = []
     original_sleep = vs_mod._time.sleep
-    vs_mod._time.sleep = lambda d: slept.append(d)
+    vs_mod._time.sleep = slept.append
     try:
         result = _retry(lambda: 99, label="first_attempt")
         assert result == 99
@@ -395,7 +395,7 @@ def test_retry_debug_log_on_intermediate_failure(
         nonlocal attempt
         attempt += 1
         if attempt < 3:  # noqa: PLR2004
-            raise IOError("nfs stall")
+            raise OSError("nfs stall")
         return "done"
 
     with caplog.at_level(logging.DEBUG, logger="obscura.kairos.vault_sync"):

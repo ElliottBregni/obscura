@@ -346,7 +346,7 @@ class TestNotFoundCounter:
             ]
         )
         loop = AgentLoop(backend1, reg)
-        events1 = await _collect_events(loop)
+        await _collect_events(loop)
 
         # Run 2: same loop instance, call fake_tool again — count should be 1, not 3
         backend2 = MockBackend(

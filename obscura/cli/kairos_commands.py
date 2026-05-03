@@ -14,6 +14,7 @@ Commands::
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, cast
 
 import click
@@ -27,10 +28,12 @@ from obscura.core.kairos import (
     KairosEventKind,
 )
 from obscura.core.kairos.types import KairosConfig
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_settings
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import Backend
 from obscura.providers import CopilotBackend
+
+logger = logging.getLogger(__name__)
 
 
 def _get_db_path() -> str:
@@ -345,11 +348,6 @@ def _print_goal(goal: Any, *, verbose: bool, kairos: Kairos) -> None:
 
 
 # --- Kairos CLI global settings helpers (enable/disable/status) ---
-
-from obscura.core.paths import resolve_obscura_settings
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 def _read_settings() -> dict[str, Any]:

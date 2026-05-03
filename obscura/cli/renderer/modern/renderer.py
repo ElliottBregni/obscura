@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
+import platform as _platform
 import re
 import shutil
 import signal
@@ -51,9 +53,6 @@ from obscura.core.types import AgentEvent, AgentEventKind
 
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _PULSE_COLORS = [201, 165, 129, 93, 129, 165]
-
-import platform as _platform
-import logging
 
 logger = logging.getLogger(__name__)
 

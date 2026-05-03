@@ -119,6 +119,7 @@ class PostgresStorage:
         message_id: str,
         status: str,
         attempts: int | None = None,
+        last_error: str | None = None,
     ) -> None:
         pool = self._require_pool()
         async with pool.acquire() as conn:
