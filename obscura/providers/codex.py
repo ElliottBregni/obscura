@@ -7,7 +7,6 @@ JSON-RPC. Reference: https://developers.openai.com/codex/sdk
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import inspect
 import json
@@ -1059,7 +1058,7 @@ class CodexBackend(BackendToolHostMixin):
         callbacks = self._hooks.get(context.hook, [])
         for callback in callbacks:
             try:
-                if asyncio.iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     await callback(context)
                 else:
                     callback(context)

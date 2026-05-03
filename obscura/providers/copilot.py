@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
@@ -495,6 +495,7 @@ class CopilotBackend(BackendToolHostMixin):
 
     # -- Tools (register_tool comes from BackendToolHostMixin) -------------------
 
+    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry for agent loop use."""
         return self._tool_registry
@@ -684,7 +685,7 @@ class CopilotBackend(BackendToolHostMixin):
             request: PermissionRequest,
             _context: dict[str, str],
         ) -> PermissionRequestResult:
-            return PermissionRequestResult(kind="approved")
+            return PermissionRequestResult(kind="approved")  # pyright: ignore[reportArgumentType]
 
         config["on_permission_request"] = _approve_all
 
@@ -912,7 +913,7 @@ def _make_handler(event_type: str, callback: Callable[..., Any]) -> Callable[...
         # If event has no type field, silently ignore (don't call through)
 
     # Tag the handler so the SDK can identify it
-    handler._event_type = event_type
+    handler._event_type = event_type  # pyright: ignore[reportFunctionMemberAccess]
     return handler
 
 

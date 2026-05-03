@@ -29,7 +29,7 @@ import asyncio
 import inspect
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -418,7 +418,7 @@ class MCPBackendMixin:
     def _parent_register_tool(self, spec: ToolSpec) -> None:
         """Call register_tool on the next class in MRO (the concrete backend)."""
         # super() resolves at runtime via MRO to the concrete backend's register_tool.
-        register: Any = super().register_tool
+        register = cast("Callable[[ToolSpec], None]", super().register_tool)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         register(spec)
 
     async def start(self) -> None:

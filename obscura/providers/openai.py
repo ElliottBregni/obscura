@@ -13,7 +13,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import AsyncIterator, Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
@@ -292,6 +292,7 @@ class OpenAIBackend(BackendToolHostMixin):
         _set_span_attr(span, "backend", self._backend_type.value)
         _set_span_attr(span, "model", self._model)
         finish_reason = ""
+        _last_chunk: Any = None
         try:
             await self._run_hooks(
                 HookContext(hook=HookPoint.USER_PROMPT_SUBMITTED, prompt=prompt),
@@ -324,7 +325,6 @@ class OpenAIBackend(BackendToolHostMixin):
             _active_tool_name = ""
             _active_tool_id = ""
             _active_tool_input = ""
-            _last_chunk = None
             async for chunk in response:
                 _last_chunk = chunk
                 if not chunk.choices:
@@ -522,6 +522,7 @@ class OpenAIBackend(BackendToolHostMixin):
             pass
         return "\n".join(lines)
 
+    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
         return self._tool_registry
@@ -573,7 +574,7 @@ class OpenAIBackend(BackendToolHostMixin):
             if self._client is None:
                 return self._get_fallback_models()
             models_response = await self._client.models.list()
-            model_list = []
+            model_list: list[RegistryModelInfo] = []
             for model in models_response.data:
                 # Filter to OpenAI chat models only
                 if not model.id.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
