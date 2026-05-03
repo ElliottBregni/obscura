@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.integrations.messaging.identity import normalize_identity
 from obscura.integrations.messaging.models import PlatformMessage
@@ -35,16 +35,23 @@ def _extract_chat_id(update: dict[str, Any]) -> str | None:
 
 
 def _extract_sender_id(update: dict[str, Any]) -> str | None:
-    msg = update.get("message") or update.get("edited_message")
-    if not msg:
+    msg_any = update.get("message") or update.get("edited_message")
+    if not msg_any or not isinstance(msg_any, dict):
         return None
-    sender = msg.get("from", {})
+    msg = cast(dict[str, Any], msg_any)
+    sender_any = msg.get("from", {})
+    sender: dict[str, Any] = (
+        cast(dict[str, Any], sender_any) if isinstance(sender_any, dict) else {}
+    )
     return str(sender.get("id", "")) or None
 
 
 def _make_message_id(update: dict[str, Any]) -> str:
     update_id = update.get("update_id", "")
-    msg = update.get("message") or {}
+    msg_any: Any = update.get("message")
+    msg: dict[str, Any] = (
+        cast(dict[str, Any], msg_any) if isinstance(msg_any, dict) else {}
+    )
     msg_id = msg.get("message_id", "")
     raw = f"{update_id}:{msg_id}"
     return hashlib.sha1(raw.encode()).hexdigest()

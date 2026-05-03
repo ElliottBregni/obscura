@@ -292,7 +292,7 @@ async def register_external_mcp_tools(
     except Exception as exc:
         logger.warning("MCP discovery aborted: %s", exc)
         report = DiscoveryReport(
-            statuses=(
+            statuses=tuple(
                 DiscoveryStatus(
                     server_name=str(s.get("name") or "unknown"),
                     transport=str(s.get("transport") or "stdio"),

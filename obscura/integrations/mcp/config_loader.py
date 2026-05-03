@@ -33,7 +33,7 @@ class DiscoveredMCPServer:
     env: dict[str, str]
     tools: tuple[str, ...]
     missing_env: tuple[str, ...]
-    headers: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict[str, str])
 
 
 def _resolve_env_value(raw: str, *, resolve_env: bool) -> tuple[str, str | None]:

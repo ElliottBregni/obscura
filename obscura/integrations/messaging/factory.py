@@ -150,7 +150,7 @@ async def build_channel_router(
     await client.start()
 
     backend_impl = client.backend_impl
-    tool_registry = client._tool_registry  # noqa: SLF001
+    tool_registry = client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
 
     # Resolve the global default mode (env var overrides kwarg default)
     _env_default = os.environ.get("OBSCURA_CHANNEL_MODE", "")

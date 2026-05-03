@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_home
 from obscura.integrations.messaging.models import ConversationState
@@ -341,28 +341,36 @@ class ConversationStore(_SQLiteBase):
 
     @staticmethod
     def _row_to_state(row: sqlite3.Row) -> ConversationState:
-        participants = []
-        history = []
+        participants_raw: list[Any] = []
+        history_raw: list[Any] = []
         try:
-            participants = json.loads(row["participants_json"])
+            loaded_p = json.loads(row["participants_json"])
+            if isinstance(loaded_p, list):
+                participants_raw = cast(list[Any], loaded_p)
         except Exception:
             logger.warning("Invalid participants_json for %s", row["conversation_key"])
         try:
-            history = json.loads(row["history_json"])
+            loaded_h = json.loads(row["history_json"])
+            if isinstance(loaded_h, list):
+                history_raw = cast(list[Any], loaded_h)
         except Exception:
             logger.warning("Invalid history_json for %s", row["conversation_key"])
+
+        history_clean: list[dict[str, str]] = []
+        for x in history_raw:
+            if isinstance(x, dict):
+                xd = cast(dict[str, Any], x)
+                history_clean.append(
+                    {"role": str(xd.get("role", "")), "text": str(xd.get("text", ""))}
+                )
 
         return ConversationState(
             conversation_key=str(row["conversation_key"]),
             platform=str(row["platform"]),
             account_id=str(row["account_id"]),
             channel_id=str(row["channel_id"]),
-            participants=[str(p) for p in participants if isinstance(p, str)],
-            history=[
-                {"role": str(x.get("role", "")), "text": str(x.get("text", ""))}
-                for x in history
-                if isinstance(x, dict)
-            ],
+            participants=[str(p) for p in participants_raw if isinstance(p, str)],
+            history=history_clean,
             last_activity_epoch_s=float(row["last_activity_epoch_s"] or 0.0),
         )
 

@@ -410,7 +410,8 @@ class ObscuraMCPServer:
 
         config = AgentConfig(
             name=arguments["name"],
-            model=arguments["model"],
+            provider=arguments.get("provider", "claude"),
+            model_id=arguments.get("model"),
             system_prompt=arguments.get("system_prompt", ""),
             memory_namespace=arguments.get("memory_namespace", "default"),
             tags=arguments.get("tags", []),
@@ -418,7 +419,7 @@ class ObscuraMCPServer:
 
         agent = self._runtime.spawn(
             name=config.name,
-            model=config.model,
+            model=config.model_id or "",
             system_prompt=config.system_prompt,
             memory_namespace=config.memory_namespace,
         )

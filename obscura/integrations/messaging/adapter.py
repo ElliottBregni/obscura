@@ -13,9 +13,12 @@ class MessagePlatformAdapter(Protocol):
 
     async def start(self) -> None:
         """Initialize adapter and load cursor/state."""
+        ...
 
     async def poll(self) -> list[PlatformMessage]:
         """Poll or receive new inbound messages."""
+        ...
 
     async def send(self, recipient: str, text: str) -> bool:
         """Send a plain-text outbound message."""
+        ...

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class PlatformMessage:
     message_id: str
     text: str
     timestamp: datetime
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass
@@ -31,22 +31,25 @@ class ConversationState:
     account_id: str
     channel_id: str
     participants: list[str]
-    history: list[dict[str, str]] = field(default_factory=list)
+    history: list[dict[str, str]] = field(default_factory=list[dict[str, str]])
     last_activity_epoch_s: float = 0.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ConversationState:
+        history_items: list[dict[str, str]] = []
+        for x in cast(list[Any], data.get("history", [])):
+            if isinstance(x, dict):
+                xd = cast(dict[str, Any], x)
+                history_items.append(
+                    {"role": str(xd.get("role", "")), "text": str(xd.get("text", ""))}
+                )
         return cls(
             conversation_key=str(data.get("conversation_key", "")),
             platform=str(data.get("platform", "")),
             account_id=str(data.get("account_id", "default")),
             channel_id=str(data.get("channel_id", "")),
-            participants=[str(p) for p in data.get("participants", [])],
-            history=[
-                {"role": str(x.get("role", "")), "text": str(x.get("text", ""))}
-                for x in data.get("history", [])
-                if isinstance(x, dict)
-            ],
+            participants=[str(p) for p in cast(list[Any], data.get("participants", []))],
+            history=history_items,
             last_activity_epoch_s=float(data.get("last_activity_epoch_s", 0.0) or 0.0),
         )
 

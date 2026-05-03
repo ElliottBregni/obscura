@@ -26,7 +26,7 @@ class JSONRPCRequest:
     jsonrpc: str = "2.0"
     id: str | int | None = None
     method: str = ""
-    params: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ class JSONRPCNotification:
 
     jsonrpc: str = "2.0"
     method: str = ""
-    params: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass(frozen=True)
@@ -103,7 +103,7 @@ class MCPImplementation:
 class MCPCapabilities:
     """MCP server/client capabilities."""
 
-    experimental: dict[str, Any] = field(default_factory=dict)
+    experimental: dict[str, Any] = field(default_factory=dict[str, Any])
     prompts: dict[str, Any] | None = None
     resources: dict[str, Any] | None = None
     tools: dict[str, Any] | None = None
@@ -114,7 +114,7 @@ class MCPCapabilities:
 class MCPClientCapabilities:
     """MCP client capabilities."""
 
-    experimental: dict[str, Any] = field(default_factory=dict)
+    experimental: dict[str, Any] = field(default_factory=dict[str, Any])
     roots: dict[str, Any] | None = None
     sampling: dict[str, Any] | None = None
 
@@ -125,7 +125,7 @@ class MCPTool:
 
     name: str
     description: str
-    inputSchema: dict[str, Any] = field(default_factory=dict)
+    inputSchema: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass
@@ -133,14 +133,14 @@ class MCPToolCall:
     """MCP tool call."""
 
     name: str
-    arguments: dict[str, Any] = field(default_factory=dict)
+    arguments: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @dataclass
 class MCPToolResult:
     """MCP tool result."""
 
-    content: list[dict[str, Any]] = field(default_factory=list)
+    content: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     isError: bool = False
 
 
@@ -186,7 +186,7 @@ class MCPPromptResult:
     """MCP prompt result."""
 
     description: str | None = None
-    messages: list[MCPPromptMessage] = field(default_factory=list)
+    messages: list[MCPPromptMessage] = field(default_factory=list[MCPPromptMessage])
 
 
 @dataclass
@@ -226,10 +226,10 @@ class MCPConnectionConfig:
 
     transport: MCPTransportType
     command: str | None = None  # For stdio transport
-    args: list[str] = field(default_factory=list)  # For stdio transport
+    args: list[str] = field(default_factory=list[str])  # For stdio transport
     url: str | None = None  # For SSE/WebSocket transport
-    env: dict[str, str] = field(default_factory=dict)
-    headers: dict[str, str] = field(default_factory=dict)  # Outbound auth headers (HTTP/SSE)
+    env: dict[str, str] = field(default_factory=dict[str, str])
+    headers: dict[str, str] = field(default_factory=dict[str, str])  # Outbound auth headers (HTTP/SSE)
     timeout: float = 30.0
     name: str = ""  # Human-readable server name used as session/tool prefix
 
@@ -299,7 +299,7 @@ class ObscuraMCPConfig:
     """Configuration for Obscura MCP integration."""
 
     enabled: bool = True
-    servers: list[MCPConnectionConfig] = field(default_factory=list)
+    servers: list[MCPConnectionConfig] = field(default_factory=list[MCPConnectionConfig])
     expose_obscura_as_mcp: bool = True
     allow_external_mcp: bool = True
     tool_timeout: float = 60.0

@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from obscura.integrations.a2a.types import (
@@ -155,7 +156,7 @@ class UnixSocketServicer:
     async def _handle_stream_message(
         self,
         params: dict[str, Any],
-    ) -> Any:
+    ) -> AsyncIterator[Any]:
         message = A2AMessage.model_validate(params.get("message", {}))
         async for event in self._service.message_stream(
             message,
@@ -305,20 +306,21 @@ class UnixSocketA2AClient:
             msg = "Not connected — call connect() first"
             raise RuntimeError(msg)
 
-        message = {
+        message: dict[str, Any] = {
             "role": "user",
             "messageId": uuid.uuid4().hex,
             "parts": [{"kind": "text", "text": prompt}],
         }
-        request = {
-            "method": "SendMessage",
-            "params": {
-                "message": message,
-                "blocking": blocking,
-            },
+        params_payload: dict[str, Any] = {
+            "message": message,
+            "blocking": blocking,
         }
         if context_id:
-            request["params"]["contextId"] = context_id
+            params_payload["contextId"] = context_id
+        request: dict[str, Any] = {
+            "method": "SendMessage",
+            "params": params_payload,
+        }
 
         await _write_json(self._writer, request)
 

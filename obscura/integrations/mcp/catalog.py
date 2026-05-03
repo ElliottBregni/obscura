@@ -85,8 +85,9 @@ class MCPSoCatalogProvider:
                     if isinstance(payload, list):
                         return cast("list[dict[str, Any]]", payload)
                     if isinstance(payload, dict):
+                        payload_d = cast("dict[str, Any]", payload)
                         for key in ("servers", "data", "items", "results", "plugins"):
-                            val = payload.get(key)
+                            val = payload_d.get(key)
                             if isinstance(val, list):
                                 return cast("list[dict[str, Any]]", val)
             except Exception:
@@ -151,9 +152,7 @@ class MCPSoCatalogProvider:
                 if not raw_items:
                     break
                 for item in raw_items:
-                    if not isinstance(item, dict):
-                        continue
-                    item_d = cast("dict[str, Any]", item)
+                    item_d = item
                     slug = str(
                         item_d.get("slug")
                         or item_d.get("name")
