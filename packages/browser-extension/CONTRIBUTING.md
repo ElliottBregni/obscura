@@ -56,7 +56,7 @@ ruff format --check packages/browser-extension/ obscura/cli/
 pyright packages/browser-extension/native-host/
 
 # 3. Python tests
-uv run pytest tests/browser_extension/ -m browser -v
+uv run pytest tests/browser_extension/ -v
 
 # 4. JS syntax check (Node 18+)
 node --check packages/browser-extension/src/sidepanel/sidepanel.js
@@ -93,8 +93,16 @@ It'll appear in panel autocomplete on next host start.
 1. Add a `ToolSpec` to `native-host/browser_tools.py:TOOLS` with an
    `op` name matching the JS handler you're about to write.
 2. Add a `case "op_name":` in `sidepanel.js:runBrowserOp`.
-3. Add a test that stubs `chrome.scripting.executeScript` and asserts
-   the op's request/response shape.
+3. Pick a family:
+   - **Event dispatch** (default): `execInTab(tab.id, fn, args)`. No
+     `debugger` permission needed. `isTrusted=false`.
+   - **CDP**: `await ensureCdpAttached(tab.id);` then
+     `chrome.debugger.sendCommand(...)`. Yellow banner appears until
+     `browser_cdp_detach` is called. Requires `debugger` in
+     `manifest.json:permissions`.
+4. Add a test that stubs `chrome.scripting.executeScript` (or
+   `chrome.debugger.sendCommand`) and asserts the op's request/response
+   shape.
 
 ### Add a wire frame type
 Required PR checklist:

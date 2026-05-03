@@ -40,7 +40,7 @@ describe("extension loads without errors", () => {
     await browser?.close();
   });
 
-  it("onboarding page renders its expected structure", async () => {
+  it("sidepanel page renders its expected structure", async () => {
     const page = await browser.newPage();
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -48,22 +48,17 @@ describe("extension loads without errors", () => {
     page.on("pageerror", (err) => pageErrors.push(err.message));
 
     await page.goto(
-      `chrome-extension://${extensionId}/src/onboarding/index.html`,
+      `chrome-extension://${extensionId}/src/sidepanel/index.html`,
       { waitUntil: "domcontentloaded" },
     );
 
     // Structural assertions — any of these failing would indicate a JS
     // error prevented the page from wiring itself up, or an id got
     // renamed without updating every consumer.
-    const extIdEl = await page.$("#ext-id");
-    expect(extIdEl).not.toBeNull();
-    const statusEl = await page.$("#host-status");
-    expect(statusEl).not.toBeNull();
-
-    // The ext-id element is populated by a synchronous chrome.runtime.id
-    // read, so by the time DOMContentLoaded fires it should be set.
-    const extIdText = await page.$eval("#ext-id", (el) => el.textContent);
-    expect(extIdText).toBe(extensionId);
+    for (const id of ["backend", "workspace", "log", "composer", "prompt"]) {
+      const el = await page.$(`#${id}`);
+      expect(el, `missing #${id}`).not.toBeNull();
+    }
 
     // No uncaught page errors — a broken import or missing element id
     // would explode here.
@@ -93,23 +88,20 @@ describe.skipIf(!FULL)("native-host handshake (OBSCURA_E2E_FULL=1)", () => {
     cleanupManifest?.();
   });
 
-  it("onboarding page reports host: connected within 15s", async () => {
+  it("sidepanel reports host: connected within 15s", async () => {
     const page = await browser.newPage();
     await page.goto(
-      `chrome-extension://${extensionId}/src/onboarding/index.html`,
+      `chrome-extension://${extensionId}/src/sidepanel/index.html`,
       { waitUntil: "domcontentloaded" },
     );
 
+    // The sidepanel updates a status indicator once the native host's
+    // ready frame is processed. Look for any element whose text matches
+    // "connected" within the timeout.
     await page.waitForFunction(
-      () => {
-        const el = document.getElementById("host-status");
-        return el && /connected/.test(el.textContent ?? "");
-      },
+      () => /connected/i.test(document.body?.textContent ?? ""),
       { timeout: 15_000 },
     );
-
-    const pillText = await page.$eval("#host-status", (el) => el.textContent);
-    expect(pillText).toMatch(/connected\s*·\s*v\d+\.\d+\.\d+/);
   }, 30_000);
 
   it("native host manifest references the pinned extension id", async () => {

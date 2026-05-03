@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import pytest
+import pytest_asyncio
 
 HOST_SCRIPT = (
     Path(__file__).parent.parent.parent
@@ -124,7 +125,7 @@ class HostProcess:
         return list(self._messages)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def host() -> AsyncGenerator[HostProcess, None]:
     """Launch the native host as a subprocess and yield a HostProcess wrapper."""
     proc = await asyncio.create_subprocess_exec(

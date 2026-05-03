@@ -231,8 +231,23 @@ Drop in `~/.obscura/commands/`. Picked up via `ready.at_commands`.
 ### Adding a new browser DOM tool
 Add a `ToolSpec` to `native-host/browser_tools.py:TOOLS` and an
 `op` handler in `sidepanel.js:runBrowserOp`. The ToolSpec names the
-op; the handler executes it via `chrome.scripting.executeScript` and
-returns the result.
+op; the handler executes it and returns the result.
+
+Two tool families share this pattern — pick based on what you need:
+
+- **Event dispatch** (default): handler runs via
+  `chrome.scripting.executeScript` and synthesises DOM events. No
+  banner, no debugger attach, but `isTrusted=false` so browser-default
+  behaviours (Tab moving focus, characters auto-typing into inputs,
+  native dialog dismissal) won't fire — only app-level listeners do.
+- **CDP** (Chrome DevTools Protocol): handler calls
+  `chrome.debugger.sendCommand(...)`. Real input — `isTrusted=true`,
+  file uploads work via `DOM.setFileInputFiles`, console + network
+  observable. Cost: Chrome shows a yellow "X is debugging this browser"
+  banner until you call `browser_cdp_detach`. Requires `debugger` in
+  the manifest's `permissions`.
+
+If you don't need the CDP guarantees, prefer event dispatch.
 
 ### Adding a new wire frame type
 1. Add a handler in `_main()` of `obscura_native_host.py` (or emit
@@ -258,6 +273,8 @@ flow already handles arbitrary action sets.
 | `~/.obscura/logs/browser-extension-host.log` | Host stderr / logging | Manual rotation |
 | `~/.obscura/browser-host.pid` | PID file (advisory lock) | Host exit |
 | `~/.obscura/browser-host.env` | User secrets (GH_TOKEN, API keys) | Manual edit |
+| `~/.obscura/browser/active.json` | Active hosts registry (pid, socket path, profile) consumed by `attach_if_running` | Host exit |
+| `/tmp/obscura-browser/<pid>.sock` | Unix socket the host fan-out listens on | Host exit |
 
 **Multi-profile warning:** two Chrome profiles running obscura on the
 same machine today share `events.db` and can corrupt session ids. See

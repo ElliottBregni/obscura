@@ -56,8 +56,8 @@ class TestToolSpecs:
             assert tool.description, f"Tool {tool.name} has no description"
 
     def test_tool_count(self, tools: list[Any]) -> None:
-        # 9 original ops + 8 permission-free additions.
-        assert len(tools) == 17, f"Expected 17 browser tools, got {len(tools)}"
+        # 17 event-dispatch + 10 CDP-backed tools.
+        assert len(tools) == 27, f"Expected 27 browser tools, got {len(tools)}"
 
     def test_mutating_tools_marked(self, tools: list[Any]) -> None:
         mutating = {

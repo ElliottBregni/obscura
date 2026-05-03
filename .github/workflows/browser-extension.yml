@@ -30,7 +30,7 @@ jobs:
         run: uv sync --extra dev
 
       - name: Run browser extension tests (Python)
-        run: uv run pytest tests/browser_extension/ -m browser -v
+        run: uv run pytest tests/browser_extension/ -v
 
       - name: Set up Node
         uses: actions/setup-node@v4
