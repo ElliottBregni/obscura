@@ -291,6 +291,6 @@ def get_worktree_tool_specs() -> list[ToolSpec]:
     from typing import cast
 
     return [
-        cast("ToolSpec", enter_worktree.spec),
-        cast("ToolSpec", exit_worktree.spec),
+        cast("ToolSpec", getattr(enter_worktree, "spec")),
+        cast("ToolSpec", getattr(exit_worktree, "spec")),
     ]

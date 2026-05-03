@@ -47,7 +47,7 @@ async def _ensure_browser() -> Any:
     return _page
 
 
-async def _close_browser() -> None:
+async def _close_browser() -> None:  # pyright: ignore[reportUnusedFunction]
     """Close the browser if open."""
     global _browser, _page
     if _browser is not None:
@@ -228,4 +228,4 @@ async def web_browser(
 
 def get_browser_tool_specs() -> list[ToolSpec]:
     """Return browser tool specs for registration."""
-    return [cast("ToolSpec", web_browser.spec)]
+    return [cast("ToolSpec", getattr(web_browser, "spec"))]

@@ -519,7 +519,7 @@ async def policy_probe(
     policy_source = "unknown"
 
     if policy_override:
-        if not isinstance(policy_override, dict):
+        if not isinstance(policy_override, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
             return json.dumps(
                 {
                     "status": "error",

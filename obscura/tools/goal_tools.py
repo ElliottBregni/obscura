@@ -52,7 +52,7 @@ def _notify_arbiter(goal: Any) -> None:
         task_statuses: list[str] = []
         if goal.tasks:
             try:
-                from obscura.tools.task_tools import _get_db
+                from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
 
                 db = _get_db()
                 for tid in goal.tasks:
@@ -114,9 +114,9 @@ def _emit_goal_event(
 
 def _get_current_user() -> Any:
     """Best-effort retrieval of the current authenticated user."""
-    from obscura.auth.context import current_user
+    from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
 
-    return current_user()
+    return current_user()  # pyright: ignore[reportUnknownVariableType]
 
 
 def _json_ok(**data: object) -> str:
@@ -338,4 +338,4 @@ def goal_tool(
 
 def get_goal_tool_specs() -> list[ToolSpec]:
     """Return goal management tool specs for registration."""
-    return [cast("ToolSpec", goal_tool.spec)]
+    return [cast("ToolSpec", getattr(goal_tool, "spec"))]
