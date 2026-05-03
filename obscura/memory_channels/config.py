@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.memory_channels.models import ChannelTriggers, MemoryChannel
 
@@ -72,7 +72,7 @@ def _parse_channels(raw: dict[str, Any]) -> list[MemoryChannel]:
         if not isinstance(cfg, dict):
             continue
         try:
-            channels.append(_parse_single_channel(name, cfg))
+            channels.append(_parse_single_channel(name, cast(dict[str, Any], cfg)))
         except Exception:
             logger.debug("Skipping malformed channel %s", name, exc_info=True)
     return channels
@@ -80,20 +80,29 @@ def _parse_channels(raw: dict[str, Any]) -> list[MemoryChannel]:
 
 def _parse_single_channel(name: str, cfg: dict[str, Any]) -> MemoryChannel:
     """Parse a single channel config dict into a MemoryChannel."""
-    triggers_raw = cfg.get("triggers", {})
-    if not isinstance(triggers_raw, dict):
-        triggers_raw = {}
+    triggers_raw_any = cfg.get("triggers", {})
+    triggers_raw: dict[str, Any] = (
+        cast(dict[str, Any], triggers_raw_any)
+        if isinstance(triggers_raw_any, dict)
+        else {}
+    )
 
     # Support flat keys (TOML-friendly) or nested triggers dict
-    file_globs = cfg.get("file_globs") or triggers_raw.get("file_globs", [])
-    keywords = cfg.get("keywords") or triggers_raw.get("keywords", [])
-    tool_names = cfg.get("tool_names") or triggers_raw.get("tool_names", [])
+    file_globs = cast(
+        list[Any], cfg.get("file_globs") or triggers_raw.get("file_globs", [])
+    )
+    keywords = cast(
+        list[Any], cfg.get("keywords") or triggers_raw.get("keywords", [])
+    )
+    tool_names = cast(
+        list[Any], cfg.get("tool_names") or triggers_raw.get("tool_names", [])
+    )
     always = cfg.get("always", triggers_raw.get("always", False))
 
     triggers = ChannelTriggers(
-        file_globs=tuple(file_globs),
-        keywords=tuple(keywords),
-        tool_names=tuple(tool_names),
+        file_globs=tuple(str(g) for g in file_globs),
+        keywords=tuple(str(k) for k in keywords),
+        tool_names=tuple(str(t) for t in tool_names),
         always=bool(always),
     )
 

@@ -66,9 +66,9 @@ class ContextSignals:
     *keywords* and *current_query* are reset each turn.
     """
 
-    file_paths: set[str] = field(default_factory=set)
-    keywords: set[str] = field(default_factory=set)
-    tool_names: set[str] = field(default_factory=set)
+    file_paths: set[str] = field(default_factory=set[str])
+    keywords: set[str] = field(default_factory=set[str])
+    tool_names: set[str] = field(default_factory=set[str])
     current_query: str = ""
 
     def reset_turn(self) -> None:
