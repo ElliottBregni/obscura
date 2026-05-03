@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .sqlite_impl import SQLiteStorage
 
 if TYPE_CHECKING:
     from .storage import Storage
+
+
+def _default_db_url() -> str:
+    """Resolve the default notify DB URL via the optional config.notify module."""
+    try:
+        from config.notify import get_notify_db_url  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
+    except ImportError:
+        # Fallback: a file in the user's home, mirroring the obscura runtime layout.
+        return f"sqlite:///{os.path.expanduser('~/.obscura/notify.db')}"
+    return cast(str, get_notify_db_url())
 
 
 def create_storage(db_url: str | None = None) -> Storage:
@@ -15,18 +25,13 @@ def create_storage(db_url: str | None = None) -> Storage:
     Defaults to SQLite file at ~/.obscura/notify.db when not provided.
     If db_url starts with 'postgres' it returns PostgresStorage (lazy import).
     """
-    db_url = db_url or os.environ.get("NOTIFY_DATABASE_URL")
-    if not db_url:
-        # default to SQLite file
-        from config.notify import get_notify_db_url
+    resolved = db_url or os.environ.get("NOTIFY_DATABASE_URL") or _default_db_url()
 
-        db_url = get_notify_db_url()
-
-    if db_url.startswith("postgres"):
+    if resolved.startswith("postgres"):
         # lazy import to avoid requiring asyncpg unless used
         from .postgres_impl import PostgresStorage
 
-        return PostgresStorage(db_url)
+        return PostgresStorage(resolved)
 
     # treat everything else as sqlite
-    return SQLiteStorage(db_url)
+    return SQLiteStorage(resolved)
