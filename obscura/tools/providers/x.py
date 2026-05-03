@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 _BASE = "https://api.twitter.com"
+
+__all__ = [
+    "_handler_get_tweet",
+    "_handler_get_user",
+    "_handler_like_tweet",
+    "_handler_post_tweet",
+    "_handler_reply_tweet",
+    "_handler_retweet",
+    "_handler_search_tweets",
+    "_handler_user_mentions",
+    "_handler_user_timeline",
+    "healthcheck",
+]
 
 
 def _bearer() -> str:
@@ -26,6 +39,12 @@ def _headers_write() -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+def _coerce_dict(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return {"data": value}
+
+
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(
@@ -35,7 +54,7 @@ async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any
         ) as c:
             r = await c.get(path, params=params)
             r.raise_for_status()
-            return r.json()  # type: ignore[no-any-return]
+            return _coerce_dict(r.json())
     except Exception as e:
         logger.warning("X API GET %s failed: %s", path, e)
         return {"error": str(e)}
@@ -50,7 +69,7 @@ async def _post(path: str, body: dict[str, Any]) -> dict[str, Any]:
         ) as c:
             r = await c.post(path, json=body)
             r.raise_for_status()
-            return r.json()  # type: ignore[no-any-return]
+            return _coerce_dict(r.json())
     except Exception as e:
         logger.warning("X API POST %s failed: %s", path, e)
         return {"error": str(e)}
