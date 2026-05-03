@@ -108,8 +108,8 @@ async def arbiter_appeal(target_id: str, reasoning: str) -> str:
         from dataclasses import replace as dc_replace
 
         appeal_config = dc_replace(engine.config, judge_mode="always")
-        original_config = engine._config
-        engine._config = appeal_config
+        original_config = engine._config  # pyright: ignore[reportPrivateUsage]
+        engine._config = appeal_config  # pyright: ignore[reportPrivateUsage]
 
         try:
             score = await engine.evaluate(
@@ -121,7 +121,7 @@ async def arbiter_appeal(target_id: str, reasoning: str) -> str:
                 },
             )
         finally:
-            engine._config = original_config
+            engine._config = original_config  # pyright: ignore[reportPrivateUsage]
 
         return json.dumps(
             {
@@ -216,9 +216,9 @@ async def query_arbiter_verdicts(
                 params,
             ).fetchall()
 
-            verdicts_out = []
+            verdicts_out: list[dict[str, Any]] = []
             for row in rows:
-                r = dict(row)
+                r: dict[str, Any] = dict(row)
                 # Decode JSON fields for readability
                 for field_name in ("details", "metadata"):
                     if isinstance(r.get(field_name), str):
@@ -238,7 +238,7 @@ async def query_arbiter_verdicts(
 def get_arbiter_tool_specs() -> list[ToolSpec]:
     """Return Arbiter tool specs for registration."""
     return [
-        cast("ToolSpec", arbiter_status.spec),
-        cast("ToolSpec", arbiter_appeal.spec),
-        cast("ToolSpec", query_arbiter_verdicts.spec),
+        cast("ToolSpec", getattr(arbiter_status, "spec")),
+        cast("ToolSpec", getattr(arbiter_appeal, "spec")),
+        cast("ToolSpec", getattr(query_arbiter_verdicts, "spec")),
     ]

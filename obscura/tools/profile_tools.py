@@ -51,11 +51,11 @@ def _profile() -> Any:
 def _profile_store() -> Any:
     """Get the vector-backed ProfileStore (lazy, may fail if no user context)."""
     try:
-        from obscura.auth.context import current_user
+        from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
         from obscura.profile.store import ProfileStore
 
-        user = current_user()
-        return ProfileStore.for_user(user)
+        user: Any = current_user()  # pyright: ignore[reportUnknownVariableType]
+        return ProfileStore.for_user(user)  # pyright: ignore[reportUnknownArgumentType]
     except Exception:
         return None
 
@@ -343,10 +343,10 @@ def profile_forget(key: str) -> str:
 def get_profile_tool_specs() -> list[ToolSpec]:
     """Return profile management tool specs for registration."""
     return [
-        cast("ToolSpec", profile_get.spec),
-        cast("ToolSpec", profile_update.spec),
-        cast("ToolSpec", profile_recall.spec),
-        cast("ToolSpec", profile_sync.spec),
-        cast("ToolSpec", profile_set.spec),
-        cast("ToolSpec", profile_forget.spec),
+        cast("ToolSpec", getattr(profile_get, "spec")),
+        cast("ToolSpec", getattr(profile_update, "spec")),
+        cast("ToolSpec", getattr(profile_recall, "spec")),
+        cast("ToolSpec", getattr(profile_sync, "spec")),
+        cast("ToolSpec", getattr(profile_set, "spec")),
+        cast("ToolSpec", getattr(profile_forget, "spec")),
     ]
