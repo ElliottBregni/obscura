@@ -15,6 +15,7 @@ from obscura.core.tools import ToolRegistry
 from obscura.core.types import Backend
 from obscura.eval.compiler import compile_suite
 from obscura.eval.engine import EvalEngine
+from obscura.eval.eval_backend import AnthropicEvalBackend, ClaudeCliEvalBackend
 from obscura.eval.loader import (
     discover_eval_files,
     load_all_eval_suites,
@@ -23,6 +24,11 @@ from obscura.eval.loader import (
 from obscura.eval.models import CompiledEvalCase
 from obscura.eval.report import render_json, render_markdown, render_table
 from obscura.eval.store import EvalResultStore
+from obscura.providers.copilot import CopilotBackend
+from obscura.providers.localllm import LocalLLMBackend
+from obscura.providers.moonshot import MoonshotBackend
+from obscura.providers.openai import OpenAIBackend
+from obscura.tools.system import get_system_tool_specs
 
 if TYPE_CHECKING:
     from obscura.core.types import BackendProtocol

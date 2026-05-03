@@ -255,11 +255,13 @@ class ObscuraClient:
         """
         # Connect to MCP servers and register their tools FIRST
         if self._mcp_server_configs:
+            # lazy: obscura.integrations.mcp package init pulls in obscura.agent.agents,
+            # which imports back here via obscura.core.client.
             from obscura.integrations.mcp.types import (
                 MCPConnectionConfig,
                 MCPTransportType,
             )
-            from obscura.providers.mcp_backend import MCPBackend  # lazy: avoid circular dep with obscura.providers (loaded via obscura.core.client at module init)
+            from obscura.providers.mcp_backend import MCPBackend
 
             configs: list[MCPConnectionConfig] = []
             for server in self._mcp_server_configs:

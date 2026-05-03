@@ -192,8 +192,6 @@ class Http:
     async def clipboard_read() -> str:
         if platform.system() != "Darwin":
             return Policy.json_error("clipboard_unsupported", platform=platform.system())
-        from obscura.tools.system._shell import Shell
-
         result = await Shell.run_command("pbpaste", timeout_seconds=5.0)
         payload = json.loads(result)
         if payload.get("ok"):
