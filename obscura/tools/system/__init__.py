@@ -22,6 +22,8 @@ import re
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+from obscura.core.paths import resolve_obscura_home
+from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
 from obscura.tools.system._fs_read import FsRead

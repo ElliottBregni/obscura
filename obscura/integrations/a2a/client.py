@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Self
 import httpx
 
 from obscura.integrations.a2a.types import (
+    A2AError,
     A2AMessage,
     AgentCard,
     StreamEvent,
@@ -148,8 +149,6 @@ class A2AClient:
 
         if "error" in body:
             error = body["error"]
-            from obscura.integrations.a2a.types import A2AError
-
             raise A2AError(error["code"], error["message"], error.get("data"))
 
         return body.get("result", {})

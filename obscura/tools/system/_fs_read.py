@@ -9,8 +9,13 @@ import stat as stat_module
 from pathlib import Path
 from typing import Any
 
+from obscura.core.context_window import (
+    MAX_FILE_READ_TOKENS,
+    truncate_to_token_budget,
+)
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+from obscura.tools.system.file_state import is_unchanged, record_read
 
 
 class FsRead:
@@ -174,8 +179,6 @@ class FsRead:
         limit: int = 0,
         pages: str = "",
     ) -> str:
-        from obscura.tools.system.file_state import is_unchanged, record_read
-
         target = Policy.resolve_path(path)
         if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
             return Policy.json_error("path_not_allowed", path=str(target))
@@ -313,11 +316,6 @@ class FsRead:
             truncated = end < total_lines
 
         # Apply token budget.
-        from obscura.core.context_window import (
-            MAX_FILE_READ_TOKENS,
-            truncate_to_token_budget,
-        )
-
         text, token_truncated = truncate_to_token_budget(text, MAX_FILE_READ_TOKENS)
         truncated = truncated or token_truncated
 

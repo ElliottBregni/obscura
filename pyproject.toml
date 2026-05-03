@@ -227,20 +227,55 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
+    # pycodestyle / pyflakes
     "E501",    # line length
-    "PLR0913", # too many args (Click commands legitimately have many)
+
+    # pylint subset
+    "PLR0911", # too many return statements (command handlers)
     "PLR0912", # too many branches (REPL command dispatch)
+    "PLR0913", # too many args (Click commands legitimately have many)
     "PLR0915", # too many statements
     "PLR2004", # magic numbers (status codes, byte sizes are clearer inline)
-    "PLR0911", # too many return statements (command handlers)
-    "PLW2901", # for loop var overwritten
     "PLW0603", # global statements (used intentionally for caches)
+    "PLW1510", # subprocess.run without check= (often intentional)
+    "PLW2901", # for loop var overwritten
+    "PLC2701", # private import access (used between related modules)
+    "PLC0414", # explicit re-export (we use it deliberately in re-export modules)
+
+    # simplify
+    "SIM102",  # combine nested ifs (often less readable for long branches)
+    "SIM105",  # use contextlib.suppress (try/except/pass is often clearer)
     "SIM108",  # ternary suggestion (often less readable for long branches)
     "SIM117",  # combine nested with-statements (often less readable)
-    "B008",    # function calls in defaults (Click idiom)
-    "B904",    # raise-from (often verbose without value)
+
+    # bugbear
     "B007",    # unused loop variable (common with enumerate)
+    "B008",    # function calls in defaults (Click idiom)
+    "B009",    # getattr with constant string (sometimes intentional)
+    "B023",    # function uses loop variable (intentional in many cases)
+    "B904",    # raise-from (often verbose without value)
+    "BLE001",  # broad except Exception (fine in top-level error traps)
+
+    # pyupgrade
+    "UP037",   # quoted annotations (sometimes needed for forward refs)
     "UP038",   # isinstance with X|Y (rejected by some Python versions at runtime)
+
+    # type-checking imports
+    "TC006",   # runtime cast() argument should be quoted (ugly, often unhelpful)
+
+    # ruff-specific
+    "RUF002",  # ambiguous unicode (intentional in user-facing strings)
+    "RUF006",  # asyncio.create_task without storing ref (fine when fire-and-forget)
+    "RUF012",  # mutable class attributes (sometimes needed)
+    "RUF022",  # __all__ unsorted (manual ordering is meaningful)
+    "RUF100",  # unused noqa — runs after we trim ignores; let user decide
+
+    # bandit-equivalent / convention
+    "ARG001",  # unused function arg (interface requirement)
+    "ARG002",  # unused method arg (interface requirement)
+    "ARG005",  # unused lambda arg
+    "SLF001",  # private member access (related modules)
+    "C901",    # too complex (subjective)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -290,6 +325,44 @@ ignore = [
 "obscura/auth/cli_user.py" = ["PLC0415"]
 "obscura/auth/profile.py" = ["PLC0415"]
 "obscura/auth/supabase_secrets.py" = ["PLC0415"]
+
+# PLC0415 (no nested imports) is enforced for obscura/cli/** only in this pass.
+# Non-CLI directories carry pre-existing lazy imports out of scope; clean up
+# in a future PR.
+"obscura/agent/**/*.py" = ["PLC0415"]
+"obscura/arbiter/**/*.py" = ["PLC0415"]
+"obscura/auth/__init__.py" = ["PLC0415"]
+"obscura/auth/middleware.py" = ["PLC0415"]
+"obscura/auth/rate_limit_middleware.py" = ["PLC0415"]
+"obscura/auth/rbac.py" = ["PLC0415"]
+"obscura/auth/secrets.py" = ["PLC0415"]
+"obscura/core/**/*.py" = ["PLC0415"]
+"obscura/deps/**/*.py" = ["PLC0415"]
+"obscura/eval/**/*.py" = ["PLC0415"]
+"obscura/heartbeat/**/*.py" = ["PLC0415"]
+"obscura/integrations/**/*.py" = ["PLC0415"]
+"obscura/kairos/**/*.py" = ["PLC0415"]
+"obscura/manifest/**/*.py" = ["PLC0415"]
+"obscura/mcp_server/**/*.py" = ["PLC0415"]
+"obscura/memory/**/*.py" = ["PLC0415"]
+"obscura/memory_channels/**/*.py" = ["PLC0415"]
+"obscura/notify/**/*.py" = ["PLC0415"]
+"obscura/parity/**/*.py" = ["PLC0415"]
+"obscura/plugins/**/*.py" = ["PLC0415"]
+"obscura/providers/**/*.py" = ["PLC0415"]
+"obscura/routes/**/*.py" = ["PLC0415"]
+"obscura/schemas/**/*.py" = ["PLC0415"]
+"obscura/server/**/*.py" = ["PLC0415"]
+"obscura/telemetry/**/*.py" = ["PLC0415"]
+"obscura/testing/**/*.py" = ["PLC0415"]
+"obscura/tools/**/*.py" = ["PLC0415"]
+"obscura/vault_gen/**/*.py" = ["PLC0415"]
+"obscura/vector_memory/**/*.py" = ["PLC0415"]
+"obscura/voice/**/*.py" = ["PLC0415"]
+
+# Tests: same rule scope (don't enforce PLC0415 in test code)
+"tests/**/*.py" = ["PLC0415"]
+"scripts/**/*.py" = ["PLC0415"]
 
 [tool.uv.sources]
 # Pin to openai/codex monorepo — the third-party "codex-app-server-sdk" on

@@ -133,9 +133,6 @@ def run_cmd(
     console.print(f"Running {len(all_cases)} eval case(s)...")
 
     async def _run() -> None:
-        from obscura.eval.engine import EvalEngine
-        from obscura.eval.store import EvalResultStore
-
         # For now, create a minimal mock backend for dry-run
         # Real usage will resolve backend from the provider factory
         resolved_backend = _resolve_backend(all_cases[0].backend, all_cases[0].model)
@@ -176,8 +173,6 @@ def run_cmd(
 def list_cmd(suites: bool, runs: bool, baselines: bool) -> None:
     """List eval suites, runs, or baselines."""
     if suites or (not runs and not baselines):
-        from obscura.eval.loader import discover_eval_files
-
         files = discover_eval_files()
         if not files:
             console.print("[yellow]No eval suites found.[/yellow]")
@@ -189,8 +184,6 @@ def list_cmd(suites: bool, runs: bool, baselines: bool) -> None:
     if runs:
 
         async def _list_runs() -> None:
-            from obscura.eval.store import EvalResultStore
-
             store = EvalResultStore()
             results = await store.list_runs()
             if not results:
@@ -210,8 +203,6 @@ def list_cmd(suites: bool, runs: bool, baselines: bool) -> None:
     if baselines:
 
         async def _list_baselines() -> None:
-            from obscura.eval.store import EvalResultStore
-
             store = EvalResultStore()
             results = await store.list_baselines()
             if not results:
@@ -257,9 +248,6 @@ def report_cmd(run_id: str | None, suite_id: str | None, output_format: str) -> 
 
 def _resolve_backend(backend_name: str, model_name: str) -> "BackendProtocol":
     """Resolve a BackendProtocol instance by name."""
-    from obscura.core.auth import resolve_auth
-    from obscura.core.types import Backend
-
     try:
         backend_enum = Backend(backend_name)
     except ValueError:
@@ -280,14 +268,10 @@ def _resolve_backend(backend_name: str, model_name: str) -> "BackendProtocol":
         api_key = auth.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
 
         if api_key:
-            from obscura.eval.eval_backend import AnthropicEvalBackend
-
             return AnthropicEvalBackend(api_key=api_key, model=model_name)
 
         # Fall back to the Claude CLI which handles OAuth internally
         if shutil.which("claude"):
-            from obscura.eval.eval_backend import ClaudeCliEvalBackend
-
             return ClaudeCliEvalBackend(model=model_name)
 
         msg = (
@@ -299,23 +283,15 @@ def _resolve_backend(backend_name: str, model_name: str) -> "BackendProtocol":
         )
 
     if backend_enum == Backend.COPILOT:
-        from obscura.providers.copilot import CopilotBackend
-
         return CopilotBackend(auth)
 
     if backend_enum == Backend.OPENAI:
-        from obscura.providers.openai import OpenAIBackend
-
         return OpenAIBackend(auth, model=model_name)
 
     if backend_enum == Backend.LOCALLLM:
-        from obscura.providers.localllm import LocalLLMBackend
-
         return LocalLLMBackend(auth, model=model_name)
 
     if backend_enum == Backend.MOONSHOT:
-        from obscura.providers.moonshot import MoonshotBackend
-
         return MoonshotBackend(auth, model=model_name)
 
     msg = f"Backend '{backend_name}' not yet supported for evals."
@@ -324,12 +300,8 @@ def _resolve_backend(backend_name: str, model_name: str) -> "BackendProtocol":
 
 def _resolve_tool_registry() -> "ToolRegistry":
     """Get a ToolRegistry with standard system tools registered."""
-    from obscura.core.tools import ToolRegistry
-
     registry = ToolRegistry()
     try:
-        from obscura.tools.system import get_system_tool_specs
-
         for spec in get_system_tool_specs():
             registry.register(spec)
     except Exception:

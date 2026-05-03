@@ -9,6 +9,8 @@ import shutil
 
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+from obscura.tools.system.diff_utils import compute_unified_diff
+from obscura.tools.system.file_state import check_staleness
 
 
 class FsWrite:
@@ -92,9 +94,6 @@ class FsWrite:
         overwrite: bool = True,
         create_dirs: bool = True,
     ) -> str:
-        from obscura.tools.system.diff_utils import compute_unified_diff
-        from obscura.tools.system.file_state import check_staleness
-
         target = Policy.resolve_path(path)
         if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
             return Policy.json_error("path_not_allowed", path=str(target))
@@ -154,8 +153,6 @@ class FsWrite:
         },
     )
     async def append_text_file(path: str, text: str, create_dirs: bool = True) -> str:
-        from obscura.tools.system.diff_utils import compute_unified_diff
-
         target = Policy.resolve_path(path)
         if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
             return Policy.json_error("path_not_allowed", path=str(target))
@@ -300,9 +297,6 @@ class FsWrite:
         new_text: str,
         replace_all: bool = False,
     ) -> str:
-        from obscura.tools.system.diff_utils import compute_unified_diff
-        from obscura.tools.system.file_state import check_staleness
-
         target = Policy.resolve_path(path)
         if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
             return Policy.json_error("path_not_allowed", path=str(target))

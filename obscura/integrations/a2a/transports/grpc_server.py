@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
+    TaskNotFoundError,
     TaskState,
 )
 
@@ -75,8 +76,6 @@ class A2AServicer:
         task_id = params.get("taskId", "")
         task = await self._service.tasks_get(task_id)
         if task is None:
-            from obscura.integrations.a2a.types import TaskNotFoundError
-
             raise TaskNotFoundError(task_id)
         return task.model_dump_json()
 

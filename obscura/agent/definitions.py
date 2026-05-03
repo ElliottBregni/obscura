@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from obscura.core.frontmatter import parse_frontmatter_file
+from obscura.core.paths import resolve_obscura_global_home
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +103,6 @@ def resolve_all_definitions(cwd: Path | None = None) -> dict[str, AgentDefinitio
     merged.update(load_definitions_dir(_BUILTIN_DIR, source="built-in"))
 
     # 2. Global user definitions.
-    from obscura.core.paths import resolve_obscura_global_home
-
     global_agents = resolve_obscura_global_home() / "agents"
     merged.update(load_definitions_dir(global_agents, source="global"))
 

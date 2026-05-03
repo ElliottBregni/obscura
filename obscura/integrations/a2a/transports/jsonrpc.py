@@ -19,6 +19,7 @@ from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
     A2AMethod,
+    TaskNotFoundError,
     TaskState,
     TextPart,
 )
@@ -103,8 +104,6 @@ async def _dispatch(
         task_id = params.get("taskId", "")
         task = await service.tasks_get(task_id)
         if task is None:
-            from obscura.integrations.a2a.types import TaskNotFoundError
-
             raise TaskNotFoundError(task_id)
         return task.model_dump(mode="json")
 

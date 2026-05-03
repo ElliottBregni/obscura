@@ -16,7 +16,33 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.types import AgentEventKind
+from obscura.cli import trace as trace_mod
+from obscura.cli._tool_confirm import cli_confirm, maybe_parse_plan, track_file_event
+from obscura.cli.bootstrap import (
+    _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]
+)
+from obscura.cli.commands import cmd_compact, estimate_effective_context_tokens
+from obscura.cli.render import console, print_warning, set_active_renderer
+from obscura.cli.renderer import create_renderer
+from obscura.cli.tool_collapse import ToolCollapser
+from obscura.cli.vector_memory_bridge import (
+    auto_save_turn,
+    search_relevant_context,
+    search_with_router,
+)
+from obscura.cli.widgets import detect_question_choices, present_detected_choices
+from obscura.core.compaction import should_auto_compact
+from obscura.core.cost_tracker import get_cost_tracker
+from obscura.core.deep_log import dlog
+from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
+from obscura.core.session_utils import generate_session_title
+from obscura.core.types import (
+    EFFORT_THINKING_BUDGETS,
+    AgentEventKind,
+    EffortLevel,
+    ToolCallInfo,
+)
+from obscura.tools.system import UI, Session
 
 if TYPE_CHECKING:
     from obscura.cli.commands import REPLContext
@@ -39,17 +65,6 @@ async def send_message(
 
     Returns the accumulated assistant text.
     """
-    from obscura.cli import trace as trace_mod
-    from obscura.cli.bootstrap import (
-        _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]
-    )
-    from obscura.cli.render import console
-    from obscura.cli.vector_memory_bridge import (
-        auto_save_turn,
-        search_relevant_context,
-        search_with_router,
-    )
-
     inline_agent_response = await _run_inline_agent_from_mention(ctx, text)
     if inline_agent_response is not None:
         ctx.message_history.append(("user", text))
@@ -68,8 +83,6 @@ async def send_message(
             )
         return inline_agent_response
 
-    from obscura.cli.renderer import create_renderer
-
     renderer = create_renderer(streaming_status=streaming_status)
     # Feed session context into the modern renderer's status bar
     _set_session_context = getattr(renderer, "set_session_context", None)
@@ -82,30 +95,19 @@ async def send_message(
         )
     # Register active renderer so prompt can expand previews while streaming
     try:
-        from obscura.cli.render import set_active_renderer
-
         set_active_renderer(renderer)
     except Exception:
         pass
     accumulated: list[str] = []
 
     # Build confirm callback with permission mode integration.
-    from obscura.core.types import ToolCallInfo
-
     async def confirm_cb(tc: ToolCallInfo) -> bool:
         # 1. Check permission mode (dangerous patterns + mode restrictions).
         try:
-            from obscura.core.permission_modes import (
-                PermissionMode,
-                PermissionModeEngine,
-            )
-
             mode_str = getattr(ctx, "permission_mode", "default")
             engine = PermissionModeEngine(PermissionMode(mode_str))
             decision = engine.evaluate(tc.name, tc.input)
             if not decision.allowed:
-                from obscura.cli.render import print_warning
-
                 print_warning(f"Blocked by {mode_str} mode: {tc.name}")
                 return False
             if decision.auto_approved:
@@ -114,20 +116,13 @@ async def send_message(
             pass
         # 2. If confirm is enabled, prompt user.
         if ctx.confirm_enabled:
-            from obscura.cli._tool_confirm import cli_confirm
-
             return await cli_confirm(ctx, tc.name, tc.input)
         return True
 
     # ── Token-aware auto-compact ────────────────────────────────────────────
-    from obscura.cli.commands import cmd_compact, estimate_effective_context_tokens
-
     _context_window = ctx.client.context_window
     _compact_threshold = int(_context_window * 0.60)  # compact at 60%
     _warn_threshold = ctx.client.context_warn_threshold  # 50% of window
-
-    # Update the system tool's token tracker so the LLM can introspect
-    from obscura.tools.system import Session
 
     # ── Vector memory pre-search ──────────────────────────────────────────
     augmented_text = text
@@ -191,16 +186,12 @@ async def send_message(
         context_retry_used: bool = False,
         dead_session_retry_used: bool = False,
     ) -> list[str]:
-        from obscura.cli._tool_confirm import track_file_event
-
         nonlocal _stream_output_chars
         _buf: list[str] = []
         # Inject effort-level thinking budget if set.
         _effective_kwargs = dict(loop_kwargs)
         if hasattr(ctx, "effort_level") and ctx.effort_level:
             try:
-                from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
-
                 _lvl = EffortLevel(ctx.effort_level)
                 _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[_lvl]
             except (ValueError, KeyError):
@@ -242,8 +233,6 @@ async def send_message(
                 track_file_event(event.kind, ctx, event)
                 # Deep logging
                 try:
-                    from obscura.core.deep_log import dlog
-
                     if event.kind == AgentEventKind.TOOL_CALL:
                         dlog.tool_call(
                             getattr(event, "tool_name", ""),
@@ -263,8 +252,6 @@ async def send_message(
                     tool_name = getattr(event, "tool_name", "")
                     tool_input = getattr(event, "tool_input", {})
                     try:
-                        from obscura.cli.tool_collapse import ToolCollapser
-
                         if not hasattr(ctx, "collapser"):
                             ctx.collapser = ToolCollapser()
                         ctx.collapser.record(tool_name, tool_input)

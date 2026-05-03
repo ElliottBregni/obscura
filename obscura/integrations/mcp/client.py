@@ -30,6 +30,7 @@ from typing import Any, Self, override
 
 import httpx
 
+from obscura.auth.secrets import safe_subprocess_env
 from obscura.integrations.mcp.types import (
     MCPConnectionConfig,
     MCPError,
@@ -432,8 +433,6 @@ class StdioTransport(MCPTransport):
         # ``self.config.env`` carries MCP-specific env vars the server
         # actually needs; they're passed as ``extras`` so strict mode
         # doesn't strip them.
-        from obscura.auth.secrets import safe_subprocess_env
-
         env = safe_subprocess_env(self.config.env)
 
         self._process = await asyncio.create_subprocess_exec(

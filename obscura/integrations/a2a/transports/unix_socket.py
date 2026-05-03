@@ -37,6 +37,8 @@ from typing import TYPE_CHECKING, Any
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
+    TaskNotFoundError,
+    TaskState,
 )
 
 if TYPE_CHECKING:
@@ -168,14 +170,10 @@ class UnixSocketServicer:
         task_id = params.get("taskId", "")
         task = await self._service.tasks_get(task_id)
         if task is None:
-            from obscura.integrations.a2a.types import TaskNotFoundError
-
             raise TaskNotFoundError(task_id)
         return json.loads(task.model_dump_json())
 
     async def _handle_list_tasks(self, params: dict[str, Any]) -> Any:
-        from obscura.integrations.a2a.types import TaskState
-
         tasks, cursor = await self._service.tasks_list(
             context_id=params.get("contextId"),
             state=TaskState(params["state"]) if "state" in params else None,

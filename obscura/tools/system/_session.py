@@ -6,6 +6,7 @@ import asyncio
 import json
 from typing import Any, ClassVar, cast
 
+from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 
@@ -213,8 +214,6 @@ class Session:
         },
     )
     async def enter_plan_mode() -> str:
-        from obscura.core.tool_context import current_tool_context
-
         ctx = current_tool_context()
         cb = ctx.permission_mode_callback if ctx is not None else None
         if cb is None:
@@ -243,8 +242,6 @@ class Session:
         },
     )
     async def exit_plan_mode(plan_summary: str = "") -> str:
-        from obscura.core.tool_context import current_tool_context
-
         ctx = current_tool_context()
         approval_cb = ctx.plan_approval_callback if ctx is not None else None
         if approval_cb is None:
@@ -308,8 +305,6 @@ class Session:
         end_turn: int,
         reason: str = "",
     ) -> str:
-        from obscura.core.tool_context import current_tool_context
-
         ctx = current_tool_context()
         history = ctx.history if ctx is not None else None
         if history is None:

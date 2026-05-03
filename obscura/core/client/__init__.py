@@ -392,8 +392,6 @@ class ObscuraClient:
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send prompt, yield streaming chunks."""
-        from obscura.core.circuit_breaker import CircuitOpenError
-
         # Apply prompt injection filter and memory enrichment
         prompt = self._enrich_prompt(self._filter_prompt(prompt))
 
@@ -474,15 +472,10 @@ class ObscuraClient:
             on finish — the caller manages the session lifecycle.
 
         """
-        from obscura.core.agent_loop import AgentLoop
-
         # Load session history if enabled
         initial_messages = None
         if load_session_history and session_id:
             try:
-                from obscura.core.context import load_session_messages
-                from obscura.core.paths import resolve_obscura_home
-
                 db_path = resolve_obscura_home() / "events.db"
                 initial_messages = load_session_messages(
                     session_id,
@@ -501,8 +494,6 @@ class ObscuraClient:
         # so the loop's confirmation gate is never reached).
         loop_confirm = on_confirm
         if on_confirm and isinstance(self._backend, ConfirmationCapable):
-            from obscura.core.types import ToolCallInfo
-
             def _wrap_confirm(name: str, inp: dict[str, Any]) -> bool:
                 return on_confirm(ToolCallInfo(name=name, input=inp))  # type: ignore[arg-type]
 
@@ -548,8 +539,6 @@ class ObscuraClient:
         **kwargs: Any,
     ) -> str:
         """Run the agent loop and return the final concatenated text."""
-        from obscura.core.agent_loop import AgentLoop
-
         loop = AgentLoop(
             self._backend,
             self._tool_registry,
@@ -640,8 +629,6 @@ class ObscuraClient:
             claude = client.backend_impl  # ClaudeBackend
             await claude.fork_session(ref)
         """
-        from obscura.core.throttle import ThrottledBackend
-
         backend = self._backend
         if isinstance(backend, ThrottledBackend):
             return backend.wrapped
@@ -709,8 +696,6 @@ class ObscuraClient:
         default_ttl: float = 300.0,
     ) -> None:
         """Enable the LLM response cache for ``send()``."""
-        from obscura.core.llm_cache import LLMCache
-
         self._cache = LLMCache(max_entries=max_entries, default_ttl=default_ttl)
 
     @property
@@ -793,8 +778,6 @@ class ObscuraClient:
             return result.filtered
         except ImportError:
             # Fail secure: only skip filtering for privileged tier
-            from obscura.auth.capability import CapabilityTier
-
             if self._capability_token.tier == CapabilityTier.PRIVILEGED:
                 return prompt
             raise
@@ -832,6 +815,9 @@ class ObscuraClient:
         tool_policy: ToolPolicy | None = None,
     ) -> BackendProtocol:
         """Instantiate the appropriate backend, wrapped in the throttle gate."""
+        # lazy: obscura.providers.* is reached via obscura.agent.agents during
+        # obscura/__init__.py import, which means importing them at the top
+        # of this module would cycle through obscura.core.client itself.
         instance: BackendProtocol
         backend_name: str
 
@@ -903,8 +889,6 @@ class ObscuraClient:
         else:
             msg = f"Unknown backend: {backend}"
             raise ValueError(msg)
-
-        from obscura.core.throttle import wrap_if_enabled
 
         return wrap_if_enabled(instance, backend_name=backend_name, auth=auth)
 
