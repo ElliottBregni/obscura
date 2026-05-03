@@ -339,6 +339,7 @@ class LazyCommandLoader:
 
             default_commands = DEFAULT_COMMANDS
         except ImportError:
+            logger.debug("suppressed exception in discover_commands", exc_info=True)
             default_commands = {}
 
         for filename, content in default_commands.items():
@@ -590,7 +591,7 @@ def load_eval_for_command(cmd: CommandMetadata) -> EvalSuite | None:
         if cmd.name in DEFAULT_EVALS:
             return _try_parse_eval(DEFAULT_EVALS[cmd.name], cmd.name, "built-in")
     except ImportError:
-        pass
+        logger.debug("suppressed exception in load_eval_for_command", exc_info=True)
 
     return None
 

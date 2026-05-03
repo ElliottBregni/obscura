@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any, cast
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 BASE_URL = "https://api.coingecko.com/api/v3"
 
@@ -35,6 +39,7 @@ async def _handler_price(
             resp.raise_for_status()
             return _coerce_dict(resp.json())
     except Exception as e:
+        logger.debug("suppressed exception in _handler_price", exc_info=True)
         return {"error": str(e)}
 
 
@@ -53,6 +58,7 @@ async def _handler_market_chart(
             resp.raise_for_status()
             return _coerce_dict(resp.json())
     except Exception as e:
+        logger.debug("suppressed exception in _handler_market_chart", exc_info=True)
         return {"error": str(e)}
 
 
@@ -63,4 +69,5 @@ async def _handler_trending(**kwargs: Any) -> dict[str, Any]:
             resp.raise_for_status()
             return _coerce_dict(resp.json())
     except Exception as e:
+        logger.debug("suppressed exception in _handler_trending", exc_info=True)
         return {"error": str(e)}

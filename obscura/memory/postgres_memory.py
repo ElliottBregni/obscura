@@ -236,11 +236,13 @@ class PostgreSQLMemoryStore:
                     val: Any = row["value"]
                     if isinstance(val, str):
                         val = json.loads(val)
-                    results.append({
-                        "namespace": row["namespace"],
-                        "key": row["key"],
-                        "value": val,
-                    })
+                    results.append(
+                        {
+                            "namespace": row["namespace"],
+                            "key": row["key"],
+                            "value": val,
+                        }
+                    )
                 return results
         finally:
             self._put_conn(conn)
@@ -251,8 +253,7 @@ class PostgreSQLMemoryStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM memory.entries "
-                    "WHERE user_id = %s AND namespace = %s",
+                    "DELETE FROM memory.entries WHERE user_id = %s AND namespace = %s",
                     (self.user_id, namespace),
                 )
             conn.commit()

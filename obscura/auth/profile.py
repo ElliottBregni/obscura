@@ -157,7 +157,7 @@ def get_or_create_machine_id() -> str:
     try:
         path.chmod(0o600)
     except OSError:
-        pass
+        logger.debug("suppressed exception in get_or_create_machine_id", exc_info=True)
     return new_id
 
 

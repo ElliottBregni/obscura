@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field
 
 from obscura.integrations.a2a.client import A2AClient
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.agent.agents import Agent, AgentRuntime
@@ -164,6 +168,7 @@ class PeerRegistry:
                     ),
                 )
             except Exception:
+                logger.debug("suppressed exception in discover_remote", exc_info=True)
                 refs.append(RemoteAgentRef(url=url, status="error"))
             finally:
                 with contextlib.suppress(Exception):

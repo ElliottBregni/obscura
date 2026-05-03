@@ -165,6 +165,7 @@ def _clear_passphrase_key() -> bool:
         try:
             keyring.delete_password(_KEYRING_SERVICE, _PASSPHRASE_KEY_SLOT)
         except keyring.errors.PasswordDeleteError:
+            logger.debug("suppressed exception in _clear_passphrase_key", exc_info=True)
             return False
     except Exception as exc:  # noqa: BLE001
         logger.debug("Keyring delete of passphrase key failed: %s", exc)

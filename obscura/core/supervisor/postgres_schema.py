@@ -317,7 +317,10 @@ def verify_supervisor_schema_pg(conn: Any) -> list[str]:
             "SELECT table_name FROM information_schema.tables "
             "WHERE table_schema = 'supervisor'"
         )
-        existing = {row["table_name"] if hasattr(row, "__getitem__") else row[0] for row in cur.fetchall()}
+        existing = {
+            row["table_name"] if hasattr(row, "__getitem__") else row[0]
+            for row in cur.fetchall()
+        }
 
     missing = [t for t in REQUIRED_TABLES_PG if t not in existing]
     if missing:

@@ -11,6 +11,9 @@ from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 from obscura.tools.system.diff_utils import compute_unified_diff
 from obscura.tools.system.file_state import check_staleness
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class FsWrite:
@@ -95,7 +98,9 @@ class FsWrite:
         create_dirs: bool = True,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not Policy.is_vault_write_allowed(target):
             return Policy.json_error(
@@ -115,7 +120,9 @@ class FsWrite:
             # Staleness check for existing files.
             staleness_err = check_staleness(target)
             if staleness_err is not None:
-                return Policy.json_error("stale_file", path=str(target), detail=staleness_err)
+                return Policy.json_error(
+                    "stale_file", path=str(target), detail=staleness_err
+                )
             original = target.read_text(encoding="utf-8")
             # Preserve original line endings if the file uses CRLF.
             if "\r\n" in original and "\r\n" not in text:
@@ -154,7 +161,9 @@ class FsWrite:
     )
     async def append_text_file(path: str, text: str, create_dirs: bool = True) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not Policy.is_vault_write_allowed(target):
             return Policy.json_error(
@@ -171,6 +180,7 @@ class FsWrite:
             try:
                 original = target.read_text(encoding="utf-8")
             except OSError:
+                logger.debug("suppressed exception in append_text_file", exc_info=True)
                 original = ""
 
         try:
@@ -179,11 +189,14 @@ class FsWrite:
             with target.open("a", encoding="utf-8") as fh:
                 fh.write(text)
         except OSError as exc:
+            logger.debug("suppressed exception in append_text_file", exc_info=True)
             return Policy.json_error("append_failed", path=str(target), detail=str(exc))
 
         after = original + text
         diff = compute_unified_diff(original, after, str(target))
-        total_lines = after.count("\n") + (1 if after and not after.endswith("\n") else 0)
+        total_lines = after.count("\n") + (
+            1 if after and not after.endswith("\n") else 0
+        )
         return json.dumps(
             {
                 "ok": True,
@@ -215,11 +228,14 @@ class FsWrite:
         exist_ok: bool = True,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         try:
             target.mkdir(parents=parents, exist_ok=exist_ok)
         except OSError as exc:
+            logger.debug("suppressed exception in make_directory", exc_info=True)
             return Policy.json_error("mkdir_failed", path=str(target), detail=str(exc))
         return json.dumps({"ok": True, "path": str(target)})
 
@@ -243,7 +259,9 @@ class FsWrite:
         missing_ok: bool = True,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not Policy.is_vault_write_allowed(target):
             return Policy.json_error(
@@ -258,7 +276,9 @@ class FsWrite:
 
         if target.is_dir():
             if not recursive:
-                return Policy.json_error("directory_requires_recursive_true", path=str(target))
+                return Policy.json_error(
+                    "directory_requires_recursive_true", path=str(target)
+                )
             shutil.rmtree(target)
             return json.dumps({"ok": True, "path": str(target), "removed": True})
 
@@ -298,7 +318,9 @@ class FsWrite:
         replace_all: bool = False,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not Policy.is_vault_write_allowed(target):
             return Policy.json_error(
@@ -320,7 +342,9 @@ class FsWrite:
                 # concurrent writer can slip in between check and read.
                 staleness_err = check_staleness(target)
                 if staleness_err is not None:
-                    return Policy.json_error("stale_file", path=str(target), detail=staleness_err)
+                    return Policy.json_error(
+                        "stale_file", path=str(target), detail=staleness_err
+                    )
 
                 content = fh.read()
 
@@ -479,11 +503,13 @@ class FsWrite:
                 keepends=True,
             )
         except OSError as exc:
+            logger.debug("suppressed exception in diff_files", exc_info=True)
             return Policy.json_error("read_failed", detail=str(exc))
 
         try:
             context_lines = int(context_lines)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in diff_files", exc_info=True)
             context_lines = 3
         ctx = max(0, min(context_lines, 20))
         diff = list(

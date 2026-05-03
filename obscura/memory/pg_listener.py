@@ -229,6 +229,6 @@ def listen_blocking(
         while listener.is_running():
             time.sleep(0.5)
     except KeyboardInterrupt:
-        pass
+        _log.debug("suppressed exception in listen_blocking", exc_info=True)
     finally:
         listener.stop()

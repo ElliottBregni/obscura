@@ -28,6 +28,10 @@ from obscura.cli.render import (
     print_info,
 )
 from obscura.core.paths import resolve_obscura_home
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -138,14 +142,14 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
             )
             report.message_count = rec.message_count
     except Exception:
-        pass
+        logger.debug("suppressed exception in _collect_heartbeat", exc_info=True)
 
     # 2. Event count
     try:
         events = await ctx.store.get_events(ctx.session_id)
         report.event_count = len(events)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _collect_heartbeat", exc_info=True)
 
     # 3. Events DB health
     try:
@@ -154,7 +158,7 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
             report.events_db_ok = True
             report.events_db_size_kb = db_path.stat().st_size / 1024.0
     except Exception:
-        pass
+        logger.debug("suppressed exception in _collect_heartbeat", exc_info=True)
 
     # 4. Tool registry
     try:
@@ -162,7 +166,7 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
         report.tool_count = len(tools)
         report.tool_names = [t.name for t in tools]
     except Exception:
-        pass
+        logger.debug("suppressed exception in _collect_heartbeat", exc_info=True)
 
     # 5. Vector memory
     try:
@@ -171,7 +175,7 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
             report.vector_memory_count = stats.get("total_memories", 0)
             report.vector_memory_backend = stats.get("backend", "")
     except Exception:
-        pass
+        logger.debug("suppressed exception in _collect_heartbeat", exc_info=True)
 
     # 6. Supervisor health (sync probe via thread)
     with contextlib.suppress(Exception):
@@ -205,7 +209,9 @@ def _probe_supervisor_sync(report: HeartbeatReport, session_id: str) -> None:
                     report.supervisor_lock_held = True
                     report.supervisor_lock_holder = row["holder_id"]
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in _probe_supervisor_sync", exc_info=True
+            )
 
         # Latest heartbeat state + count
         try:
@@ -219,6 +225,9 @@ def _probe_supervisor_sync(report: HeartbeatReport, session_id: str) -> None:
                 report.supervisor_heartbeat_count = row["cnt"]
         except Exception:
             # Try simpler queries if the above fails
+            logger.debug(
+                "suppressed exception in _probe_supervisor_sync", exc_info=True
+            )
             try:
                 count_row = conn.execute(
                     "SELECT COUNT(*) as cnt FROM session_heartbeats WHERE session_id = ?",
@@ -227,7 +236,9 @@ def _probe_supervisor_sync(report: HeartbeatReport, session_id: str) -> None:
                 if count_row is not None:
                     report.supervisor_heartbeat_count = count_row["cnt"]
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _probe_supervisor_sync", exc_info=True
+                )
             try:
                 state_row = conn.execute(
                     "SELECT state FROM session_heartbeats "
@@ -237,11 +248,13 @@ def _probe_supervisor_sync(report: HeartbeatReport, session_id: str) -> None:
                 if state_row is not None:
                     report.supervisor_state = state_row["state"]
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _probe_supervisor_sync", exc_info=True
+                )
 
         conn.close()
     except Exception:
-        pass
+        logger.debug("suppressed exception in _probe_supervisor_sync", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +383,7 @@ async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
         ).fetchall()
         conn.close()
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_policies", exc_info=True)
         print_error(f"Failed to query policy_versions: {exc}")
         return None
 
@@ -438,6 +452,7 @@ async def cmd_replay(args: str, ctx: REPLContext) -> str | None:
         ).fetchall()
         conn.close()
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_replay", exc_info=True)
         print_error(f"Failed to query supervisor DB: {exc}")
         return None
 

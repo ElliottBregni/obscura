@@ -83,7 +83,7 @@ def get_runtime_override(plugin_id: str) -> str | None:
                 if val in (RUNTIME_NATIVE, RUNTIME_MCP):
                     return val
     except Exception:
-        pass
+        logger.debug("suppressed exception in get_runtime_override", exc_info=True)
 
     return None
 
@@ -272,6 +272,10 @@ def load_native_handlers_from_plugin(
                 logger.debug("Imported module %s from %s", candidate, plugin_dir)
                 break
             except ImportError:
+                logger.debug(
+                    "suppressed exception in load_native_handlers_from_plugin",
+                    exc_info=True,
+                )
                 continue
 
         if mod is None:

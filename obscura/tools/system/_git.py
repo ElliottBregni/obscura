@@ -10,6 +10,9 @@ from typing import Any
 
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Git:
@@ -36,6 +39,7 @@ class Git:
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
+            logger.debug("suppressed exception in git_subprocess", exc_info=True)
             proc.kill()
             await proc.wait()
             return {"ok": False, "error": "timeout", "git_args": args, "cwd": work_dir}
@@ -188,6 +192,7 @@ class Git:
             try:
                 max_count = int(max_count)
             except (TypeError, ValueError):
+                logger.debug("suppressed exception in git", exc_info=True)
                 max_count = 10
             count = max(1, min(max_count, 100))
             args = ["log", f"-{count}"]

@@ -105,6 +105,9 @@ def _get_phantom_message_preamble() -> str:
             style_hint = f" Style: {'; '.join(f.value for f in prefs[:3])}."
     except Exception:
         # Fall back to markdown profile.
+        logger.debug(
+            "suppressed exception in _get_phantom_message_preamble", exc_info=True
+        )
         try:
             from obscura.kairos.user_profile import UserProfile
 
@@ -113,7 +116,9 @@ def _get_phantom_message_preamble() -> str:
             if m:
                 name = m.group(1).strip()
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in _get_phantom_message_preamble", exc_info=True
+            )
 
     # Read autonomy level for context.
     level = int(os.environ.get("OBSCURA_PHANTOM_LEVEL", "3"))
@@ -377,6 +382,9 @@ class DaemonAgent:
                     try:
                         exc = self._scheduler_task.exception()
                     except asyncio.CancelledError:
+                        logger.debug(
+                            "suppressed exception in run_forever", exc_info=True
+                        )
                         exc = None
                     if exc is not None:
                         logger.error(
@@ -535,7 +543,9 @@ class DaemonAgent:
                                 exc,
                             )
                     except asyncio.CancelledError:
-                        pass
+                        logger.debug(
+                            "suppressed exception in run_forever", exc_info=True
+                        )
             logger.info("[%s] daemon agent stopped", self._name)
             self._lock_store.release(
                 lock_name=self._lock_name,
@@ -914,6 +924,7 @@ class DaemonAgent:
                     return None
                 return trigger
             except TimeoutError:
+                logger.debug("suppressed exception in _get_next_trigger", exc_info=True)
                 return None
         return None
 
@@ -949,6 +960,7 @@ class DaemonAgent:
         try:
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
+            logger.debug("suppressed exception in _run_schedulers", exc_info=True)
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -959,6 +971,7 @@ class DaemonAgent:
             try:
                 await asyncio.sleep(60.0)
             except asyncio.CancelledError:
+                logger.debug("suppressed exception in _poll_schedules", exc_info=True)
                 return
 
             for trigger in triggers:
@@ -1149,6 +1162,7 @@ class DaemonAgent:
             try:
                 await asyncio.sleep(0.5)
             except asyncio.CancelledError:
+                logger.debug("suppressed exception in _poll_messages", exc_info=True)
                 return
 
     async def _emit_output(
@@ -1237,12 +1251,14 @@ def _cron_matches_now(cron_expr: str) -> bool:
                 if step <= 0 or now_val % step != 0:
                     return False
             except ValueError:
+                logger.debug("suppressed exception in _cron_matches_now", exc_info=True)
                 return False
         else:
             try:
                 if int(field_str) != now_val:
                     return False
             except ValueError:
+                logger.debug("suppressed exception in _cron_matches_now", exc_info=True)
                 return False
 
     return True

@@ -13,6 +13,9 @@ from urllib import request as url_request
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 from obscura.tools.system._shell import Shell
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Http:
@@ -30,7 +33,10 @@ class Http:
             "type": "object",
             "properties": {
                 "url": {"type": "string"},
-                "path": {"type": "string", "description": "Local path to save the file."},
+                "path": {
+                    "type": "string",
+                    "description": "Local path to save the file.",
+                },
                 "timeout_seconds": {"type": "number"},
                 "max_bytes": {
                     "type": "integer",
@@ -47,13 +53,16 @@ class Http:
         max_bytes: int = 50_000_000,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
 
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
             url = Policy.validate_url(url)
         except ValueError as exc:
+            logger.debug("suppressed exception in download_file", exc_info=True)
             return Policy.json_error("ssrf_blocked", url=url, detail=str(exc))
         req = url_request.Request(
             url,
@@ -66,7 +75,9 @@ class Http:
             with url_request.urlopen(req, timeout=timeout_seconds) as resp:
                 data = resp.read(max_bytes + 1)
                 if len(data) > max_bytes:
-                    return Policy.json_error("file_too_large", url=url, max_bytes=max_bytes)
+                    return Policy.json_error(
+                        "file_too_large", url=url, max_bytes=max_bytes
+                    )
                 target.write_bytes(data[:max_bytes])
                 return json.dumps(
                     {
@@ -78,8 +89,10 @@ class Http:
                     },
                 )
         except url_error.HTTPError as exc:
+            logger.debug("suppressed exception in download_file", exc_info=True)
             return Policy.json_error("download_failed", url=url, status=exc.code)
         except Exception as exc:
+            logger.debug("suppressed exception in download_file", exc_info=True)
             return Policy.json_error("download_failed", url=url, detail=str(exc))
 
     @staticmethod
@@ -90,9 +103,18 @@ class Http:
             "type": "object",
             "properties": {
                 "url": {"type": "string"},
-                "method": {"type": "string", "description": "HTTP method (default GET)."},
-                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
-                "body": {"type": "string", "description": "Request body (string or JSON)."},
+                "method": {
+                    "type": "string",
+                    "description": "HTTP method (default GET).",
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Request body (string or JSON).",
+                },
                 "json_body": {
                     "type": "object",
                     "description": "JSON body (auto-sets Content-Type).",
@@ -122,6 +144,7 @@ class Http:
         try:
             url = Policy.validate_url(url)
         except ValueError as exc:
+            logger.debug("suppressed exception in http_request", exc_info=True)
             return Policy.json_error("ssrf_blocked", url=url, detail=str(exc))
         req = url_request.Request(
             url=url,
@@ -160,6 +183,7 @@ class Http:
 
                 return json.dumps(result)
         except url_error.HTTPError as exc:
+            logger.debug("suppressed exception in http_request", exc_info=True)
             raw_error = exc.read(100_000)
             return json.dumps(
                 {
@@ -173,6 +197,7 @@ class Http:
                 },
             )
         except Exception as exc:
+            logger.debug("suppressed exception in http_request", exc_info=True)
             return Policy.json_error(
                 "request_failed",
                 url=url,
@@ -191,7 +216,9 @@ class Http:
     )
     async def clipboard_read() -> str:
         if platform.system() != "Darwin":
-            return Policy.json_error("clipboard_unsupported", platform=platform.system())
+            return Policy.json_error(
+                "clipboard_unsupported", platform=platform.system()
+            )
         result = await Shell.run_command("pbpaste", timeout_seconds=5.0)
         payload = json.loads(result)
         if payload.get("ok"):
@@ -218,7 +245,9 @@ class Http:
     )
     async def clipboard_write(text: str) -> str:
         if platform.system() != "Darwin":
-            return Policy.json_error("clipboard_unsupported", platform=platform.system())
+            return Policy.json_error(
+                "clipboard_unsupported", platform=platform.system()
+            )
         proc = await asyncio.create_subprocess_exec(
             "pbcopy",
             stdin=asyncio.subprocess.PIPE,
@@ -231,6 +260,7 @@ class Http:
                 timeout=5.0,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in clipboard_write", exc_info=True)
             proc.kill()
             await proc.wait()
             return Policy.json_error("timeout")

@@ -53,6 +53,10 @@ _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _PULSE_COLORS = [201, 165, 129, 93, 129, 165]
 
 import platform as _platform
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _BLACK_CIRCLE = "⏺" if _platform.system() == "Darwin" else "●"
 _HOOK = "⎿"  # Claude Code's assistant response prefix
@@ -282,6 +286,7 @@ class ModernRenderer:
 
             summary = summarize_tool_call(event.tool_name, event.tool_input)
         except Exception:
+            logger.debug("suppressed exception in _handle_tool_call", exc_info=True)
             summary = f"{event.tool_name}()"
 
         tool_name = _sanitize(event.tool_name or "")
@@ -575,7 +580,7 @@ class ModernRenderer:
             loop = asyncio.get_running_loop()
             self._frame_task = loop.create_task(self._frame_loop())
         except RuntimeError:
-            pass
+            logger.debug("suppressed exception in _ensure_frame_task", exc_info=True)
 
     async def _frame_loop(self) -> None:
         """Background task: animate and redraw the live region at target FPS."""
@@ -620,7 +625,7 @@ class ModernRenderer:
 
                 await asyncio.sleep(self.FRAME_INTERVAL_S)
         except asyncio.CancelledError:
-            pass
+            logger.debug("suppressed exception in _frame_loop", exc_info=True)
 
     def _render_frame(self) -> None:
         """Synchronous single-frame render (used by finish)."""
@@ -633,7 +638,7 @@ class ModernRenderer:
             self._out.write(s)
             self._out.flush()
         except Exception:
-            pass
+            logger.debug("suppressed exception in _write", exc_info=True)
 
     def _on_resize(self, signum: int, frame: Any) -> None:
         self._width = shutil.get_terminal_size((80, 24)).columns
@@ -669,7 +674,7 @@ class ModernRenderer:
                 if preview is not None:
                     self._ss.preview = preview  # type: ignore[union-attr]
         except Exception:
-            pass
+            logger.debug("suppressed exception in _update_status", exc_info=True)
 
     # ── Tool registry (lazy) ──────────────────────────────────────────────
 

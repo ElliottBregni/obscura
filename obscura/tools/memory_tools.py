@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, Any
 from obscura.core.types import ToolSpec
 from obscura.memory import MemoryStore
 from obscura.vector_memory import VectorMemoryEntry, VectorMemoryStore
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -30,6 +34,7 @@ def _project_namespace() -> str:
     try:
         return f"project:{os.path.basename(os.getcwd())}"
     except Exception:
+        logger.debug("suppressed exception in _project_namespace", exc_info=True)
         return "default"
 
 

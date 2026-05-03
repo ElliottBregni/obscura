@@ -212,7 +212,9 @@ def auto_save_turn(
 
         # Auto-learn profile facts from user messages (best-effort, silent).
         try:
-            profile_store = ProfileStore.for_user(current_cli_user(), vector_store=store)
+            profile_store = ProfileStore.for_user(
+                current_cli_user(), vector_store=store
+            )
             learner = ProfileLearner(profile_store)
             new_facts = learner.process_turn(user_text)
             if new_facts:
@@ -263,6 +265,7 @@ def clear_mcp_noise_memories(store: VectorMemoryStore) -> int:
     try:
         keys = store.list_keys(namespace=CLI_NAMESPACE)
     except Exception:
+        _logger.debug("suppressed exception in clear_mcp_noise_memories", exc_info=True)
         return 0
 
     for key in keys:
@@ -273,6 +276,9 @@ def clear_mcp_noise_memories(store: VectorMemoryStore) -> int:
             if _is_mcp_noise_text(entry.text) and store.delete(key):
                 removed += 1
         except Exception:
+            _logger.debug(
+                "suppressed exception in clear_mcp_noise_memories", exc_info=True
+            )
             continue
     return removed
 

@@ -22,6 +22,10 @@ import uuid
 from typing import TYPE_CHECKING, Any, override
 
 from starlette.middleware.base import BaseHTTPMiddleware
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,7 +83,7 @@ def enrich_request_span(request: Any, request_id: str) -> None:
             enrich_span_with_user(span, user)
 
     except (ImportError, AttributeError):
-        pass
+        logger.debug("suppressed exception in enrich_request_span", exc_info=True)
 
 
 def get_traceparent() -> str | None:
@@ -94,7 +98,7 @@ def get_traceparent() -> str | None:
             flags = format(ctx.trace_flags, "02x")
             return f"00-{trace_id}-{span_id}-{flags}"
     except (ImportError, AttributeError):
-        pass
+        logger.debug("suppressed exception in get_traceparent", exc_info=True)
     return None
 
 

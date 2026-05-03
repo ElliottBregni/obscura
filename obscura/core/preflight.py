@@ -207,6 +207,7 @@ class PreflightValidator:
                 message=f"Python {version} does not match expected {expected}",
             )
         except Exception as exc:
+            logger.debug("suppressed exception in _check_python_version", exc_info=True)
             return PreflightCheck(
                 name="python_version",
                 passed=False,
@@ -242,6 +243,7 @@ class PreflightValidator:
                 message=f"Package '{name}' is not installed",
             )
         except Exception as exc:
+            logger.debug("suppressed exception in _check_package", exc_info=True)
             return PreflightCheck(
                 name=f"package:{name}",
                 passed=False,

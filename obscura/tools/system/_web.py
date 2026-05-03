@@ -17,6 +17,9 @@ from obscura.core.context_window import (
 )
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Web:
@@ -40,7 +43,9 @@ class Web:
             flags=re.DOTALL | re.IGNORECASE,
         )
         # Replace block-level tags with newlines for readability
-        text = re.sub(r"</(p|div|li|tr|h[1-6]|br)[^>]*>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"</(p|div|li|tr|h[1-6]|br)[^>]*>", "\n", text, flags=re.IGNORECASE
+        )
         # Strip remaining tags
         text = re.sub(r"<[^>]+>", " ", text)
         # Decode HTML entities (&amp; &lt; etc.)
@@ -66,6 +71,7 @@ class Web:
                 ),
             )
         except ImportError:
+            logger.debug("suppressed exception in html_to_markdown", exc_info=True)
             return Web.strip_html(html_text)
 
     # ------------------------------------------------------------------
@@ -90,7 +96,10 @@ class Web:
                     "description": "What to extract or summarize from the page.",
                 },
                 "method": {"type": "string"},
-                "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": {"type": "string"},
+                },
                 "body": {"type": "string"},
                 "timeout_seconds": {"type": "number"},
                 "max_bytes": {"type": "integer"},
@@ -123,6 +132,7 @@ class Web:
         try:
             url = Policy.validate_url(url)
         except ValueError as exc:
+            logger.debug("suppressed exception in web_fetch", exc_info=True)
             return Policy.json_error("ssrf_blocked", url=url, detail=str(exc))
         req = url_request.Request(
             url=url,
@@ -187,6 +197,7 @@ class Web:
                     Web._cache[cache_key] = (_time.time(), result_json)
                 return result_json
         except url_error.HTTPError as exc:
+            logger.debug("suppressed exception in web_fetch", exc_info=True)
             raw_error = exc.read(max_bytes)
             return json.dumps(
                 {
@@ -198,6 +209,7 @@ class Web:
                 },
             )
         except Exception as exc:
+            logger.debug("suppressed exception in web_fetch", exc_info=True)
             return Policy.json_error("web_fetch_failed", url=url, detail=str(exc))
 
     @staticmethod
@@ -253,6 +265,7 @@ class Web:
             with url_request.urlopen(req, timeout=20) as resp:
                 raw_html = resp.read(500_000).decode("utf-8", errors="replace")
         except Exception as exc:
+            logger.debug("suppressed exception in web_search", exc_info=True)
             return Policy.json_error("web_search_fetch_failed", detail=str(exc))
 
         def clean(s: str) -> str:
@@ -289,7 +302,9 @@ class Web:
             # DDG wraps hrefs in a redirect — extract uddg param if present
             if "uddg=" in href:
                 uddg_match = re.search(r"uddg=([^&]+)", href)
-                href = url_parse.unquote_plus(uddg_match.group(1)) if uddg_match else href
+                href = (
+                    url_parse.unquote_plus(uddg_match.group(1)) if uddg_match else href
+                )
             url = href or (urls_fb[i] if i < len(urls_fb) else "")
             snippet = snippets[i] if i < len(snippets) else ""
 
@@ -300,6 +315,7 @@ class Web:
 
                     domain = (_urlparse(url).hostname or "").lower()
                 except Exception:
+                    logger.debug("suppressed exception in web_search", exc_info=True)
                     domain = ""
                 if allowed_domains and not any(
                     domain.endswith(d.lower()) for d in allowed_domains

@@ -18,6 +18,10 @@ from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_r
 from obscura.deps import audit
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["webhooks"])
 
@@ -181,6 +185,7 @@ async def webhook_test(
                 },
             )
     except Exception as e:
+        logger.debug("suppressed exception in webhook_test", exc_info=True)
         return JSONResponse(
             content={
                 "webhook_id": webhook_id,
@@ -245,4 +250,4 @@ async def trigger_webhooks(event_type: str, data: dict[str, Any]) -> None:
                     timeout=30.0,
                 )
         except Exception:
-            pass
+            logger.debug("suppressed exception in trigger_webhooks", exc_info=True)

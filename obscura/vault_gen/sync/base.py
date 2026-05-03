@@ -25,9 +25,7 @@ class SyncResult:
     adapter: str
     changes: tuple[Change, ...] = ()
     error: str | None = None
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class SyncAdapter(ABC):

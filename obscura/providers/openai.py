@@ -514,7 +514,7 @@ class OpenAIBackend(BackendToolHostMixin):
                 lines.append("")
                 lines.append(cap_section)
         except Exception:
-            pass
+            logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
         return "\n".join(lines)
 
     @override
@@ -557,7 +557,7 @@ class OpenAIBackend(BackendToolHostMixin):
                 else:
                     callback(context)
             except Exception:
-                pass
+                logger.debug("suppressed exception in _run_hooks", exc_info=True)
 
     # -- OpenAI-specific methods (escape hatch) ------------------------------
 
@@ -592,6 +592,7 @@ class OpenAIBackend(BackendToolHostMixin):
             return model_list or self._get_fallback_models()
         except Exception:
             # API failure - return fallback models
+            logger.debug("suppressed exception in list_models", exc_info=True)
             return self._get_fallback_models()
 
     def get_default_model(self) -> str:
@@ -1036,6 +1037,7 @@ class OpenAIBackend(BackendToolHostMixin):
                 try:
                     tool_input = json.loads(tc.function.arguments)
                 except (json.JSONDecodeError, TypeError):
+                    logger.debug("suppressed exception in to_message", exc_info=True)
                     tool_input = {"raw": tc.function.arguments}
                 blocks.append(
                     ContentBlock(
@@ -1067,6 +1069,7 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
             return cast("dict[str, Any]", parsed)
         return {"raw": raw}
     except json.JSONDecodeError:
+        logger.debug("suppressed exception in _parse_tool_input", exc_info=True)
         return {"raw": raw}
 
 
@@ -1075,12 +1078,16 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 from obscura.telemetry.traces import NoOpTracer, get_tracer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_backend_tracer() -> Any:
     try:
         return get_tracer("obscura.openai_backend")
     except Exception:
+        logger.debug("suppressed exception in _get_backend_tracer", exc_info=True)
         return NoOpTracer()
 
 
@@ -1089,4 +1096,4 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _set_span_attr", exc_info=True)

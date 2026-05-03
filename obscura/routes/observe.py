@@ -17,6 +17,10 @@ from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.memory import MemoryStore
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -33,6 +37,7 @@ def _parse_iso_datetime(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(raw)
     except ValueError:
+        logger.debug("suppressed exception in _parse_iso_datetime", exc_info=True)
         return None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)

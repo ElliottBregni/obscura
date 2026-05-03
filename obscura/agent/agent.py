@@ -257,6 +257,7 @@ def _get_agent_tracer() -> Any:
 
         return get_tracer("obscura.agent")
     except Exception:
+        _logger.debug("suppressed exception in _get_agent_tracer", exc_info=True)
         return NoOpTracer()
 
 
@@ -269,4 +270,4 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _set_span_attr", exc_info=True)

@@ -162,7 +162,7 @@ class AudioCapture:
                     break
                 self._chunks.append(chunk)
         except asyncio.CancelledError:
-            pass
+            logger.debug("suppressed exception in _read_chunks", exc_info=True)
 
     async def stop(self) -> bytes:
         """Stop recording and return captured PCM audio bytes."""
@@ -174,6 +174,7 @@ class AudioCapture:
             self._process.terminate()
             await asyncio.wait_for(self._process.wait(), timeout=2.0)
         except (TimeoutError, ProcessLookupError):
+            logger.debug("suppressed exception in stop", exc_info=True)
             self._process.kill()
             await self._process.wait()
 

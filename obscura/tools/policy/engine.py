@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from obscura.tools.policy.models import PolicyResult, ToolPolicy
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Tools that operate on file-system paths.
 _FS_TOOLS: frozenset[str] = frozenset(
@@ -109,6 +113,7 @@ def _check_base_dir(base_dir: Path, args: dict[str, Any]) -> PolicyResult:
         try:
             target.relative_to(base_dir.resolve())
         except ValueError:
+            logger.debug("suppressed exception in _check_base_dir", exc_info=True)
             return PolicyResult(
                 allowed=False,
                 reason=f"path '{target}' escapes base_dir '{base_dir}'",

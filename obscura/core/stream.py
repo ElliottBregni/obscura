@@ -13,6 +13,10 @@ import json
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.types import ChunkKind, StreamChunk, StreamMetadata
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -145,6 +149,9 @@ class EventToIteratorBridge:
                     try:
                         delta = json.dumps(tool_input)
                     except (TypeError, ValueError):
+                        logger.debug(
+                            "suppressed exception in on_tool_start", exc_info=True
+                        )
                         delta = str(cast(object, tool_input))
                 self.push(
                     StreamChunk(

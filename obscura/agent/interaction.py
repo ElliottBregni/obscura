@@ -190,6 +190,7 @@ class InteractionBus:
                 return await asyncio.wait_for(future, timeout=timeout)
             return await future
         except TimeoutError:
+            logger.debug("suppressed exception in request_attention", exc_info=True)
             self._response_waiters.pop(request.request_id, None)
             return UserResponse(
                 request_id=request.request_id,

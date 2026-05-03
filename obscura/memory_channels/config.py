@@ -91,9 +91,7 @@ def _parse_single_channel(name: str, cfg: dict[str, Any]) -> MemoryChannel:
     file_globs = cast(
         list[Any], cfg.get("file_globs") or triggers_raw.get("file_globs", [])
     )
-    keywords = cast(
-        list[Any], cfg.get("keywords") or triggers_raw.get("keywords", [])
-    )
+    keywords = cast(list[Any], cfg.get("keywords") or triggers_raw.get("keywords", []))
     tool_names = cast(
         list[Any], cfg.get("tool_names") or triggers_raw.get("tool_names", [])
     )

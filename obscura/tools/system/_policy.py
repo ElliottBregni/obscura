@@ -16,6 +16,9 @@ from typing import Any, ClassVar, cast
 from urllib import parse as url_parse
 
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_output_dir
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Policy:
@@ -116,6 +119,7 @@ class Policy:
         try:
             candidate.relative_to(base)
         except ValueError:
+            logger.debug("suppressed exception in is_cwd_allowed", exc_info=True)
             return False
         return True
 
@@ -155,7 +159,7 @@ class Policy:
                 path.relative_to(allowed)
                 return True
             except ValueError:
-                pass
+                logger.debug("suppressed exception in is_path_allowed", exc_info=True)
 
         # 2. Always allow .obscura/ — agent-owned data must never be
         #    locked out by a project-scoped base-dir restriction.
@@ -169,14 +173,15 @@ class Policy:
                 resolved.relative_to(obscura_home)
                 return True
             except ValueError:
-                pass
+                logger.debug("suppressed exception in is_path_allowed", exc_info=True)
         except Exception:
-            pass
+            logger.debug("suppressed exception in is_path_allowed", exc_info=True)
 
         # 3. Standard base-dir check.
         try:
             path.relative_to(base)
         except ValueError:
+            logger.debug("suppressed exception in is_path_allowed", exc_info=True)
             return False
         return True
 
@@ -194,7 +199,9 @@ class Policy:
             if zone in ("user", "shared"):
                 return False
         except (ValueError, Exception):
-            pass  # Not inside vault — allow
+            logger.debug(
+                "suppressed exception in is_vault_write_allowed", exc_info=True
+            )
         return True
 
     # ------------------------------------------------------------------

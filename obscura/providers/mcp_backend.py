@@ -387,6 +387,7 @@ class MCPBackend:
                 await asyncio.wait_for(client.ping(), timeout=5.0)
                 health[name] = {"status": "healthy"}
             except Exception as e:
+                logger.debug("suppressed exception in health_check", exc_info=True)
                 health[name] = {"status": "unhealthy", "error": str(e)}
 
         return health

@@ -132,6 +132,7 @@ def _keyring_available() -> bool:
         if name in {"NullKeyring", "FailKeyring"}:
             return False
     except Exception:
+        logger.debug("suppressed exception in _keyring_available", exc_info=True)
         return False
     return True
 
@@ -149,7 +150,7 @@ def save_session(session: StoredSession) -> None:
                 try:
                     CREDENTIALS_PATH.unlink()
                 except OSError:
-                    pass
+                    logger.debug("suppressed exception in save_session", exc_info=True)
             return
         except Exception as exc:
             logger.warning(
@@ -163,7 +164,7 @@ def save_session(session: StoredSession) -> None:
     try:
         CREDENTIALS_PATH.chmod(0o600)
     except OSError:
-        pass
+        logger.debug("suppressed exception in save_session", exc_info=True)
 
 
 def load_session() -> StoredSession | None:
@@ -176,6 +177,7 @@ def load_session() -> StoredSession | None:
                 try:
                     return StoredSession.from_dict(json.loads(raw))
                 except (ValueError, KeyError):
+                    logger.debug("suppressed exception in load_session", exc_info=True)
                     return None
         except Exception as exc:
             logger.debug("Keyring read failed: %s", exc)
@@ -185,6 +187,7 @@ def load_session() -> StoredSession | None:
     try:
         return StoredSession.from_dict(json.loads(CREDENTIALS_PATH.read_text()))
     except (OSError, ValueError, KeyError):
+        logger.debug("suppressed exception in load_session", exc_info=True)
         return None
 
 
@@ -199,7 +202,7 @@ def clear_session() -> bool:
                 keyring.delete_password(_KEYRING_SERVICE, _KEYRING_USERNAME)
                 removed = True
             except keyring.errors.PasswordDeleteError:
-                pass
+                logger.debug("suppressed exception in clear_session", exc_info=True)
         except Exception as exc:
             logger.debug("Keyring delete failed: %s", exc)
 
@@ -392,6 +395,7 @@ def _decode_jwt_payload(token: str) -> dict[str, Any]:
         padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
         return json.loads(base64.urlsafe_b64decode(padded))  # type: ignore[no-any-return]
     except Exception:
+        logger.debug("suppressed exception in _decode_jwt_payload", exc_info=True)
         return {}
 
 

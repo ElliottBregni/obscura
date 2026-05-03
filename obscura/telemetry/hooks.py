@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.agent.agent import BaseAgent
@@ -78,7 +82,7 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
             m = get_metrics()
             m.agent_runs_total.add(1, {"agent_name": agent_name, "status": "success"})
         except ImportError:
-            pass
+            logger.debug("suppressed exception in _on_post_respond", exc_info=True)
 
     # -- Tool hooks ------------------------------------------------------------
 
@@ -137,7 +141,7 @@ def _start_phase_span(
         if tokens is not None:
             tokens[f"phase.{phase}"] = token
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _start_phase_span", exc_info=True)
 
 
 def _end_phase_span(
@@ -158,7 +162,7 @@ def _end_phase_span(
         if token is not None:
             context.detach(token)
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _end_phase_span", exc_info=True)
 
     if start_time is not None:
         duration = time.monotonic() - start_time
@@ -171,7 +175,7 @@ def _end_phase_span(
                 {"agent_name": agent_name, "phase": phase},
             )
         except ImportError:
-            pass
+            logger.debug("suppressed exception in _end_phase_span", exc_info=True)
 
 
 def _start_tool_span(tool_name: str, tokens: dict[str, Any] | None = None) -> None:
@@ -191,7 +195,7 @@ def _start_tool_span(tool_name: str, tokens: dict[str, Any] | None = None) -> No
         if tokens is not None:
             tokens[f"tool.{tool_name}"] = token
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _start_tool_span", exc_info=True)
 
 
 def _end_tool_span(
@@ -211,7 +215,7 @@ def _end_tool_span(
         if token is not None:
             context.detach(token)
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _end_tool_span", exc_info=True)
 
 
 # Public wrappers for testing/observability
@@ -252,4 +256,4 @@ def end_tool_span(
             duration = time.monotonic() - start_time
             m.tool_duration_seconds.record(duration, {"tool_name": tool_name})
     except ImportError:
-        pass
+        logger.debug("suppressed exception in end_tool_span", exc_info=True)

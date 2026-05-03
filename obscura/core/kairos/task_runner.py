@@ -161,6 +161,7 @@ class TaskRunner:
                         tokens_used += getattr(usage_data, "total_tokens", 0)
 
         except TimeoutError:
+            logger.debug("suppressed exception in _execute_once", exc_info=True)
             elapsed = int(time.monotonic() * 1000) - start_ms
             return TaskResult(
                 task_id=task.task_id,

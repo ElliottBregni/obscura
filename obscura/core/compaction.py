@@ -865,7 +865,7 @@ def _rebuild_block_text(block: Any, new_text: str) -> Any:
         if hasattr(block, "_replace"):
             return block._replace(text=new_text)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _rebuild_block_text", exc_info=True)
     result: dict[str, Any] = {"type": _get_block_type(block), "text": new_text}
     tid = _get_block_tool_use_id(block)
     if tid:
@@ -882,7 +882,7 @@ def _rebuild_message(msg: Any, new_content: list[Any]) -> Any:
         if hasattr(msg, "_replace"):
             return msg._replace(content=new_content)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _rebuild_message", exc_info=True)
     return {"role": _get_role(msg), "content": new_content}
 
 

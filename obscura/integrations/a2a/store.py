@@ -149,6 +149,7 @@ class InMemoryTaskStore:
             try:
                 start_idx = int(base64.b64decode(cursor).decode())
             except Exception:
+                logger.debug("suppressed exception in list_tasks", exc_info=True)
                 start_idx = 0
 
         page = tasks[start_idx : start_idx + limit]
@@ -343,6 +344,7 @@ class RedisTaskStore:
             try:
                 start_idx = int(base64.b64decode(cursor).decode())
             except Exception:
+                logger.debug("suppressed exception in list_tasks", exc_info=True)
                 start_idx = 0
 
         task_ids: list[str]

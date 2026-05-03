@@ -148,8 +148,7 @@ def _build_vault_context(vs: Any, *, query: str | None = None) -> str:
 
     # 1. Always-inject files (full content, small and curated).
     always_files = [
-        m for m in vs.scan("user")
-        if m.frontmatter.get("always_inject") is True
+        m for m in vs.scan("user") if m.frontmatter.get("always_inject") is True
     ]
     for meta in always_files:
         if meta.body:
@@ -165,8 +164,25 @@ def _build_vault_context(vs: Any, *, query: str | None = None) -> str:
 
         if index_files:
             # Build query word set for relevance scoring.
-            stop = {"the", "a", "an", "and", "or", "of", "to", "in", "is",
-                    "for", "with", "this", "that", "are", "on", "at", "be"}
+            stop = {
+                "the",
+                "a",
+                "an",
+                "and",
+                "or",
+                "of",
+                "to",
+                "in",
+                "is",
+                "for",
+                "with",
+                "this",
+                "that",
+                "are",
+                "on",
+                "at",
+                "be",
+            }
             query_words: set[str] = set()
             if query:
                 query_words = {

@@ -263,6 +263,7 @@ async def exit_worktree(
             os.getcwd()
         ).is_relative_to(Path(worktree_path))
     except (OSError, ValueError):
+        logger.debug("suppressed exception in exit_worktree", exc_info=True)
         inside_worktree = True
 
     if inside_worktree:

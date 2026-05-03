@@ -4,6 +4,10 @@ import contextlib
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _msal: Any
 try:
@@ -11,6 +15,7 @@ try:
 
     _msal = msal
 except ImportError:
+    logger.debug("suppressed exception in <module>", exc_info=True)
     _msal = None
 
 if TYPE_CHECKING:

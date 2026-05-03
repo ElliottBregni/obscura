@@ -505,6 +505,7 @@ class ObscuraMCPServer:
         try:
             value = json.loads(value_str)
         except json.JSONDecodeError:
+            logger.debug("suppressed exception in _handle_set_memory", exc_info=True)
             value = value_str
 
         memory = MemoryStore.for_user(self.user)
@@ -576,6 +577,10 @@ class ObscuraMCPServer:
                     try:
                         key_str = str(key)
                     except TypeError:
+                        logger.debug(
+                            "suppressed exception in _handle_search_memory",
+                            exc_info=True,
+                        )
                         key_str = repr(key)
                 results.append({"key": key_str, "value": value})
 
@@ -627,6 +632,9 @@ class ObscuraMCPServer:
         try:
             backend_enum = Backend(backend_name)
         except ValueError:
+            logger.debug(
+                "suppressed exception in _handle_sessions_create", exc_info=True
+            )
             return {"error": f"Unknown backend: {backend_name}"}
 
         session_id = f"mcp-{uuid.uuid4().hex[:12]}"
@@ -696,6 +704,7 @@ class ObscuraMCPServer:
         try:
             return read_file(path, start_line=start_line, end_line=end_line)
         except ValueError as exc:
+            logger.debug("suppressed exception in _handle_files_read", exc_info=True)
             return {"error": str(exc)}
 
     async def _handle_files_search(
@@ -711,6 +720,7 @@ class ObscuraMCPServer:
         try:
             return search_files(query, glob_pattern, limit=limit)
         except ValueError as exc:
+            logger.debug("suppressed exception in _handle_files_search", exc_info=True)
             return {"error": str(exc)}
 
     # -----------------------------------------------------------------------
@@ -811,6 +821,7 @@ class ObscuraMCPServer:
         try:
             data = json.loads(data_str)
         except json.JSONDecodeError:
+            logger.debug("suppressed exception in _handle_memory_upsert", exc_info=True)
             data = data_str
 
         memory = MemoryStore.for_user(self.user)
@@ -1134,6 +1145,7 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
                 "result": result,
             }
         except MCPError as e:
+            logger.debug("suppressed exception in handle_rpc", exc_info=True)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,

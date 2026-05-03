@@ -197,7 +197,7 @@ class EvalMemory:
                 memory_type="eval_resolution",
             )
         except Exception:
-            pass
+            logger.debug("suppressed exception in record_tool_success", exc_info=True)
 
     def record_eval_result(
         self,
@@ -372,7 +372,9 @@ class EvalMemory:
                 if r.score < _RECALL_THRESHOLD:
                     continue
                 raw_meta: Any = r.metadata if hasattr(r, "metadata") else {}
-                meta: dict[str, Any] = cast(dict[str, Any], raw_meta) if isinstance(raw_meta, dict) else {}
+                meta: dict[str, Any] = (
+                    cast(dict[str, Any], raw_meta) if isinstance(raw_meta, dict) else {}
+                )
                 # Freshness check
                 if not self._is_fresh(meta):
                     continue
@@ -412,7 +414,9 @@ class EvalMemory:
                 if r.score < _RECALL_THRESHOLD:
                     continue
                 raw_meta: Any = r.metadata if hasattr(r, "metadata") else {}
-                meta: dict[str, Any] = cast(dict[str, Any], raw_meta) if isinstance(raw_meta, dict) else {}
+                meta: dict[str, Any] = (
+                    cast(dict[str, Any], raw_meta) if isinstance(raw_meta, dict) else {}
+                )
                 if not self._is_fresh(meta):
                     continue
                 r_tool = str(meta.get("tool_name", ""))

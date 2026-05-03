@@ -154,7 +154,7 @@ class _SQLiteBase:
                 )
                 con.commit()
             except Exception:
-                pass  # column already exists — ignore
+                logger.debug("suppressed exception in _ensure_schema", exc_info=True)
             con.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_messaging_channel_configs_platform
@@ -897,15 +897,15 @@ class ChannelConfigStore(_SQLiteBase):
         try:
             credentials = json.loads(row["credentials_json"])
         except Exception:
-            pass
+            logger.debug("suppressed exception in _row_to_record", exc_info=True)
         try:
             router_config = json.loads(row["router_config_json"])
         except Exception:
-            pass
+            logger.debug("suppressed exception in _row_to_record", exc_info=True)
         try:
             contacts = json.loads(row["contacts_json"])
         except Exception:
-            pass
+            logger.debug("suppressed exception in _row_to_record", exc_info=True)
         return ChannelConfigRecord(
             id=str(row["id"]),
             platform=str(row["platform"]),

@@ -122,6 +122,7 @@ class PluginRegistryService:
                 return cast(list[dict[str, Any]], data)
             return []
         except Exception:
+            logger.debug("suppressed exception in _read", exc_info=True)
             return []
 
     def _write(self, entries: list[dict[str, Any]]) -> None:
@@ -228,6 +229,9 @@ class PluginRegistryService:
                         "entry": entry,
                     }
                 except Exception as exc:
+                    logger.debug(
+                        "suppressed exception in install_from_source", exc_info=True
+                    )
                     return {"ok": False, "message": f"Manifest install failed: {exc}"}
             else:
                 # Legacy: copy as local plugin (no manifest)
@@ -242,6 +246,9 @@ class PluginRegistryService:
                         shutil.copy2(p, dest)
                     return {"ok": True, "message": f"Copied local plugin to {dest}"}
                 except Exception as exc:
+                    logger.debug(
+                        "suppressed exception in install_from_source", exc_info=True
+                    )
                     return {"ok": False, "message": f"Local install failed: {exc}"}
 
         # Git URL
@@ -276,6 +283,9 @@ class PluginRegistryService:
                     }
                 return {"ok": True, "message": f"Cloned to {dest} (no manifest found)"}
             except Exception as exc:
+                logger.debug(
+                    "suppressed exception in install_from_source", exc_info=True
+                )
                 return {"ok": False, "message": f"Git install failed: {exc}"}
 
         # Pip package
@@ -316,6 +326,7 @@ class PluginRegistryService:
                 "entry": entry,
             }
         except Exception as exc:
+            logger.debug("suppressed exception in install_from_source", exc_info=True)
             return {"ok": False, "message": f"pip install failed: {exc}"}
 
     def uninstall(self, plugin_id: str) -> bool:

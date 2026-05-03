@@ -342,6 +342,7 @@ class A2AService:
             await self._store.transition(task.id, TaskState.COMPLETED)
 
         except asyncio.CancelledError:
+            logger.debug("suppressed exception in _run_agent_blocking", exc_info=True)
             with contextlib.suppress(Exception):
                 await self._store.transition(task.id, TaskState.CANCELED)
         except Exception as e:

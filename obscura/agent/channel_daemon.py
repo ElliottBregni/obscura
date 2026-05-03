@@ -94,7 +94,7 @@ class ChannelDaemon:
             try:
                 loop.add_signal_handler(sig, _stop)
             except (NotImplementedError, RuntimeError):
-                pass  # Windows / non-main thread
+                logger.debug("suppressed exception in run", exc_info=True)
 
         logger.info(
             "ChannelDaemon: polling %d adapters every %.1fs",

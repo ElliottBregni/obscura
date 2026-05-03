@@ -10,6 +10,9 @@ import re
 import subprocess
 import tomllib
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RepoAccess:
@@ -94,6 +97,7 @@ class RepoAccess:
             try:
                 lines = (self.root / file_path).read_text().splitlines()
             except OSError:
+                logger.debug("suppressed exception in search", exc_info=True)
                 continue
             for lineno, line in enumerate(lines, 1):
                 if pattern.search(line):
@@ -218,11 +222,13 @@ class RepoAccess:
         try:
             result["pull"] = self._run("git", "pull", "--rebase").strip()
         except RuntimeError as exc:
+            logger.debug("suppressed exception in sync", exc_info=True)
             result["pull_error"] = str(exc)
 
         try:
             result["push"] = self._run("git", "push").strip()
         except RuntimeError as exc:
+            logger.debug("suppressed exception in sync", exc_info=True)
             result["push_error"] = str(exc)
 
         return result
@@ -316,9 +322,7 @@ class RepoAccess:
             text=True,
         )
         if result.returncode != 0:
-            raise RuntimeError(
-                f"`{' '.join(args)}` failed:\n{result.stderr.strip()}"
-            )
+            raise RuntimeError(f"`{' '.join(args)}` failed:\n{result.stderr.strip()}")
         return result.stdout
 
 

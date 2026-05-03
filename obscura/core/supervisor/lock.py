@@ -99,6 +99,7 @@ class SessionLock:
                     conn.execute("BEGIN IMMEDIATE")
                 except Exception:
                     # Another writer is active
+                    logger.debug("suppressed exception in _acquire_sync", exc_info=True)
                     self._backend.put_conn(conn)
                     return None
 

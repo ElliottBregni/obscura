@@ -68,6 +68,7 @@ def _load_plugin_config_flag(key: str, default: bool = True) -> bool:
             section = cast(dict[str, Any], section).get(part, {})
         return section if isinstance(section, bool) else default
     except Exception:
+        logger.debug("suppressed exception in _load_plugin_config_flag", exc_info=True)
         return default
 
 
@@ -88,6 +89,7 @@ def _load_plugin_config_list(key: str) -> frozenset[str]:
             return frozenset(str(v) for v in items)
         return frozenset()
     except Exception:
+        logger.debug("suppressed exception in _load_plugin_config_list", exc_info=True)
         return frozenset()
 
 
@@ -460,7 +462,7 @@ class PluginLoader:
                 self._specs.append(spec)
                 return status
         except Exception:
-            pass  # runtime adapter not available — continue normally
+            logger.debug("suppressed exception in _load_spec", exc_info=True)
 
         # 4b. Register tools directly on broker
         #     MCP/service/docker/grpc plugins serve tools externally — skip.
@@ -659,6 +661,7 @@ class PluginLoader:
                 if not broker._specs.get(tool.name):
                     if tool.parameters:
                         broker._schemas[tool.name] = tool.parameters
+
                     def _placeholder_handler(**_kw: Any) -> None:
                         return None
 

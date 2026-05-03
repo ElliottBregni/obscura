@@ -26,6 +26,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 from obscura.core.pg_config import is_pg_configured
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -301,6 +305,7 @@ class MemoryStore:
             try:
                 value: Any = json.loads(row["value"])
             except json.JSONDecodeError:
+                logger.debug("suppressed exception in search", exc_info=True)
                 value = row["value"]
             results.append((key, value))
 

@@ -28,6 +28,10 @@ from typing import Any, Protocol, cast, runtime_checkable
 
 from obscura.core.session_utils import list_active_sessions
 from obscura.core.types import AgentEvent, AgentEventKind
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Session status machine
@@ -232,7 +236,7 @@ def _row_to_session(row: sqlite3.Row) -> SessionRecord:
             if isinstance(parsed, dict):
                 meta = cast(dict[str, Any], parsed)
         except (json.JSONDecodeError, TypeError):
-            pass
+            logger.debug("suppressed exception in _row_to_session", exc_info=True)
     return SessionRecord(
         id=row["id"],
         status=SessionStatus(row["status"]),
@@ -319,7 +323,7 @@ class SQLiteEventStore:
                     f"ALTER TABLE sessions ADD COLUMN {col_name} {col_def}",
                 )
             except sqlite3.OperationalError:
-                pass  # column already exists
+                logger.debug("suppressed exception in _init_schema", exc_info=True)
 
         # Add indexes for new columns
         for idx_sql in [

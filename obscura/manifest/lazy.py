@@ -112,7 +112,6 @@ class LazyManifestProxy:
         self._resolved_instructions.invalidate()
         self._system_prompt.invalidate()
 
-
     @property
     def resolution_state(self) -> dict[str, bool]:
         """Return a snapshot of which lazy fields are currently resolved."""
@@ -124,7 +123,6 @@ class LazyManifestProxy:
             "skills": self._resolved_skills.is_resolved,
             "instructions": self._resolved_instructions.is_resolved,
         }
-
 
     # ----- Factory methods -----
 

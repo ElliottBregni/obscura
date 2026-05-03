@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any, Self, cast
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -49,7 +52,9 @@ class BackendRoutingPolicy:
         },
     )
     fallback_order: tuple[str, ...] = ("claude", "copilot", "openai", "localllm")
-    fallback_routes: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    fallback_routes: dict[str, tuple[str, ...]] = field(
+        default_factory=dict[str, tuple[str, ...]]
+    )
 
     def select_model(self, task_type: str) -> str:
         normalized = task_type.strip().lower()
@@ -363,6 +368,7 @@ class OpenClawBridge:
                         raise
                     break
                 except httpx.RequestError as exc:
+                    logger.debug("suppressed exception in run_workflow", exc_info=True)
                     if attempt < self._config.workflow_max_retries:
                         current_attempt.retry_reason = type(exc).__name__
                         await self._sleep_backoff(attempt)

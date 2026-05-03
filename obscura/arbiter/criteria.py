@@ -35,6 +35,9 @@ from obscura.arbiter.checks import (  # noqa: PLC2701
     _STOP_WORDS,  # pyright: ignore[reportPrivateUsage]
     _stem,  # pyright: ignore[reportPrivateUsage]
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -80,8 +83,6 @@ _FILE_EXISTS_PATTERNS = re.compile(
     r"(?:file|path|module|script)\s+[`'\"]?([^\s`'\"]+)[`'\"]?\s+(?:exists?|created?|present)",
     re.IGNORECASE,
 )
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +225,7 @@ def _verify_lint_clean(
                 method="lint",
             )
         except Exception:
-            pass  # ruff not available or timeout — fall through.
+            logger.debug("suppressed exception in _verify_lint_clean", exc_info=True)
 
     return None
 
@@ -305,9 +306,7 @@ def _verify_no_errors(
         )
 
     lower = output_text.lower()
-    error_signals = re.findall(
-        r"\b(error|exception|traceback|failed|failure)\b", lower
-    )
+    error_signals = re.findall(r"\b(error|exception|traceback|failed|failure)\b", lower)
     if len(error_signals) > 2:  # noqa: PLR2004
         return CriterionResult(
             criterion=criterion,
@@ -419,6 +418,7 @@ def verify_criterion(
             )
         except TypeError:
             # Verifier doesn't accept all kwargs — call with subset.
+            logger.debug("suppressed exception in verify_criterion", exc_info=True)
             import inspect
 
             sig = inspect.signature(verifier)
@@ -483,7 +483,9 @@ def verify_criteria(
                 f"Only {satisfied}/{len(results)} acceptance criteria appear met"
             )
         for r in unsatisfied:
-            issues.append(f"Criterion unmet [{r.method}]: '{r.criterion[:80]}' — {r.reason}")
+            issues.append(
+                f"Criterion unmet [{r.method}]: '{r.criterion[:80]}' — {r.reason}"
+            )
 
     return score, issues, results
 

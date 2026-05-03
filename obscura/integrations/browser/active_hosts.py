@@ -58,11 +58,14 @@ def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
+        log.debug("suppressed exception in _alive", exc_info=True)
         return False
     except PermissionError:
         # Process exists but we can't signal it — still alive from our POV.
+        log.debug("suppressed exception in _alive", exc_info=True)
         return True
     except OSError:
+        log.debug("suppressed exception in _alive", exc_info=True)
         return False
     return True
 
@@ -78,6 +81,7 @@ def _read(path: Path) -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text())
     except FileNotFoundError:
+        log.debug("suppressed exception in _read", exc_info=True)
         return {"hosts": []}
     except (OSError, json.JSONDecodeError):
         log.warning("registry %s is corrupt; starting fresh", path)
@@ -100,6 +104,7 @@ def _pid_of(h: HostEntry) -> int:
     try:
         return int(pid)
     except (TypeError, ValueError):
+        log.debug("suppressed exception in _pid_of", exc_info=True)
         return -1
 
 
@@ -121,9 +126,7 @@ def register(
     """Add or refresh this host's entry. Idempotent on (pid)."""
     p = path or default_registry_path()
     kept: list[HostEntry] = [
-        h
-        for h in _hosts_of(_read(p))
-        if _pid_of(h) != pid and _alive(_pid_of(h))
+        h for h in _hosts_of(_read(p)) if _pid_of(h) != pid and _alive(_pid_of(h))
     ]
     kept.append(
         {
@@ -143,9 +146,7 @@ def unregister(*, pid: int, path: Path | None = None) -> None:
     p = path or default_registry_path()
     with contextlib.suppress(FileNotFoundError):
         kept = [
-            h
-            for h in _hosts_of(_read(p))
-            if _pid_of(h) != pid and _alive(_pid_of(h))
+            h for h in _hosts_of(_read(p)) if _pid_of(h) != pid and _alive(_pid_of(h))
         ]
         _atomic_write(p, {"hosts": kept})
 

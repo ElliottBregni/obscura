@@ -149,6 +149,7 @@ async def build_channel_router(
     try:
         _backend_enum = Backend(_backend_name)
     except ValueError:
+        logger.debug("suppressed exception in build_channel_router", exc_info=True)
         _backend_enum = Backend("claude")
 
     client = ObscuraClient(backend=_backend_enum)

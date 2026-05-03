@@ -46,9 +46,13 @@ class AdapterRegistry:
                 cls: type[SyncAdapter] = ep.load()
                 instance = cls()
                 self._adapters[instance.name] = cls
-                log.info("loaded adapter via entry point", name=instance.name, ep=ep.name)
+                log.info(
+                    "loaded adapter via entry point", name=instance.name, ep=ep.name
+                )
             except Exception as exc:
-                log.warning("failed to load adapter entry point", ep=ep.name, error=str(exc))
+                log.warning(
+                    "failed to load adapter entry point", ep=ep.name, error=str(exc)
+                )
 
     def get_adapter(self, name: str) -> SyncAdapter:
         cls = self._adapters.get(name)

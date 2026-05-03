@@ -36,6 +36,9 @@ from __future__ import annotations
 import json
 import time
 from typing import Any, override
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ToolResult:
@@ -144,7 +147,7 @@ class ToolResult:
                 elif isinstance(body, dict | list):
                     r._payload["json"] = body
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.debug("suppressed exception in from_http", exc_info=True)
 
         return r
 

@@ -141,9 +141,7 @@ class ToolPrediction:
 
 # Patterns: model text → likely tool call.
 # Each entry: (compiled_regex, tool_name, arg_extractor_fn)
-_PatternEntry = tuple[
-    re.Pattern[str], str, Callable[[re.Match[str]], dict[str, Any]]
-]
+_PatternEntry = tuple[re.Pattern[str], str, Callable[[re.Match[str]], dict[str, Any]]]
 _PREDICTION_PATTERNS: list[_PatternEntry] = []
 
 
@@ -271,6 +269,7 @@ class ToolPredictor:
                 try:
                     args = arg_fn(m)
                 except (IndexError, AttributeError):
+                    logger.debug("suppressed exception in predict", exc_info=True)
                     continue
 
                 key = _cache_key(tool_name, args)

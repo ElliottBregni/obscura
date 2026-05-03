@@ -20,7 +20,11 @@ def score_sync_report(report: dict[str, Any]) -> dict[str, Any]:
         score = max(0.0, 1.0 - (total / 100.0))
 
     decision = "accept" if score >= 0.8 else "review"
-    return {"score": score, "decision": decision, "counts": {"added": added, "modified": modified, "removed": removed}}
+    return {
+        "score": score,
+        "decision": decision,
+        "counts": {"added": added, "modified": modified, "removed": removed},
+    }
 
 
 def auto_accept(report: dict[str, Any], threshold: float = 0.8) -> bool:

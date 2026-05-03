@@ -8,6 +8,9 @@ from typing import Any
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.vector_memory import VectorMemoryStore
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_json(value: dict[str, Any]) -> str:
@@ -15,6 +18,7 @@ def _safe_json(value: dict[str, Any]) -> str:
     try:
         return json.dumps(value, sort_keys=True)
     except Exception:
+        logger.debug("suppressed exception in _safe_json", exc_info=True)
         return "{}"
 
 

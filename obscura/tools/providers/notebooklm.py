@@ -133,6 +133,7 @@ async def _handler_create_notebook(**kwargs: Any) -> dict[str, Any]:
             return {"error": "Failed to create notebook"}
         return {"notebook_id": nb.id, "title": nb.title}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_create_notebook", exc_info=True)
         return {"error": str(e)}
 
 
@@ -145,6 +146,7 @@ async def _handler_list_notebooks(**kwargs: Any) -> dict[str, Any]:
             "count": len(notebooks),
         }
     except Exception as e:
+        logger.debug("suppressed exception in _handler_list_notebooks", exc_info=True)
         return {"error": str(e)}
 
 
@@ -159,6 +161,7 @@ async def _handler_get_notebook(**kwargs: Any) -> dict[str, Any]:
             return {"error": f"Notebook {notebook_id} not found"}
         return _coerce_dict(result)
     except Exception as e:
+        logger.debug("suppressed exception in _handler_get_notebook", exc_info=True)
         return {"error": str(e)}
 
 
@@ -171,6 +174,7 @@ async def _handler_delete_notebook(**kwargs: Any) -> dict[str, Any]:
         ok = client.delete_notebook(notebook_id)
         return {"deleted": ok, "notebook_id": notebook_id}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_delete_notebook", exc_info=True)
         return {"error": str(e)}
 
 
@@ -198,6 +202,7 @@ async def _handler_add_source(**kwargs: Any) -> dict[str, Any]:
             return {"error": "Failed to add source"}
         return _coerce_dict(result)
     except Exception as e:
+        logger.debug("suppressed exception in _handler_add_source", exc_info=True)
         return {"error": str(e)}
 
 
@@ -210,6 +215,7 @@ async def _handler_list_sources(**kwargs: Any) -> dict[str, Any]:
         sources = client.get_notebook_sources_with_types(notebook_id)
         return {"sources": sources, "count": len(sources)}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_list_sources", exc_info=True)
         return {"error": str(e)}
 
 
@@ -222,6 +228,7 @@ async def _handler_get_source(**kwargs: Any) -> dict[str, Any]:
         result = client.get_source_fulltext(source_id)
         return _coerce_dict(result)
     except Exception as e:
+        logger.debug("suppressed exception in _handler_get_source", exc_info=True)
         return {"error": str(e)}
 
 
@@ -234,6 +241,7 @@ async def _handler_delete_source(**kwargs: Any) -> dict[str, Any]:
         ok = client.delete_source(source_id)
         return {"deleted": ok, "source_id": source_id}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_delete_source", exc_info=True)
         return {"error": str(e)}
 
 
@@ -261,6 +269,7 @@ async def _handler_create_note(**kwargs: Any) -> dict[str, Any]:
             return {"error": "Failed to create note"}
         return _coerce_dict(result)
     except Exception as e:
+        logger.debug("suppressed exception in _handler_create_note", exc_info=True)
         return {"error": str(e)}
 
 
@@ -273,6 +282,7 @@ async def _handler_list_notes(**kwargs: Any) -> dict[str, Any]:
         summary = client.get_notebook_summary(notebook_id)
         return _coerce_dict(summary)
     except Exception as e:
+        logger.debug("suppressed exception in _handler_list_notes", exc_info=True)
         return {"error": str(e)}
 
 
@@ -287,6 +297,7 @@ async def _handler_get_note(**kwargs: Any) -> dict[str, Any]:
             return {"error": f"Conversation {conversation_id} not found"}
         return {"messages": history, "count": len(history)}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_get_note", exc_info=True)
         return {"error": str(e)}
 
 
@@ -299,6 +310,7 @@ async def _handler_delete_note(**kwargs: Any) -> dict[str, Any]:
         ok = client.delete_conversation(conversation_id)
         return {"deleted": ok, "conversation_id": conversation_id}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_delete_note", exc_info=True)
         return {"error": str(e)}
 
 
@@ -316,6 +328,9 @@ async def _handler_generate_audio_overview(**kwargs: Any) -> dict[str, Any]:
         result = client.generate_audio_overview(notebook_id)
         return _coerce_dict(result)
     except Exception as e:
+        logger.debug(
+            "suppressed exception in _handler_generate_audio_overview", exc_info=True
+        )
         return {"error": str(e)}
 
 
@@ -328,4 +343,7 @@ async def _handler_get_audio_overview(**kwargs: Any) -> dict[str, Any]:
         result = client.get_audio_overview(notebook_id)
         return _coerce_dict(result)
     except Exception as e:
+        logger.debug(
+            "suppressed exception in _handler_get_audio_overview", exc_info=True
+        )
         return {"error": str(e)}

@@ -262,13 +262,17 @@ class ObscuraConfig(BaseModel):
                 "http://127.0.0.1:4317",
             ),
             otel_service_name=_str(
-                "OTEL_SERVICE_NAME", "otel_service_name", "obscura-sdk",
+                "OTEL_SERVICE_NAME",
+                "otel_service_name",
+                "obscura-sdk",
             ),
             log_level=_str("OBSCURA_LOG_LEVEL", "log_level", "INFO"),
             log_format=_str("OBSCURA_LOG_FORMAT", "log_format", "json"),
             # Backends
             default_backend=_str(
-                "OBSCURA_DEFAULT_BACKEND", "default_backend", "copilot",
+                "OBSCURA_DEFAULT_BACKEND",
+                "default_backend",
+                "copilot",
             ),
             # Capability system — secret stays env-only (never in settings.json)
             capability_secret=os.environ.get("OBSCURA_CAPABILITY_SECRET", ""),
@@ -276,11 +280,15 @@ class ObscuraConfig(BaseModel):
             # Rate limiting
             rate_limit_rpm=_int("OBSCURA_RATE_LIMIT_RPM", "rate_limit_rpm", 100),
             rate_limit_concurrent=_int(
-                "OBSCURA_RATE_LIMIT_CONCURRENT", "rate_limit_concurrent", 10,
+                "OBSCURA_RATE_LIMIT_CONCURRENT",
+                "rate_limit_concurrent",
+                10,
             ),
             # Circuit breaker
             circuit_breaker_threshold=_int(
-                "OBSCURA_CIRCUIT_BREAKER_THRESHOLD", "circuit_breaker_threshold", 5,
+                "OBSCURA_CIRCUIT_BREAKER_THRESHOLD",
+                "circuit_breaker_threshold",
+                5,
             ),
             circuit_breaker_recovery=_float(
                 "OBSCURA_CIRCUIT_BREAKER_RECOVERY",
@@ -290,44 +298,66 @@ class ObscuraConfig(BaseModel):
             # Retry
             max_retries=_int("OBSCURA_MAX_RETRIES", "max_retries", 2),
             retry_initial_backoff=_float(
-                "OBSCURA_RETRY_INITIAL_BACKOFF", "retry_initial_backoff", 0.5,
+                "OBSCURA_RETRY_INITIAL_BACKOFF",
+                "retry_initial_backoff",
+                0.5,
             ),
             # Cache
             cache_enabled=_bool_optin(
-                "OBSCURA_CACHE_ENABLED", "cache_enabled", default=False,
+                "OBSCURA_CACHE_ENABLED",
+                "cache_enabled",
+                default=False,
             ),
             cache_max_entries=_int(
-                "OBSCURA_CACHE_MAX_ENTRIES", "cache_max_entries", 1000,
+                "OBSCURA_CACHE_MAX_ENTRIES",
+                "cache_max_entries",
+                1000,
             ),
             cache_default_ttl=_float(
-                "OBSCURA_CACHE_DEFAULT_TTL", "cache_default_ttl", 300.0,
+                "OBSCURA_CACHE_DEFAULT_TTL",
+                "cache_default_ttl",
+                300.0,
             ),
             # A2A
             a2a_enabled=_bool_optin(
-                "OBSCURA_A2A_ENABLED", "a2a_enabled", default=False,
+                "OBSCURA_A2A_ENABLED",
+                "a2a_enabled",
+                default=False,
             ),
             a2a_redis_url=_str("OBSCURA_A2A_REDIS_URL", "a2a_redis_url", ""),
             a2a_task_ttl=_int("OBSCURA_A2A_TASK_TTL", "a2a_task_ttl", 86400),
             a2a_grpc_port=_int("OBSCURA_A2A_GRPC_PORT", "a2a_grpc_port", 50051),
             a2a_agent_name=_str(
-                "OBSCURA_A2A_AGENT_NAME", "a2a_agent_name", "Obscura Agent",
+                "OBSCURA_A2A_AGENT_NAME",
+                "a2a_agent_name",
+                "Obscura Agent",
             ),
             a2a_agent_description=_str(
-                "OBSCURA_A2A_AGENT_DESCRIPTION", "a2a_agent_description", "",
+                "OBSCURA_A2A_AGENT_DESCRIPTION",
+                "a2a_agent_description",
+                "",
             ),
             # Kairos (opt-out)
             kairos_enabled=_bool_optout(
-                "OBSCURA_KAIROS", "kairos_enabled", default=True,
+                "OBSCURA_KAIROS",
+                "kairos_enabled",
+                default=True,
             ),
             kairos_proactive=_bool_optout(
-                "OBSCURA_KAIROS_PROACTIVE", "kairos_proactive", default=True,
+                "OBSCURA_KAIROS_PROACTIVE",
+                "kairos_proactive",
+                default=True,
             ),
             kairos_dream=_bool_optout(
-                "OBSCURA_KAIROS_DREAM", "kairos_dream", default=True,
+                "OBSCURA_KAIROS_DREAM",
+                "kairos_dream",
+                default=True,
             ),
             # Undercover (opt-out)
             undercover_enabled=_bool_optout(
-                "OBSCURA_UNDERCOVER", "undercover_enabled", default=True,
+                "OBSCURA_UNDERCOVER",
+                "undercover_enabled",
+                default=True,
             ),
             # Deployment safety (opt-in)
             allow_unauthenticated=_bool_optin(

@@ -210,6 +210,7 @@ class MemoryConsolidator:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
+            _log.debug("suppressed exception in _call_llm", exc_info=True)
             has_loop = False
 
         if has_loop:

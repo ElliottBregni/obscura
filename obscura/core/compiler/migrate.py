@@ -63,6 +63,7 @@ def migrate_agents_yaml(
     try:
         raw = load_config(agents_yaml, warn_yaml=False)
     except Exception as exc:
+        logger.debug("suppressed exception in migrate_agents_yaml", exc_info=True)
         result.errors.append(f"Failed to parse {agents_yaml}: {exc}")
         return result
 
@@ -104,6 +105,7 @@ def migrate_agents_yaml(
             dest.write_text(template_toml, encoding="utf-8")
             result.templates_written.append(name)
         except Exception as exc:
+            logger.debug("suppressed exception in migrate_agents_yaml", exc_info=True)
             result.errors.append(f"{name}: {exc}")
 
     return result

@@ -103,7 +103,9 @@ class Supervisor:
         else:
             self._backend = create_supervisor_backend()
         self._config = config or SupervisorConfig()
-        self._lock = SessionLock(backend=self._backend, default_ttl=self._config.lock_ttl)
+        self._lock = SessionLock(
+            backend=self._backend, default_ttl=self._config.lock_ttl
+        )
         self._tool_store = ToolSnapshotStore(backend=self._backend)
 
     def _sql(self, sql: str) -> str:
@@ -564,7 +566,9 @@ class Supervisor:
                                         SupervisorState.RUNNING_TOOLS
                                     )
                                 except Exception:
-                                    pass
+                                    logger.debug(
+                                        "suppressed exception in run", exc_info=True
+                                    )
                         elif event_kind == _AEK.TURN_START:
                             # Transition back to RUNNING_MODEL on new turns
                             if sm.state == SupervisorState.RUNNING_TOOLS:
@@ -575,7 +579,9 @@ class Supervisor:
                                         SupervisorState.RUNNING_MODEL
                                     )
                                 except Exception:
-                                    pass
+                                    logger.debug(
+                                        "suppressed exception in run", exc_info=True
+                                    )
 
                         # Wrap agent event as supervisor event
                         sv_event = SupervisorEvent(
@@ -608,7 +614,7 @@ class Supervisor:
                     t_evt = sm.transition(SupervisorState.RUNNING_MODEL)
                     yield t_evt
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in run", exc_info=True)
 
             # Fire post-model hooks
             await hooks.fire_after(

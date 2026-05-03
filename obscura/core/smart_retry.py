@@ -153,7 +153,7 @@ async def with_smart_retry[T](
                     error=str(exc)[:200],
                 )
             except Exception:
-                pass
+                logger.debug("suppressed exception in with_smart_retry", exc_info=True)
 
             await asyncio.sleep(wait)
 

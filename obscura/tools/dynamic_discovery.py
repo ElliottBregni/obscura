@@ -89,6 +89,7 @@ class DynamicToolDiscovery:
         try:
             all_capabilities = self.discover_popular(limit=50)
         except Exception:
+            logger.debug("suppressed exception in discover_by_category", exc_info=True)
             all_capabilities = []
 
         # Simple keyword matching for categories

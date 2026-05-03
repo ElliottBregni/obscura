@@ -38,6 +38,9 @@ from obscura.integrations.mcp.config_loader import (
 )
 from obscura.manifest.models import AgentManifest
 
+logger = logging.getLogger(__name__)
+
+
 if TYPE_CHECKING:
     from obscura.cli.commands import REPLContext
 
@@ -51,7 +54,7 @@ def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:  # pyright: ignor
                 s.name for s in discovered
             ]
     except Exception:
-        pass
+        logger.debug("suppressed exception in _discover_mcp", exc_info=True)
     return [], []
 
 
@@ -84,6 +87,7 @@ def _discover_agent_infos() -> list[AgentInfo]:
             for name, cfg in agents.items()
         ]
     except Exception:
+        logger.debug("suppressed exception in _discover_agent_infos", exc_info=True)
         return []
 
 
@@ -171,15 +175,16 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
                     "delegate_allowlist": list(cast(list[Any], raw_delegate))
                     if isinstance(raw_delegate, list)
                     else [],
-                    "max_delegation_depth": int(
-                        cfg.get("max_delegation_depth", 3)
-                    ),
+                    "max_delegation_depth": int(cfg.get("max_delegation_depth", 3)),
                     "tool_allowlist": list(cast(list[Any], raw_tool_allow))
                     if isinstance(raw_tool_allow, list)
                     else None,
                 }
             )
     except Exception as exc:
+        logger.debug(
+            "suppressed exception in _run_inline_agent_from_mention", exc_info=True
+        )
         print_warning(f"Failed loading @{agent_name} manifest: {exc}")
     if manifest is None:
         print_warning(
@@ -197,9 +202,15 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
             if getattr(event, "text", None):
                 output_chunks.append(event.text)
     except KeyboardInterrupt:
+        logger.debug(
+            "suppressed exception in _run_inline_agent_from_mention", exc_info=True
+        )
         renderer.finish()
         console.print("[dim][interrupted][/]")
     except Exception as exc:
+        logger.debug(
+            "suppressed exception in _run_inline_agent_from_mention", exc_info=True
+        )
         renderer.finish()
         print_error(f"Inline @{agent_name} failed: {exc}")
     else:

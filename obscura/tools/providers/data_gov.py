@@ -6,6 +6,10 @@ import re
 from typing import Any, cast
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 CKAN_BASE = "https://catalog.data.gov/api/3/action/package_search"
 HTML_SEARCH = "https://catalog.data.gov/dataset"
@@ -21,11 +25,12 @@ async def search_datasets(
     try:
         return await _ckan_search(q, rows, start)
     except Exception:
-        pass
+        logger.debug("suppressed exception in search_datasets", exc_info=True)
 
     try:
         return await _html_fallback(q, rows, start)
     except Exception as exc:
+        logger.debug("suppressed exception in search_datasets", exc_info=True)
         return {"error": str(exc)}
 
 
@@ -49,9 +54,9 @@ async def _ckan_search(q: str, rows: int, start: int) -> dict[str, Any]:
             "title": ds.get("title"),
             "notes": (ds.get("notes") or "")[:300],
             "url": ds.get("url"),
-            "organization": cast(
-                dict[str, Any], ds.get("organization") or {}
-            ).get("title"),
+            "organization": cast(dict[str, Any], ds.get("organization") or {}).get(
+                "title"
+            ),
             "formats": sorted(
                 {
                     r.get("format", "").upper()

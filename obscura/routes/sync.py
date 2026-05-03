@@ -14,6 +14,10 @@ from obscura.deps import audit, record_sync_metric
 from obscura.schemas import SyncRequest, SyncResponse
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["sync"])
 
@@ -56,10 +60,12 @@ async def trigger_sync(
         record_sync_metric(status)
         return SyncResponse(success=success, message=message or "sync completed")
     except subprocess.TimeoutExpired:
+        logger.debug("suppressed exception in trigger_sync", exc_info=True)
         audit("sync.trigger", user, "sync:vault", "execute", "error", reason="timeout")
         record_sync_metric("error")
         return SyncResponse(success=False, message="sync timed out after 120s")
     except Exception as exc:
+        logger.debug("suppressed exception in trigger_sync", exc_info=True)
         audit("sync.trigger", user, "sync:vault", "execute", "error", reason=str(exc))
         record_sync_metric("error")
         return SyncResponse(success=False, message=str(exc))

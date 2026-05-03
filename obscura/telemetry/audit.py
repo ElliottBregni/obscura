@@ -30,6 +30,10 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Audit event dataclass
@@ -142,7 +146,7 @@ def _emit_to_otel(record: dict[str, Any]) -> None:
                 },
             )
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _emit_to_otel", exc_info=True)
 
 
 def _emit_to_structlog(event: AuditEvent) -> None:
@@ -161,7 +165,7 @@ def _emit_to_structlog(event: AuditEvent) -> None:
             trace_id=event.trace_id,
         )
     except Exception:
-        pass
+        logger.debug("suppressed exception in _emit_to_structlog", exc_info=True)
 
 
 def _current_trace_id() -> str:
@@ -173,5 +177,5 @@ def _current_trace_id() -> str:
         if ctx and getattr(ctx, "trace_id", 0):
             return format(ctx.trace_id, "032x")
     except (ImportError, AttributeError):
-        pass
+        logger.debug("suppressed exception in _current_trace_id", exc_info=True)
     return ""

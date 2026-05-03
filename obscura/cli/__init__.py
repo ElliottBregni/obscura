@@ -223,6 +223,7 @@ def main(
                 f"{len(compiled_ws.policies)} policies)",
             )
         except Exception as exc:
+            _log.debug("suppressed exception in main", exc_info=True)
             click.echo(f"Failed to load workspace '{workspace_name}': {exc}", err=True)
 
     _ensure_cli_auth_for_startup(backend, prompt)
@@ -242,7 +243,7 @@ def main(
             if row:
                 resolved_session = row[0]
         except Exception:
-            pass
+            _log.debug("suppressed exception in main", exc_info=True)
 
     try:
         asyncio.run(
@@ -261,7 +262,7 @@ def main(
             ),
         )
     except KeyboardInterrupt:
-        pass  # graceful exit on Ctrl-C
+        _log.debug("suppressed exception in main", exc_info=True)
 
 
 @main.command()
@@ -292,10 +293,12 @@ def init(force: bool, no_bootstrap: bool) -> None:
         ws = init_workspace(force=force)
         click.echo(f"Workspace initialised at {ws}")
     except WorkspaceExistsError:
+        _log.debug("suppressed exception in init", exc_info=True)
         click.echo(".obscura/ already exists. Use --force to reinitialise.")
         if no_bootstrap:
             return
     except Exception as exc:
+        _log.debug("suppressed exception in init", exc_info=True)
         click.echo(f"Init failed: {exc}", err=True)
         return
 
@@ -320,6 +323,7 @@ def init(force: bool, no_bootstrap: bool) -> None:
                     + ", ".join(e.split(":")[0] for e in summary["errors"]),
                 )
         except Exception as exc:
+            _log.debug("suppressed exception in init", exc_info=True)
             click.echo(f"Bootstrap failed: {exc}", err=True)
 
 
@@ -366,6 +370,7 @@ def workspace_inspect(name: str) -> None:
     try:
         ws = compile_workspace_from_dir(name, specs_dir, strict=False)
     except CompileError as exc:
+        _log.debug("suppressed exception in workspace_inspect", exc_info=True)
         click.echo(f"Compile error: {exc}", err=True)
         return
 
@@ -407,6 +412,7 @@ def workspace_load(name: str) -> None:
     try:
         ws = compile_workspace(name, strict=False)
     except CompileError as exc:
+        _log.debug("suppressed exception in workspace_load", exc_info=True)
         click.echo(f"Compile error: {exc}", err=True)
         return
 
@@ -477,6 +483,7 @@ def template_inspect(name: str) -> None:
         chain = resolve_template_chain(tmpl, registry)
         merged = merge_template_chain(chain)
     except CompileError as exc:
+        _log.debug("suppressed exception in template_inspect", exc_info=True)
         click.echo(f"Resolution error: {exc}", err=True)
         return
 

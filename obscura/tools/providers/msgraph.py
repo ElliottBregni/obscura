@@ -150,8 +150,12 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                 try:
                     return resp.json()
                 except Exception:
+                    logger.debug(
+                        "suppressed exception in MSGraphProvider", exc_info=True
+                    )
                     return {"status": resp.status_code, "body": resp.text}
 
             return {"error": f"Unknown tool: {tool_name}"}
         except Exception as e:
+            logger.debug("suppressed exception in MSGraphProvider", exc_info=True)
             return {"error": str(e)}

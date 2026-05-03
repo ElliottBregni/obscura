@@ -20,6 +20,9 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
+logger = logging.getLogger(__name__)
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -41,6 +44,7 @@ def configure_logging(config: ObscuraConfig) -> None:
         import structlog
     except ImportError:
         # structlog not installed — fall back to stdlib logging
+        logger.debug("suppressed exception in configure_logging", exc_info=True)
         logging.basicConfig(
             level=getattr(logging, config.log_level.upper(), logging.INFO),
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -90,6 +94,7 @@ def get_logger(name: str) -> Any:
 
         return structlog.get_logger(name)
     except ImportError:
+        logger.debug("suppressed exception in get_logger", exc_info=True)
         return logging.getLogger(name)
 
 
@@ -107,7 +112,7 @@ def _add_otel_context(
             event_dict["trace_id"] = format(ctx.trace_id, "032x")
             event_dict["span_id"] = format(ctx.span_id, "016x")
     except (ImportError, AttributeError):
-        pass
+        logger.debug("suppressed exception in _add_otel_context", exc_info=True)
 
     return event_dict
 

@@ -48,6 +48,10 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # How long (seconds) before a claimed-but-unheartbeated task is reclaimed.
 _CLAIM_TIMEOUT = 120.0
@@ -114,7 +118,7 @@ def _add_col(conn: sqlite3.Connection, col: str, definition: str) -> None:
         conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {definition}")
         conn.commit()
     except sqlite3.OperationalError:
-        pass  # Column already exists — fine.
+        logger.debug("suppressed exception in _add_col", exc_info=True)
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -124,6 +128,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
             try:
                 d[key] = json.loads(d[key])
             except Exception:
+                logger.debug("suppressed exception in _row_to_dict", exc_info=True)
                 d[key] = {} if key == "metadata" else []
     return d
 

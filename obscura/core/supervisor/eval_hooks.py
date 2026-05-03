@@ -43,7 +43,7 @@ def _snapshot_dirty_files() -> set[str]:
         )
         files.update(f for f in r.stdout.strip().splitlines() if f)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _snapshot_dirty_files", exc_info=True)
     try:
         u = subprocess.run(
             ["git", "ls-files", "--others", "--exclude-standard"],
@@ -53,7 +53,7 @@ def _snapshot_dirty_files() -> set[str]:
         )
         files.update(f for f in u.stdout.strip().splitlines() if f)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _snapshot_dirty_files", exc_info=True)
     return files
 
 
@@ -73,6 +73,7 @@ def _revert_files(new_files: set[str]) -> list[str]:
                 os.remove(f)
             reverted.append(f)
         except Exception:
+            logger.debug("suppressed exception in _revert_files", exc_info=True)
             continue
     return reverted
 
@@ -99,7 +100,7 @@ def _check_python_files(files: set[str]) -> dict[str, str]:
                     errors.setdefault(path, "")
                     errors[path] += line + "\n"
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        logger.debug("suppressed exception in _check_python_files", exc_info=True)
     return errors
 
 
@@ -206,6 +207,9 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
             source = open(f, encoding="utf-8").read()
             _ast.parse(source, filename=f)
         except SyntaxError as exc:
+            logger.debug(
+                "suppressed exception in session_eval_gate_handler", exc_info=True
+            )
             syntax_errors.append(f"{f}:{exc.lineno}: {exc.msg}")
     if syntax_errors:
         issues.append(f"{len(syntax_errors)} Python syntax error(s)")
@@ -223,6 +227,9 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
                 with open(f) as fh:
                     yaml.safe_load(fh)
             except Exception as exc:
+                logger.debug(
+                    "suppressed exception in session_eval_gate_handler", exc_info=True
+                )
                 config_errors.append(f"{f}: invalid YAML ({exc})")
         elif f.endswith(".toml"):
             try:
@@ -231,6 +238,9 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
                 with open(f, "rb") as fh:
                     tomllib.load(fh)
             except Exception as exc:
+                logger.debug(
+                    "suppressed exception in session_eval_gate_handler", exc_info=True
+                )
                 config_errors.append(f"{f}: invalid TOML ({exc})")
         elif f.endswith(".json"):
             try:
@@ -239,6 +249,9 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
                 with open(f) as fh:
                     _json.load(fh)
             except Exception as exc:
+                logger.debug(
+                    "suppressed exception in session_eval_gate_handler", exc_info=True
+                )
                 config_errors.append(f"{f}: invalid JSON ({exc})")
     if config_errors:
         issues.append(f"{len(config_errors)} config parse error(s)")
@@ -286,7 +299,9 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
                 tool_errors=tool_errors,
             )
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in session_eval_gate_handler", exc_info=True
+            )
 
         return False
 
@@ -327,7 +342,7 @@ def _try_persist_result(
 
         asyncio.create_task(store.save_run(summary))
     except Exception:
-        pass
+        logger.debug("suppressed exception in _try_persist_result", exc_info=True)
 
 
 def make_session_eval_gate() -> tuple[SupervisorHookPoint, str, Any]:

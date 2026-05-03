@@ -124,8 +124,7 @@ class Process:
     @staticmethod
     @tool(
         "list_unix_capabilities",
-        "Describe enabled Unix/system automation capabilities and active "
-        "guardrails.",
+        "Describe enabled Unix/system automation capabilities and active guardrails.",
         {"type": "object", "properties": {}},
     )
     async def list_unix_capabilities() -> str:

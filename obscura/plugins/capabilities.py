@@ -39,6 +39,7 @@ def list_builtin_capabilities() -> list[str]:
         list: list[CapabilitySpec] = CapabilityIndex().list_all()
         return [cap.id for cap in list]
     except Exception:
+        logger.debug("suppressed exception in list_builtin_capabilities", exc_info=True)
         return [
             "shell.exec",
             "file.read",

@@ -56,7 +56,7 @@ class CommitAttributionTracker:
                 for path, entry in data.items():
                     self._files[path] = FileAttribution(**entry)
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.debug("suppressed exception in _load", exc_info=True)
 
     def save(self) -> None:
         """Persist attribution data to disk."""

@@ -175,10 +175,7 @@ class PostgreSQLVectorBackend:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                sql = (
-                    "SELECT * FROM vector_memory.entries "
-                    "WHERE user_id = %s"
-                )
+                sql = "SELECT * FROM vector_memory.entries WHERE user_id = %s"
                 params: list[Any] = [self._user_id]
 
                 if namespace:

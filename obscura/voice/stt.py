@@ -124,7 +124,9 @@ class STTClient:
                             elif msg_type == "TranscriptEndpoint":
                                 break
             except TimeoutError:
-                pass
+                logger.debug(
+                    "suppressed exception in _transcribe_websocket", exc_info=True
+                )
 
         return " ".join(transcript_parts).strip()
 

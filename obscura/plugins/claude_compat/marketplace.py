@@ -40,6 +40,7 @@ def _as_str_list(value: Any) -> list[str]:
         return []
     return [v for v in cast(list[Any], value) if isinstance(v, str)]
 
+
 _MARKETPLACES_DIR = Path.home() / ".obscura" / "plugins" / "claude_marketplaces"
 _CACHE_DIR = Path.home() / ".obscura" / "plugins" / "claude_cache"
 _KNOWN_MARKETPLACES_FILE = _MARKETPLACES_DIR / "known_marketplaces.json"
@@ -394,9 +395,7 @@ class MarketplaceResolver:
         if not _KNOWN_MARKETPLACES_FILE.exists():
             return {}
         try:
-            data_raw = json.loads(
-                _KNOWN_MARKETPLACES_FILE.read_text(encoding="utf-8")
-            )
+            data_raw = json.loads(_KNOWN_MARKETPLACES_FILE.read_text(encoding="utf-8"))
             if not isinstance(data_raw, dict):
                 return {}
             data: dict[str, Any] = cast(dict[str, Any], data_raw)
@@ -420,6 +419,7 @@ class MarketplaceResolver:
                 )
             return result
         except Exception:
+            logger.debug("suppressed exception in _load_known", exc_info=True)
             return {}
 
     def _save_known(self) -> None:

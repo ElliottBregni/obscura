@@ -82,6 +82,7 @@ def _sanitize_text(s: str) -> str:
         # C0 controls (keep TAB \x09, LF \x0A, CR \x0D)
         return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", cleaned)
     except Exception:
+        logger.debug("suppressed exception in _sanitize_text", exc_info=True)
         return s
 
 
@@ -98,7 +99,7 @@ def _detect_language(text: str) -> str | None:
             json.loads(stripped)
             return "json"
         except (json.JSONDecodeError, ValueError):
-            pass
+            logger.debug("suppressed exception in _detect_language", exc_info=True)
     # TOML
     if re.match(r"^\[[\w.]+\]", stripped, re.MULTILINE):
         return "toml"
@@ -138,7 +139,7 @@ def _render_structured(text: str) -> Syntax | None:  # pyright: ignore[reportUnu
                 padding=(0, 1),
             )
         except Exception:
-            pass
+            logger.debug("suppressed exception in _render_structured", exc_info=True)
     return None
 
 
@@ -174,6 +175,9 @@ class OutputManager:
             file_path.write_text("", encoding="utf-8")
             self._session_log_path = file_path
         except Exception:
+            logger.debug(
+                "suppressed exception in configure_session_log_path", exc_info=True
+            )
             self._session_log_path = None
 
     def capture_hidden_delta(self, kind: str, text: str, *, status: str = "") -> None:
@@ -185,20 +189,20 @@ class OutputManager:
             with open(self._session_log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         except Exception:
-            pass
+            logger.debug("suppressed exception in capture_hidden_delta", exc_info=True)
         # Mirror to internal buffer depending on log level (medium suppresses noisy deltas)
         try:
             if getattr(self, "log_level", None) != "medium":
                 self._buffer.append(f"{kind} {text}")
         except Exception:
-            pass
+            logger.debug("suppressed exception in capture_hidden_delta", exc_info=True)
 
     def set_log_level(self, level: str) -> None:
         """Set the internal log level used to decide what to mirror to buffer."""
         try:
             self.log_level = level
         except Exception:
-            pass
+            logger.debug("suppressed exception in set_log_level", exc_info=True)
 
     def capture_internal(self, message: str) -> None:
         if not self.verbose:
@@ -206,27 +210,31 @@ class OutputManager:
         try:
             self._buffer.append(message)
         except Exception:
-            pass
+            logger.debug("suppressed exception in capture_internal", exc_info=True)
 
         try:
             cleaned = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", message)
         except Exception:
+            logger.debug("suppressed exception in capture_internal", exc_info=True)
             cleaned = message
 
         if self.env == "cli":
             try:
                 Console().print(Text.from_ansi(cleaned))
             except Exception:
+                logger.debug("suppressed exception in capture_internal", exc_info=True)
                 try:
                     Console().print(f"[dim][internal][/]{markup_escape(cleaned)}")
                 except Exception:
-                    pass
+                    logger.debug(
+                        "suppressed exception in capture_internal", exc_info=True
+                    )
         else:
             try:
                 if self._buffer:
                     self._buffer[-1] = cleaned
             except Exception:
-                pass
+                logger.debug("suppressed exception in capture_internal", exc_info=True)
 
     def get_buffer(self) -> list[str]:
         return list(self._buffer)
@@ -246,9 +254,7 @@ if config.CAPTURE_PRINTS:
     def _capturing_print(*args: Any, **kwargs: Any) -> None:
         _orig_print(*args, **kwargs)
         with contextlib.suppress(Exception):
-            output.capture_internal(
-                " ".join(str(cast(object, a)) for a in args)
-            )
+            output.capture_internal(" ".join(str(cast(object, a)) for a in args))
 
     builtins.print = _capturing_print
 
@@ -259,6 +265,10 @@ if config.CAPTURE_PRINTS:
 # longer overwrites the prompt while the agent is streaming.
 import os as _os
 import sys as _sys
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _real_stdout_fd = _os.dup(_sys.stdout.fileno())  # keep for fileno() queries
 
@@ -283,7 +293,9 @@ class _DynamicStdout:
         return True
 
 
-console = Console(file=cast(IO[str], _DynamicStdout()), force_terminal=True, legacy_windows=False)
+console = Console(
+    file=cast(IO[str], _DynamicStdout()), force_terminal=True, legacy_windows=False
+)
 
 # Active renderer for expand-preview hotkey (set by send_message)
 _active_renderer: Any = None
@@ -300,6 +312,7 @@ def get_active_text() -> str:
             return ""
         return _active_renderer.get_accumulated_text()
     except Exception:
+        logger.debug("suppressed exception in get_active_text", exc_info=True)
         return ""
 
 
@@ -361,7 +374,7 @@ class StreamRenderer:
                         status=str(status) if status else "",
                     )
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in handle", exc_info=True)
                 self._update_thinking_preview(getattr(event, "raw", None))
 
             case AgentEventKind.TEXT_DELTA:
@@ -417,12 +430,15 @@ class StreamRenderer:
                 self._ss.preview = ""  # type: ignore[attr-defined]
         except Exception:
             # best-effort
+            logger.debug("suppressed exception in _start_thinking", exc_info=True)
             try:
                 self._ss.active = True  # type: ignore[attr-defined]
             except Exception:
-                pass
+                logger.debug("suppressed exception in _start_thinking", exc_info=True)
 
-    def _update_thinking_preview(self, raw_status: dict[str, Any] | None = None) -> None:
+    def _update_thinking_preview(
+        self, raw_status: dict[str, Any] | None = None
+    ) -> None:
         """Update toolbar preview, but respect jitter so updates are rate-limited."""
         if self._ss is None:
             return
@@ -442,20 +458,32 @@ class StreamRenderer:
                     self._ss.update(payload)
                 except Exception:
                     # fallback to attribute assignment
+                    logger.debug(
+                        "suppressed exception in _update_thinking_preview",
+                        exc_info=True,
+                    )
                     try:
                         self._ss.preview = preview
                     except Exception:
-                        pass
+                        logger.debug(
+                            "suppressed exception in _update_thinking_preview",
+                            exc_info=True,
+                        )
             else:
                 try:
                     self._ss.preview = preview
                     if raw_status and "status" in raw_status:
                         self._ss.text = raw_status.get("status")
                 except Exception:
-                    pass
+                    logger.debug(
+                        "suppressed exception in _update_thinking_preview",
+                        exc_info=True,
+                    )
             self._last_preview_update = now
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in _update_thinking_preview", exc_info=True
+            )
 
     def _stop_status(self) -> None:
         if self._ss is None:
@@ -466,6 +494,7 @@ class StreamRenderer:
                     self._ss.update({"active": False, "text": "", "preview": ""})
                 except Exception:
                     # fallback to attribute assignment
+                    logger.debug("suppressed exception in _stop_status", exc_info=True)
                     self._ss.active = False  # type: ignore[attr-defined]
                     self._ss.text = ""  # type: ignore[attr-defined]
                     self._ss.preview = ""  # type: ignore[attr-defined]
@@ -474,7 +503,7 @@ class StreamRenderer:
                 self._ss.text = ""  # type: ignore[attr-defined]
                 self._ss.preview = ""  # type: ignore[attr-defined]
         except Exception:
-            pass
+            logger.debug("suppressed exception in _stop_status", exc_info=True)
 
     # -- flush helpers -------------------------------------------------------
 
@@ -564,6 +593,9 @@ class StreamRenderer:
                     prev_empty = False
             return "\n\n".join(cleaned_parts).strip()
         except Exception:
+            logger.debug(
+                "suppressed exception in _normalize_reasoning_text", exc_info=True
+            )
             return raw.strip()
 
     def get_thinking_blocks(self) -> list[str]:
@@ -613,7 +645,7 @@ class StreamRenderer:
                     self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]
                     self._ss.preview = ""  # type: ignore[attr-defined]
             except Exception:
-                pass
+                logger.debug("suppressed exception in _show_tool_call", exc_info=True)
 
     def _show_tool_result(self, event: AgentEvent) -> None:
         raw = event.tool_result or ""
@@ -647,6 +679,7 @@ class StreamRenderer:
             parts.extend(self._thinking_buf)
             return "".join(parts)
         except Exception:
+            logger.debug("suppressed exception in get_accumulated_text", exc_info=True)
             return ""
 
 
@@ -813,6 +846,9 @@ def render_diff_summary(changes: list[Any]) -> None:
                     Syntax(unified, "diff", theme=CODE_THEME, line_numbers=True),
                 )
             except Exception:
+                logger.debug(
+                    "suppressed exception in render_diff_summary", exc_info=True
+                )
                 console.print(unified)
 
         # Hunk status indicators.
@@ -992,7 +1028,7 @@ def _obscura_ascii_banner() -> None:
             return
 
     except Exception:
-        pass  # fall through to default if feature_flags import fails
+        logger.debug("suppressed exception in _obscura_ascii_banner", exc_info=True)
 
     # OBSCURA_DEFAULT — original oscillating purple/blue wave
     letters = {

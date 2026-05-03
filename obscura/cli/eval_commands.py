@@ -29,6 +29,10 @@ from obscura.providers.localllm import LocalLLMBackend
 from obscura.providers.moonshot import MoonshotBackend
 from obscura.providers.openai import OpenAIBackend
 from obscura.tools.system import get_system_tool_specs
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.types import BackendProtocol
@@ -305,5 +309,5 @@ def _resolve_tool_registry() -> "ToolRegistry":
         for spec in get_system_tool_specs():
             registry.register(spec)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _resolve_tool_registry", exc_info=True)
     return registry

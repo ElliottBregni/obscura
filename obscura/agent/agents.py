@@ -442,7 +442,7 @@ class Agent:
 
             plugin_loader = PluginLoader()
         except Exception:
-            pass
+            logger.debug("suppressed exception in start", exc_info=True)
 
         # Build capability resolver from discovered specs (before client creation
         # so skill gating is active when the system prompt is assembled)
@@ -522,7 +522,7 @@ class Agent:
             )
             _perm_engine = PermissionModeEngine(mode)
         except Exception:
-            pass
+            logger.debug("suppressed exception in start", exc_info=True)
 
         broker = ToolBroker(
             policy_engine=policy_engine,
@@ -662,7 +662,7 @@ class Agent:
                 else:
                     plugin_loader.load_all_enabled(broker)
             except Exception:
-                pass
+                logger.debug("suppressed exception in start", exc_info=True)
 
         # A2A remote tools
         a2a_remote_config = self.config.a2a_remote_tools
@@ -1161,7 +1161,9 @@ class Agent:
                         "type": mem.memory_type,
                     }
             except Exception:
-                pass  # Fall through to KV search
+                logger.debug(
+                    "suppressed exception in _load_relevant_memory", exc_info=True
+                )
 
         # Also pull recent tasks from KV store
         tasks_ns = f"{self.config.memory_namespace}:tasks"
@@ -1281,6 +1283,7 @@ class Agent:
                 message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
                 yield message
             except TimeoutError:
+                logger.debug("suppressed exception in receive_messages", exc_info=True)
                 if self.status in (
                     AgentStatus.COMPLETED,
                     AgentStatus.FAILED,
@@ -1407,6 +1410,7 @@ class Agent:
             await asyncio.wait_for(self.stop(), timeout=timeout)
         except TimeoutError:
             # Force stop
+            logger.debug("suppressed exception in stop_graceful", exc_info=True)
             if self._task and not self._task.done():
                 self._task.cancel()
             self.status = AgentStatus.STOPPED
@@ -1989,6 +1993,7 @@ class AgentRuntime:
                         )
 
             except asyncio.CancelledError:
+                logger.debug("suppressed exception in _message_bus_loop", exc_info=True)
                 break
             except Exception:
                 logger.exception("Error in message bus loop")
@@ -2038,5 +2043,6 @@ async def _stream_with_timeout(
         try:
             item = await asyncio.wait_for(iterator.__anext__(), timeout=timeout_seconds)
         except StopAsyncIteration:
+            logger.debug("suppressed exception in _stream_with_timeout", exc_info=True)
             break
         yield item

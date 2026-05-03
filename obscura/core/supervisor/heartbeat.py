@@ -171,6 +171,7 @@ class SessionHeartbeatManager:
             try:
                 await asyncio.sleep(self._interval)
             except asyncio.CancelledError:
+                logger.debug("suppressed exception in _loop", exc_info=True)
                 break
 
     async def _tick(self) -> None:
@@ -297,7 +298,9 @@ def get_heartbeats_for_run(
                 if isinstance(parsed, dict):
                     meta = cast(dict[str, Any], parsed)
             except (json.JSONDecodeError, TypeError):
-                pass
+                logger.debug(
+                    "suppressed exception in get_heartbeats_for_run", exc_info=True
+                )
         result.append(
             SessionHeartbeat(
                 session_id=row["session_id"],

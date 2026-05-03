@@ -99,6 +99,9 @@ def find_processes_for_command(
         try:
             pid = int(pid_str)
         except ValueError:
+            logger.debug(
+                "suppressed exception in find_processes_for_command", exc_info=True
+            )
             continue
         if pid == own_pid:
             continue
@@ -135,6 +138,7 @@ def _read_pid_ppid_map() -> dict[int, int]:
             pid = int(parts[0])
             ppid = int(parts[1])
         except ValueError:
+            logger.debug("suppressed exception in _read_pid_ppid_map", exc_info=True)
             continue
         out[pid] = ppid
     return out
@@ -216,8 +220,10 @@ def cleanup_orphans(
             sent_term.append(pid)
         except ProcessLookupError:
             # Already gone — count as success.
+            logger.debug("suppressed exception in cleanup_orphans", exc_info=True)
             sent_term.append(pid)
         except PermissionError:
+            logger.debug("suppressed exception in cleanup_orphans", exc_info=True)
             failed.append(pid)
         except OSError as exc:
             logger.debug("SIGTERM to %d failed: %s", pid, exc)
@@ -235,8 +241,10 @@ def cleanup_orphans(
             os.kill(pid, signal.SIGKILL)
             killed.append(pid)
         except ProcessLookupError:
+            logger.debug("suppressed exception in cleanup_orphans", exc_info=True)
             killed.append(pid)
         except OSError:
+            logger.debug("suppressed exception in cleanup_orphans", exc_info=True)
             failed.append(pid)
 
     return CleanupResult(killed=tuple(killed), failed=tuple(failed))
@@ -247,10 +255,13 @@ def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
+        logger.debug("suppressed exception in _pid_alive", exc_info=True)
         return False
     except PermissionError:
         # Process exists but we don't own it.
+        logger.debug("suppressed exception in _pid_alive", exc_info=True)
         return True
     except OSError:
+        logger.debug("suppressed exception in _pid_alive", exc_info=True)
         return False
     return True

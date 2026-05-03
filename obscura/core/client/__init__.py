@@ -159,7 +159,7 @@ class ObscuraClient:
                             additional=system_prompt,
                         )
             except Exception:
-                pass  # Degrade gracefully if capability module not available
+                _logger.debug("suppressed exception in __init__", exc_info=True)
 
         # Inject project context (OBSCURA.md + instructions + skills).
         # On by default so skills work uniformly across all backends.
@@ -182,7 +182,7 @@ class ObscuraClient:
                         else claude_ctx
                     )
             except Exception:
-                pass
+                _logger.debug("suppressed exception in __init__", exc_info=True)
 
         # -- Reliability infrastructure ------------------------------------------
         # Circuit breaker (per-backend, shared via registry if passed in)
@@ -494,6 +494,7 @@ class ObscuraClient:
         # so the loop's confirmation gate is never reached).
         loop_confirm = on_confirm
         if on_confirm and isinstance(self._backend, ConfirmationCapable):
+
             def _wrap_confirm(name: str, inp: dict[str, Any]) -> bool:
                 return on_confirm(ToolCallInfo(name=name, input=inp))  # type: ignore[arg-type]
 
@@ -757,7 +758,7 @@ class ObscuraClient:
                     ctx = "\n".join(lines)
                     return f"[Relevant context from memory]\n{ctx}\n\n{prompt}"
         except Exception:
-            pass
+            _logger.debug("suppressed exception in _enrich_prompt", exc_info=True)
         return prompt
 
     def _filter_prompt(self, prompt: str) -> str:
@@ -906,6 +907,7 @@ def _get_client_tracer() -> NoOpTracer:
 
         return get_tracer("obscura.client")
     except Exception:
+        _logger.debug("suppressed exception in _get_client_tracer", exc_info=True)
         return NoOpTracer()
 
 
@@ -914,7 +916,7 @@ def _set_span_attr(span: NoOpSpan, key: str, value: Any) -> None:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _set_span_attr", exc_info=True)
 
 
 def _record_request_metric(backend: str, method: str, status: str) -> None:
@@ -927,7 +929,7 @@ def _record_request_metric(backend: str, method: str, status: str) -> None:
             {"backend": backend, "method": method, "status": status},
         )
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _record_request_metric", exc_info=True)
 
 
 def _record_request_duration(backend: str, method: str, duration: float) -> None:
@@ -940,7 +942,7 @@ def _record_request_duration(backend: str, method: str, duration: float) -> None
             {"backend": backend, "method": method},
         )
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _record_request_duration", exc_info=True)
 
 
 def _record_stream_chunk(backend: str, chunk_kind: str) -> None:
@@ -950,7 +952,7 @@ def _record_stream_chunk(backend: str, chunk_kind: str) -> None:
         m = get_metrics()
         m.stream_chunks_total.add(1, {"backend": backend, "chunk_kind": chunk_kind})
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _record_stream_chunk", exc_info=True)
 
 
 def _record_cache_hit(backend: str) -> None:
@@ -959,7 +961,7 @@ def _record_cache_hit(backend: str) -> None:
 
         get_metrics().cache_hits.add(1, {"backend": backend})
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _record_cache_hit", exc_info=True)
 
 
 def _audit_prompt_filtered(token: Any, flags: tuple[str, ...] | list[str]) -> None:
@@ -983,4 +985,4 @@ def _audit_prompt_filtered(token: Any, flags: tuple[str, ...] | list[str]) -> No
             ),
         )
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _audit_prompt_filtered", exc_info=True)

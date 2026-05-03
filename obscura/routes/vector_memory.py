@@ -14,6 +14,10 @@ from obscura.vector_memory import MetadataFilter, VectorMemoryStore
 from obscura.vector_memory.vector_memory_router import MemoryRouter, MemoryTypeQuery
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["vector-memory"])
 
@@ -167,6 +171,7 @@ async def vector_memory_set(
             memory_type=memory_type,
         )
     except Exception:
+        logger.debug("suppressed exception in vector_memory_set", exc_info=True)
         audit(
             "vector_memory.set",
             user,

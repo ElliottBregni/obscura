@@ -14,6 +14,10 @@ from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_r
 from obscura.deps import audit, get_runtime
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
@@ -121,6 +125,7 @@ async def agent_group_broadcast(
             asyncio.create_task(agent.run(message, **context))
             results.append({"agent_id": agent_id, "status": "queued"})
         except Exception as e:
+            logger.debug("suppressed exception in agent_group_broadcast", exc_info=True)
             errors.append({"agent_id": agent_id, "error": str(e)})
 
     return JSONResponse(

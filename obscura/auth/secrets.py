@@ -210,6 +210,7 @@ def _load_dotenv_once() -> None:
     try:
         from dotenv import load_dotenv
     except ImportError:
+        logger.debug("suppressed exception in _load_dotenv_once", exc_info=True)
         return
 
     # 1. CWD -- standard dotenv behaviour.
@@ -235,6 +236,7 @@ def keyring_available() -> bool:
 
         backend = keyring.get_keyring()
     except Exception:
+        logger.debug("suppressed exception in keyring_available", exc_info=True)
         return False
     return type(backend).__name__ not in {"NullKeyring", "FailKeyring"}
 
@@ -429,6 +431,7 @@ def delete(name: str) -> bool:
     try:
         keyring.delete_password(_KEYRING_SERVICE, name)
     except keyring.errors.PasswordDeleteError:
+        logger.debug("suppressed exception in delete", exc_info=True)
         return False
     except keyring.errors.KeyringError as exc:
         logger.debug("Keyring delete for %s failed: %s", name, exc)

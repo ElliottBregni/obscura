@@ -13,6 +13,10 @@ import json
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.tools import tool
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -186,6 +190,7 @@ async def lsp_tool(
         )
 
     except Exception as exc:
+        logger.debug("suppressed exception in lsp_tool", exc_info=True)
         return json.dumps({"ok": False, "error": "lsp_error", "detail": str(exc)})
 
 

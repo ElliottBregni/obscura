@@ -83,9 +83,14 @@ def _retry(
         except Exception as exc:
             last_exc = exc
             if i < attempts - 1:
-                delay = base_delay * (2 ** i)
+                delay = base_delay * (2**i)
                 logger.debug(
-                    "Retry %d/%d for %s after %.1fs: %s", i + 1, attempts, label, delay, exc
+                    "Retry %d/%d for %s after %.1fs: %s",
+                    i + 1,
+                    attempts,
+                    label,
+                    delay,
+                    exc,
                 )
                 _time.sleep(delay)
     logger.warning("All %d attempts failed for %s: %s", attempts, label, last_exc)
@@ -249,7 +254,11 @@ class VaultSync:
                     )
                     # Project file shadows global file with the same relative path.
                     if rel in global_rels:
-                        metas = [m for m in metas if m.path.relative_to(self.vault_dir) != rel]
+                        metas = [
+                            m
+                            for m in metas
+                            if m.path.relative_to(self.vault_dir) != rel
+                        ]
                     metas.append(proj_meta)
 
         return metas
@@ -299,6 +308,7 @@ class VaultSync:
                     )
                 report.ingested += 1
             except Exception as exc:
+                logger.debug("suppressed exception in sync", exc_info=True)
                 report.errors.append(f"ingest {meta.path}: {exc}")
 
         # 2. Export Obscura state to agent/ zone.
@@ -307,6 +317,7 @@ class VaultSync:
                 exported = self._export_all()
                 report.exported = exported
             except Exception as exc:
+                logger.debug("suppressed exception in sync", exc_info=True)
                 report.errors.append(f"export: {exc}")
 
         # 3. Update hash state.
@@ -445,7 +456,9 @@ class VaultSync:
             logger.debug("[vault] Conflict archive written: %s", out_path.name)
         except Exception:
             logger.warning(
-                "[vault] Could not write conflict archive for %s", goal.id, exc_info=True
+                "[vault] Could not write conflict archive for %s",
+                goal.id,
+                exc_info=True,
             )
 
     def _ingest_task(self, meta: FileMeta) -> None:
@@ -792,6 +805,7 @@ class VaultSync:
                         break
                     h.update(chunk)
         except Exception:
+            logger.debug("suppressed exception in _compute_hash", exc_info=True)
             return ""
         return h.hexdigest()
 
@@ -801,6 +815,7 @@ class VaultSync:
         try:
             raw = path.read_text(encoding="utf-8")
         except Exception:
+            logger.debug("suppressed exception in _parse_frontmatter", exc_info=True)
             return {}, ""
         if not raw.startswith("---"):
             return {}, raw
@@ -813,6 +828,7 @@ class VaultSync:
             if isinstance(loaded, dict):
                 fm = cast(dict[str, Any], loaded)
         except Exception:
+            logger.debug("suppressed exception in _parse_frontmatter", exc_info=True)
             fm = {}
         return fm, parts[2].strip()
 
@@ -824,6 +840,7 @@ class VaultSync:
                     self._hash_file.read_text(encoding="utf-8")
                 )
             except Exception:
+                logger.debug("suppressed exception in _load_hashes", exc_info=True)
                 self._prev_hashes = {}
 
     def _save_hashes(self) -> None:
@@ -871,7 +888,7 @@ def notify_goal_changed(goal_id: str) -> None:
         # Quick re-export just the goal.
         vs._export_goals()  # pyright: ignore[reportPrivateUsage]
     except Exception:
-        pass
+        logger.debug("suppressed exception in notify_goal_changed", exc_info=True)
 
 
 def notify_profile_changed() -> None:
@@ -882,4 +899,4 @@ def notify_profile_changed() -> None:
             return
         vs._export_profile_summary()  # pyright: ignore[reportPrivateUsage]
     except Exception:
-        pass
+        logger.debug("suppressed exception in notify_profile_changed", exc_info=True)

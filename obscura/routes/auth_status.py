@@ -21,6 +21,10 @@ from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.types import Backend
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
@@ -37,6 +41,7 @@ def _provider_status(backend: Backend) -> dict[str, Any]:
             "reason": "",
         }
     except Exception as exc:
+        logger.debug("suppressed exception in _provider_status", exc_info=True)
         return {
             "ok": False,
             "backend": backend.value,

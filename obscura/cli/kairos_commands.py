@@ -32,6 +32,7 @@ from obscura.core.tools import ToolRegistry
 from obscura.core.types import Backend
 from obscura.providers import CopilotBackend
 
+
 def _get_db_path() -> str:
     return str(resolve_obscura_home() / "kairos.db")
 
@@ -49,10 +50,9 @@ def _get_kairos(agent_loop: AgentLoop | None = None) -> Kairos:
 
     # Read notification recipient from settings so interventions ping iMessage
     settings = _read_settings()
-    notification_recipient: str = (
-        settings.get("kairos", {}).get("notification_recipient", "")
-        or settings.get("notification_recipient", "")
-    )
+    notification_recipient: str = settings.get("kairos", {}).get(
+        "notification_recipient", ""
+    ) or settings.get("notification_recipient", "")
     kairos_config = KairosConfig(notification_recipient=notification_recipient)
 
     return Kairos(
@@ -347,6 +347,9 @@ def _print_goal(goal: Any, *, verbose: bool, kairos: Kairos) -> None:
 # --- Kairos CLI global settings helpers (enable/disable/status) ---
 
 from obscura.core.paths import resolve_obscura_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _read_settings() -> dict[str, Any]:
@@ -358,6 +361,7 @@ def _read_settings() -> dict[str, Any]:
             parsed: Any = _json.loads(p.read_text(encoding="utf-8"))
             return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
     except Exception:
+        logger.debug("suppressed exception in _read_settings", exc_info=True)
         return {}
     return {}
 
@@ -400,7 +404,9 @@ def kairos_enabled_status() -> None:
     cfg = _read_settings()
     nested = cfg.get("kairos", {})
     nested_enabled = (
-        cast(dict[str, Any], nested).get("enabled") if isinstance(nested, dict) else False
+        cast(dict[str, Any], nested).get("enabled")
+        if isinstance(nested, dict)
+        else False
     )
     enabled = bool(cfg.get("kairos_enabled") or nested_enabled)
     click.echo(f"Kairos enabled: {enabled}")

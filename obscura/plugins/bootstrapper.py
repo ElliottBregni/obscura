@@ -147,7 +147,7 @@ def _is_pip_installed(package: str) -> bool:
             )
             return result.returncode == 0
         except Exception:
-            pass
+            logger.debug("suppressed exception in _is_pip_installed", exc_info=True)
     # Fallback to pip
     try:
         result = subprocess.run(
@@ -158,6 +158,7 @@ def _is_pip_installed(package: str) -> bool:
         )
         return result.returncode == 0
     except Exception:
+        logger.debug("suppressed exception in _is_pip_installed", exc_info=True)
         return False
 
 
@@ -185,6 +186,7 @@ def _is_npm_installed(package: str) -> bool:
         )
         return result.returncode == 0
     except Exception:
+        logger.debug("suppressed exception in _is_npm_installed", exc_info=True)
         return False
 
 
@@ -215,7 +217,7 @@ def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
             # Don't fall through — uv gave a real answer
             return False, result.stderr.strip()
         except Exception:
-            pass  # fall through to pip
+            logger.debug("suppressed exception in _install_pip", exc_info=True)
     # Fallback to pip
     try:
         result = subprocess.run(
@@ -228,6 +230,7 @@ def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
             return True, ""
         return False, result.stderr.strip()
     except Exception as exc:
+        logger.debug("suppressed exception in _install_pip", exc_info=True)
         return False, str(exc)
 
 
@@ -249,6 +252,7 @@ def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
             return True, ""
         return False, result.stderr.strip()
     except Exception as exc:
+        logger.debug("suppressed exception in _install_uv", exc_info=True)
         return False, str(exc)
 
 
@@ -273,6 +277,7 @@ def _install_npm(dep: BootstrapDep) -> tuple[bool, str]:
             return True, ""
         return False, result.stderr.strip()
     except Exception as exc:
+        logger.debug("suppressed exception in _install_npm", exc_info=True)
         return False, str(exc)
 
 
@@ -292,6 +297,7 @@ def _install_cargo(dep: BootstrapDep) -> tuple[bool, str]:
             return True, ""
         return False, result.stderr.strip()
     except Exception as exc:
+        logger.debug("suppressed exception in _install_cargo", exc_info=True)
         return False, str(exc)
 
 
@@ -318,6 +324,7 @@ def _install_brew(dep: BootstrapDep) -> tuple[bool, str]:
             return True, ""
         return False, result.stderr.strip()
     except Exception as exc:
+        logger.debug("suppressed exception in _install_brew", exc_info=True)
         return False, str(exc)
 
 
@@ -339,6 +346,7 @@ def _install_pipx(dep: BootstrapDep) -> tuple[bool, str]:
             if "already" in result.stderr.lower():
                 return True, ""
         except Exception:
+            logger.debug("suppressed exception in _install_pipx", exc_info=True)
             continue
     # Final fallback: pip install into current env
     return _install_pip(dep)
@@ -385,7 +393,7 @@ def _bootstrap_dep(dep: BootstrapDep) -> tuple[str, bool, str]:
         if checker(dep.package):
             return "skipped", True, ""
     except Exception:
-        pass
+        logger.debug("suppressed exception in _bootstrap_dep", exc_info=True)
 
     # Install
     logger.info("Installing %s dependency: %s %s", dep.type, dep.package, dep.version)
@@ -442,6 +450,7 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
             if proc.returncode != 0:
                 result.warnings.append(f"post_install failed: {proc.stderr.strip()}")
         except Exception as exc:
+            logger.debug("suppressed exception in run_bootstrap", exc_info=True)
             result.warnings.append(f"post_install failed: {exc}")
 
     # Run check_command to verify
@@ -456,6 +465,7 @@ def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
             if proc.returncode != 0:
                 result.warnings.append(f"check_command failed: {proc.stderr.strip()}")
         except Exception as exc:
+            logger.debug("suppressed exception in run_bootstrap", exc_info=True)
             result.warnings.append(f"check_command failed: {exc}")
 
     return result

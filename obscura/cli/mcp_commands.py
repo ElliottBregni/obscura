@@ -20,6 +20,10 @@ from obscura.integrations.mcp.config_loader import (
     discover_mcp_servers,
     select_servers_for_task,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -63,6 +67,7 @@ def cmd_mcp_discover(args: list[str]) -> None:
             try:
                 limit = int(args[i + 1])
             except ValueError:
+                logger.debug("suppressed exception in cmd_mcp_discover", exc_info=True)
                 print_error(f"Invalid --limit value: {args[i + 1]}")
                 return
             i += 2
@@ -70,6 +75,7 @@ def cmd_mcp_discover(args: list[str]) -> None:
             try:
                 page = int(args[i + 1])
             except ValueError:
+                logger.debug("suppressed exception in cmd_mcp_discover", exc_info=True)
                 print_error(f"Invalid --page value: {args[i + 1]}")
                 return
             i += 2
@@ -137,6 +143,7 @@ def cmd_mcp_discover(args: list[str]) -> None:
         console.print(f"[dim]Registries: {registry_list}[/dim]\n")
 
     except Exception as e:
+        logger.debug("suppressed exception in cmd_mcp_discover", exc_info=True)
         print_error(f"Discovery failed: {e}")
         console.print("[dim]Try: /mcp discover --registry mcpservers.org[/dim]\n")
 
@@ -201,6 +208,7 @@ def cmd_mcp_list(args: list[str]) -> None:
             console.print("\n\u2705 [green]All servers ready to use![/green]\n")
 
     except Exception as e:
+        logger.debug("suppressed exception in cmd_mcp_list", exc_info=True)
         print_error(f"Failed to list servers: {e}")
 
 
@@ -264,6 +272,7 @@ def cmd_mcp_select(args: list[str]) -> None:
             console.print("   Using all available servers\n")
 
     except Exception as e:
+        logger.debug("suppressed exception in cmd_mcp_select", exc_info=True)
         print_error(f"Selection failed: {e}")
 
 
@@ -318,6 +327,7 @@ def cmd_mcp_env(args: list[str]) -> None:
             )
 
     except Exception as e:
+        logger.debug("suppressed exception in cmd_mcp_env", exc_info=True)
         print_error(f"Failed to check environment: {e}")
 
 
@@ -381,6 +391,7 @@ def cmd_mcp_install(args: list[str]) -> None:
         )
 
     except Exception as e:
+        logger.debug("suppressed exception in cmd_mcp_install", exc_info=True)
         print_error(f"Installation failed: {e}")
 
 

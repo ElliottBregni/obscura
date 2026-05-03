@@ -1,4 +1,5 @@
 """Routes: Kairos autonomous goal runtime."""
+
 from __future__ import annotations
 
 import uuid
@@ -18,6 +19,10 @@ from obscura.core.kairos import (
     GoalStore,
 )
 from obscura.core.paths import resolve_obscura_home
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["goals"])
 
@@ -25,6 +30,7 @@ router = APIRouter(prefix="/api/v1", tags=["goals"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_store() -> GoalStore:
     """Return a fresh GoalStore bound to the default kairos.db path."""
@@ -37,6 +43,7 @@ def _safe_get_goal(store: GoalStore, goal_id: str) -> Goal | None:
     try:
         return store.get_goal(goal_id)
     except GoalNotFoundError:
+        logger.debug("suppressed exception in _safe_get_goal", exc_info=True)
         return None
 
 
@@ -66,6 +73,7 @@ def _goal_to_dict(goal: Goal) -> dict[str, Any]:
 # Request models
 # ---------------------------------------------------------------------------
 
+
 class BudgetRequest(BaseModel):
     max_tasks: int = Field(0, ge=0, description="0 = unlimited")
     max_turns: int = Field(0, ge=0)
@@ -94,6 +102,7 @@ class CreateGoalRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/goals")
 async def list_goals(

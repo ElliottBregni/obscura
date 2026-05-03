@@ -48,7 +48,9 @@ class ConversationState:
             platform=str(data.get("platform", "")),
             account_id=str(data.get("account_id", "default")),
             channel_id=str(data.get("channel_id", "")),
-            participants=[str(p) for p in cast(list[Any], data.get("participants", []))],
+            participants=[
+                str(p) for p in cast(list[Any], data.get("participants", []))
+            ],
             history=history_items,
             last_activity_epoch_s=float(data.get("last_activity_epoch_s", 0.0) or 0.0),
         )

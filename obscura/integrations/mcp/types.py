@@ -229,7 +229,9 @@ class MCPConnectionConfig:
     args: list[str] = field(default_factory=list[str])  # For stdio transport
     url: str | None = None  # For SSE/WebSocket transport
     env: dict[str, str] = field(default_factory=dict[str, str])
-    headers: dict[str, str] = field(default_factory=dict[str, str])  # Outbound auth headers (HTTP/SSE)
+    headers: dict[str, str] = field(
+        default_factory=dict[str, str]
+    )  # Outbound auth headers (HTTP/SSE)
     timeout: float = 30.0
     name: str = ""  # Human-readable server name used as session/tool prefix
 
@@ -299,7 +301,9 @@ class ObscuraMCPConfig:
     """Configuration for Obscura MCP integration."""
 
     enabled: bool = True
-    servers: list[MCPConnectionConfig] = field(default_factory=list[MCPConnectionConfig])
+    servers: list[MCPConnectionConfig] = field(
+        default_factory=list[MCPConnectionConfig]
+    )
     expose_obscura_as_mcp: bool = True
     allow_external_mcp: bool = True
     tool_timeout: float = 60.0

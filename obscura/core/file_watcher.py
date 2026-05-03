@@ -135,6 +135,7 @@ class FileWatcher:
                             dirnames.clear()
                             continue
                     except ValueError:
+                        logger.debug("suppressed exception in _scan", exc_info=True)
                         continue
 
                     # Prune ignored directories in-place
@@ -153,8 +154,10 @@ class FileWatcher:
                                 size=st.st_size,
                             )
                         except (OSError, PermissionError):
+                            logger.debug("suppressed exception in _scan", exc_info=True)
                             continue
             except (OSError, PermissionError):
+                logger.debug("suppressed exception in _scan", exc_info=True)
                 continue
         return snapshot
 

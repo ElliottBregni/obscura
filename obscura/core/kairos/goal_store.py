@@ -48,6 +48,7 @@ def _dt(s: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(s)
     except ValueError:
+        logger.debug("suppressed exception in _dt", exc_info=True)
         return None
 
 

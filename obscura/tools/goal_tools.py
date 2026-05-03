@@ -43,7 +43,7 @@ def _notify_vault(goal_id: str) -> None:
 
         notify_goal_changed(goal_id)
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _notify_vault", exc_info=True)
 
 
 def _notify_arbiter(goal: Any) -> None:
@@ -64,7 +64,7 @@ def _notify_arbiter(goal: Any) -> None:
                     task_statuses.append(row["status"] if row else "unknown")
                 db.close()
             except Exception:
-                pass
+                _logger.debug("suppressed exception in _notify_arbiter", exc_info=True)
 
         try:
             loop = asyncio.get_running_loop()
@@ -73,11 +73,11 @@ def _notify_arbiter(goal: Any) -> None:
             )
         except RuntimeError:
             # No running loop — skip async fire.
-            pass
+            _logger.debug("suppressed exception in _notify_arbiter", exc_info=True)
     except ImportError:
-        pass
+        _logger.debug("suppressed exception in _notify_arbiter", exc_info=True)
     except Exception:
-        pass
+        _logger.debug("suppressed exception in _notify_arbiter", exc_info=True)
 
 
 def _emit_goal_event(

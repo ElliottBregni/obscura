@@ -269,6 +269,7 @@ class ClaudeBackend(BackendToolHostMixin):
                 find_processes_for_command,
             )
         except ImportError:
+            logger.debug("suppressed exception in _snapshot_mcp_pids", exc_info=True)
             return set()
 
         pids: set[int] = set()
@@ -300,6 +301,9 @@ class ClaudeBackend(BackendToolHostMixin):
                 find_processes_for_command,
             )
         except ImportError:
+            logger.debug(
+                "suppressed exception in _reap_session_mcp_subprocesses", exc_info=True
+            )
             return
 
         own_subtree = build_descendant_set(os.getpid())
@@ -324,7 +328,9 @@ class ClaudeBackend(BackendToolHostMixin):
             cleanup_orphans(new_pids)
         except Exception:
             # Cleanup is best-effort — never raise out of stop().
-            pass
+            logger.debug(
+                "suppressed exception in _reap_session_mcp_subprocesses", exc_info=True
+            )
 
     # -- Send / Stream -------------------------------------------------------
 
@@ -550,7 +556,7 @@ class ClaudeBackend(BackendToolHostMixin):
                 return
             except TypeError:
                 # Older SDKs may not accept query kwargs.
-                pass
+                logger.debug("suppressed exception in _query", exc_info=True)
         await self._client.query(prompt)
 
     def _build_query_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -741,7 +747,7 @@ class ClaudeBackend(BackendToolHostMixin):
                 lines.append("")
                 lines.append(cap_section)
         except Exception:
-            pass
+            logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
         return "\n".join(lines)
 
     def _build_mcp_tools(self) -> dict[str, Any]:
@@ -824,6 +830,9 @@ class ClaudeBackend(BackendToolHostMixin):
                 result[claude_key] = matchers
             except ImportError:
                 # Fallback: pass raw callbacks
+                logger.debug(
+                    "suppressed exception in _build_hooks_config", exc_info=True
+                )
                 result[claude_key] = callbacks
 
         return result or None
@@ -890,12 +899,16 @@ class ClaudeBackend(BackendToolHostMixin):
 # ---------------------------------------------------------------------------
 
 from obscura.telemetry.traces import NoOpTracer, get_tracer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_backend_tracer() -> Any:
     try:
         return get_tracer("obscura.claude_backend")
     except Exception:
+        logger.debug("suppressed exception in _get_backend_tracer", exc_info=True)
         return NoOpTracer()
 
 
@@ -904,4 +917,4 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _set_span_attr", exc_info=True)

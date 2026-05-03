@@ -146,6 +146,7 @@ async def run_workflow(
                 },
             )
         except Exception as exc:
+            logger.debug("suppressed exception in run_workflow", exc_info=True)
             results.append(
                 {
                     "step": step.name,

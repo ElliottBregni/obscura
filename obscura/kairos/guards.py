@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any, cast
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def pre_tool_use_guard(context: Mapping[str, Any]) -> tuple[bool, str]:
@@ -37,6 +40,7 @@ def pre_tool_use_guard(context: Mapping[str, Any]) -> tuple[bool, str]:
                     settings.get("kairos_enabled") or kairos_dict.get("enabled")
                 )
     except Exception:
+        logger.debug("suppressed exception in pre_tool_use_guard", exc_info=True)
         kairos_enabled = False
 
     # Background-originated calls are vetoed unless kairos_enabled is truthy

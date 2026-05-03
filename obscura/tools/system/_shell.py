@@ -12,6 +12,9 @@ from obscura.auth.secrets import safe_subprocess_env
 from obscura.core.background_tasks import get_background_task_manager
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Shell:
@@ -60,8 +63,7 @@ class Shell:
     @staticmethod
     @tool(
         "run_python3",
-        "Execute Python code using python3 -c and return "
-        "stdout/stderr/exit_code.",
+        "Execute Python code using python3 -c and return stdout/stderr/exit_code.",
         {
             "type": "object",
             "properties": {
@@ -116,6 +118,7 @@ class Shell:
                 timeout=timeout_seconds,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in run_python3", exc_info=True)
             proc.kill()
             await proc.wait()
             return Policy.json_error("timeout")
@@ -220,6 +223,7 @@ class Shell:
                 timeout=timeout_seconds,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in run_command", exc_info=True)
             proc.kill()
             await proc.wait()
             return Policy.json_error("timeout")

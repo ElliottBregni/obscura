@@ -81,7 +81,9 @@ def cleanup_stale_files(max_age_days: int = 30) -> dict[str, int]:
                     log_file.unlink()
                     counts["logs"] += 1
             except OSError:
-                pass
+                logger.debug(
+                    "suppressed exception in cleanup_stale_files", exc_info=True
+                )
 
     # Old output files
     output_dir = home / "output"
@@ -92,7 +94,9 @@ def cleanup_stale_files(max_age_days: int = 30) -> dict[str, int]:
                     f.unlink()
                     counts["output"] += 1
             except OSError:
-                pass
+                logger.debug(
+                    "suppressed exception in cleanup_stale_files", exc_info=True
+                )
 
     # Old exports
     exports_dir = home / "exports"
@@ -103,7 +107,9 @@ def cleanup_stale_files(max_age_days: int = 30) -> dict[str, int]:
                     f.unlink()
                     counts["exports"] += 1
             except OSError:
-                pass
+                logger.debug(
+                    "suppressed exception in cleanup_stale_files", exc_info=True
+                )
 
     # Worktree registry sweep — owners whose process is gone, and directories
     # not referenced by the registry at all.

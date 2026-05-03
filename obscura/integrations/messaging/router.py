@@ -340,7 +340,9 @@ class ChannelRouter:
             auth_token = creds.get("auth_token", "")
             from_number = creds.get("from_number", "")
             if not account_sid or not auth_token:
-                msg = "WhatsApp config missing 'account_sid'/'auth_token' in credentials"
+                msg = (
+                    "WhatsApp config missing 'account_sid'/'auth_token' in credentials"
+                )
                 raise ValueError(msg)
             from obscura.integrations.whatsapp.adapter import WhatsAppAdapter
 
@@ -361,6 +363,7 @@ class ChannelRouter:
         try:
             channel_mode = ChannelMode(record_mode.lower())
         except ValueError:
+            logger.debug("suppressed exception in apply_config", exc_info=True)
             channel_mode = ChannelMode.CHAT
 
         if channel_mode == ChannelMode.KAIROS:
@@ -485,7 +488,7 @@ class ChannelRouter:
                     chat_id = msg.metadata.get("chat_id", sender_id)
                     await adapter.send_typing(chat_id)  # type: ignore[attr-defined]
             except Exception:
-                pass  # non-critical
+                logger.debug("suppressed exception in _handle", exc_info=True)
 
         # Run agent — select per-platform runner (chat or kairos mode)
         runner = self._get_runner_for(platform)

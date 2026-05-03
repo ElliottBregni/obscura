@@ -254,6 +254,7 @@ class SkillRegistry:
         try:
             return await skill.health_check()
         except Exception as e:
+            logger.debug("suppressed exception in check_skill_health", exc_info=True)
             return SkillHealth(
                 healthy=False,
                 message=f"Health check failed: {e}",

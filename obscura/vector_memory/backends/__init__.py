@@ -11,6 +11,10 @@ from obscura.vector_memory.backends.base import (
     VectorEntry,
 )
 from obscura.vector_memory.backends.sqlite_backend import SQLiteBackend
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _QdrantBackend: type[VectorBackend] | None
 try:
@@ -21,6 +25,7 @@ try:
     _QdrantBackend = _QdrantBackendImpl
     _qdrant_available = True
 except ImportError:
+    logger.debug("suppressed exception in <module>", exc_info=True)
     _QdrantBackend = None
     _qdrant_available = False
 

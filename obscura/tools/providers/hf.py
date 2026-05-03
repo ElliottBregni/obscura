@@ -105,6 +105,8 @@ async def HFProvider(**kwargs: Any) -> dict[str, Any]:
         try:
             return json.loads(output)  # type: ignore[no-any-return]
         except (json.JSONDecodeError, ValueError):
+            logger.debug("suppressed exception in HFProvider", exc_info=True)
             return {"output": output.strip()}
     except Exception as exc:
+        logger.debug("suppressed exception in HFProvider", exc_info=True)
         return {"error": str(exc)}

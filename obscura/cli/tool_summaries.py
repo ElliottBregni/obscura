@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def summarize_tool_call(tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -21,7 +24,7 @@ def summarize_tool_call(tool_name: str, tool_input: dict[str, Any]) -> str:
         try:
             return fn(tool_input)
         except Exception:
-            pass
+            logger.debug("suppressed exception in summarize_tool_call", exc_info=True)
     return _fallback(tool_name, tool_input)
 
 

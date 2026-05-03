@@ -90,6 +90,7 @@ class UnleashAdapter(SyncAdapter):
             try:
                 remote_flags = await _fetch_flags(client, cfg)
             except httpx.HTTPStatusError as exc:
+                log.debug("suppressed exception in push", exc_info=True)
                 return SyncResult(
                     success=False,
                     adapter=self.name,
@@ -105,9 +106,14 @@ class UnleashAdapter(SyncAdapter):
                     try:
                         await _create_flag(client, cfg, spec)
                         applied.append(
-                            Change(path=file_path, action="add", detail=f"created '{flag_name}'")
+                            Change(
+                                path=file_path,
+                                action="add",
+                                detail=f"created '{flag_name}'",
+                            )
                         )
                     except httpx.HTTPStatusError as exc:
+                        log.debug("suppressed exception in push", exc_info=True)
                         return SyncResult(
                             success=False,
                             adapter=self.name,
@@ -121,9 +127,14 @@ class UnleashAdapter(SyncAdapter):
                     try:
                         await _update_flag(client, cfg, spec)
                         applied.append(
-                            Change(path=file_path, action="update", detail=f"updated '{flag_name}'")
+                            Change(
+                                path=file_path,
+                                action="update",
+                                detail=f"updated '{flag_name}'",
+                            )
                         )
                     except httpx.HTTPStatusError as exc:
+                        log.debug("suppressed exception in push", exc_info=True)
                         return SyncResult(
                             success=False,
                             adapter=self.name,
@@ -148,6 +159,7 @@ class UnleashAdapter(SyncAdapter):
                             )
                         )
                     except httpx.HTTPStatusError as exc:
+                        log.debug("suppressed exception in push", exc_info=True)
                         return SyncResult(
                             success=False,
                             adapter=self.name,
@@ -171,6 +183,7 @@ class UnleashAdapter(SyncAdapter):
             try:
                 remote_flags = await _fetch_flags(client, cfg)
             except httpx.HTTPStatusError as exc:
+                log.debug("suppressed exception in pull", exc_info=True)
                 return SyncResult(
                     success=False,
                     adapter=self.name,
@@ -188,6 +201,7 @@ class UnleashAdapter(SyncAdapter):
                     continue
                 action = "update"
             except FileNotFoundError:
+                log.debug("suppressed exception in pull", exc_info=True)
                 action = "add"
 
             repo.write(
@@ -200,7 +214,9 @@ class UnleashAdapter(SyncAdapter):
         return SyncResult(success=True, adapter=self.name, changes=tuple(applied))
 
     @override
-    async def diff(self, repo: RepoAccess, config: Mapping[str, object]) -> list[Change]:
+    async def diff(
+        self, repo: RepoAccess, config: Mapping[str, object]
+    ) -> list[Change]:
         """Return what would change on push without applying anything."""
         cfg = UnleashAdapterConfig.model_validate(config)
         token = _require_token()
@@ -217,7 +233,11 @@ class UnleashAdapter(SyncAdapter):
             file_path = f"{flags_dir}/{flag_name}.toml"
             if flag_name not in remote_flags:
                 changes.append(
-                    Change(path=file_path, action="add", detail=f"'{flag_name}' not in Unleash")
+                    Change(
+                        path=file_path,
+                        action="add",
+                        detail=f"'{flag_name}' not in Unleash",
+                    )
                 )
             elif _flag_differs(spec, remote_flags[flag_name]):
                 changes.append(
@@ -280,7 +300,9 @@ def _read_flags(repo: RepoAccess, flags_dir: str) -> dict[str, FlagSpec]:
             spec = FlagSpec.model_validate(data)
             flags[spec.name] = spec
         except Exception as exc:
-            log.warning("skipping unparseable flag file", path=file_path, error=str(exc))
+            log.warning(
+                "skipping unparseable flag file", path=file_path, error=str(exc)
+            )
     return flags
 
 
@@ -366,6 +388,7 @@ async def _archive_flag(
 
 def _flag_to_toml(flag: FlagSpec) -> str:
     """Serialise a FlagSpec to the canonical TOML format."""
+
     # Escape double-quotes in string values.
     def q(s: str) -> str:
         return s.replace("\\", "\\\\").replace('"', '\\"')

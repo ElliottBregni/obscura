@@ -591,6 +591,9 @@ def _build_default_base_agent_template() -> str:
 
         plugin_ids = list_builtin_plugin_ids()
     except Exception:  # noqa: BLE001
+        logger.debug(
+            "suppressed exception in _build_default_base_agent_template", exc_info=True
+        )
         plugin_ids = ["system-tools", "websearch", "gitleaks"]
 
     capability_ids = [

@@ -108,6 +108,7 @@ async def web_browser(
     try:
         page = await _ensure_browser()
     except RuntimeError as exc:
+        logger.debug("suppressed exception in web_browser", exc_info=True)
         return json.dumps(
             {"ok": False, "error": "browser_unavailable", "detail": str(exc)},
         )
@@ -223,6 +224,7 @@ async def web_browser(
         )
 
     except Exception as exc:
+        logger.debug("suppressed exception in web_browser", exc_info=True)
         return json.dumps({"ok": False, "error": "browser_error", "detail": str(exc)})
 
 

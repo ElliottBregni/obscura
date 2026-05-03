@@ -209,6 +209,7 @@ class AgentHeartbeatClient:
                 await self._send_heartbeat()
 
             except asyncio.CancelledError:
+                logger.debug("suppressed exception in _heartbeat_loop", exc_info=True)
                 break
             except Exception as e:
                 logger.exception(f"Error in heartbeat loop: {e}")

@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from obscura.deps import authenticate_websocket, get_runtime
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import AttentionRequest
@@ -122,6 +126,9 @@ async def agent_websocket(
                             )
                         await websocket.send_json({"type": "done"})
                     except Exception as e:
+                        logger.debug(
+                            "suppressed exception in agent_websocket", exc_info=True
+                        )
                         await websocket.send_json(
                             {
                                 "type": "error",
@@ -159,8 +166,9 @@ async def agent_websocket(
             bus.remove_attention_handler(_on_attention)
 
     except WebSocketDisconnect:
-        pass
+        logger.debug("suppressed exception in agent_websocket", exc_info=True)
     except Exception as e:
+        logger.debug("suppressed exception in agent_websocket", exc_info=True)
         with contextlib.suppress(Exception):
             await websocket.send_json(
                 {
@@ -221,9 +229,9 @@ async def monitor_websocket(websocket: WebSocket) -> None:
             )
 
     except WebSocketDisconnect:
-        pass
+        logger.debug("suppressed exception in monitor_websocket", exc_info=True)
     except Exception:
-        pass
+        logger.debug("suppressed exception in monitor_websocket", exc_info=True)
 
 
 # -- broadcast websocket ---------------------------------------------------
@@ -247,8 +255,10 @@ async def broadcast_websocket(websocket: WebSocket) -> None:
                 await websocket.send_text("pong")
 
     except WebSocketDisconnect:
+        logger.debug("suppressed exception in broadcast_websocket", exc_info=True)
         _broadcast_clients.remove(websocket)
     except Exception:
+        logger.debug("suppressed exception in broadcast_websocket", exc_info=True)
         if websocket in _broadcast_clients:
             _broadcast_clients.remove(websocket)
 
@@ -266,6 +276,7 @@ async def broadcast_event(event_type: str, data: dict[str, Any]) -> None:
         try:
             await client.send_json(message)
         except Exception:
+            logger.debug("suppressed exception in broadcast_event", exc_info=True)
             disconnected.append(client)
 
     for client in disconnected:
@@ -313,10 +324,12 @@ async def memory_watch_websocket(
                 await websocket.send_text("pong")
 
     except WebSocketDisconnect:
+        logger.debug("suppressed exception in memory_watch_websocket", exc_info=True)
         if namespace in _memory_watch_clients:
             if websocket in _memory_watch_clients[namespace]:
                 _memory_watch_clients[namespace].remove(websocket)
     except Exception:
+        logger.debug("suppressed exception in memory_watch_websocket", exc_info=True)
         if namespace in _memory_watch_clients:
             if websocket in _memory_watch_clients[namespace]:
                 _memory_watch_clients[namespace].remove(websocket)
@@ -339,6 +352,7 @@ async def notify_memory_change(namespace: str, event_type: str, key: str) -> Non
         try:
             await client.send_json(message)
         except Exception:
+            logger.debug("suppressed exception in notify_memory_change", exc_info=True)
             disconnected.append(client)
 
     for client in disconnected:

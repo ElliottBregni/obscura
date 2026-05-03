@@ -6,6 +6,10 @@ import os
 from typing import Any, cast
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 BASE_URL = "https://www.alphavantage.co/query"
 
@@ -54,6 +58,7 @@ async def _get(params: dict[str, Any]) -> dict[str, Any]:
             resp.raise_for_status()
             return _coerce_dict(resp.json())
     except Exception as e:
+        logger.debug("suppressed exception in _get", exc_info=True)
         return {"error": str(e)}
 
 

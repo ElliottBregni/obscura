@@ -211,6 +211,9 @@ class ConcurrentToolExecutor:
                     result = task.result()
                 except asyncio.CancelledError:
                     # Find the ToolCallInfo for this cancelled task
+                    logger.debug(
+                        "suppressed exception in _run_concurrent", exc_info=True
+                    )
                     tc_id = _find_task_id(tasks, task)
                     results.append(
                         ToolResultEnvelope(
@@ -255,6 +258,10 @@ class ConcurrentToolExecutor:
                             try:
                                 results.append(ct.result())
                             except (asyncio.CancelledError, Exception):
+                                logger.debug(
+                                    "suppressed exception in _run_concurrent",
+                                    exc_info=True,
+                                )
                                 results.append(
                                     ToolResultEnvelope(
                                         call_id=ct_id,
@@ -289,6 +296,10 @@ class ConcurrentToolExecutor:
                             try:
                                 results.append(ct.result())
                             except (asyncio.CancelledError, Exception):
+                                logger.debug(
+                                    "suppressed exception in _run_concurrent",
+                                    exc_info=True,
+                                )
                                 results.append(
                                     ToolResultEnvelope(
                                         call_id=ct_id,

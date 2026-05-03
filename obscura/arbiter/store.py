@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from obscura.arbiter.types import ArbiterEvent
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _db_path() -> Path:
@@ -35,7 +38,7 @@ def _add_col(conn: sqlite3.Connection, col: str, definition: str) -> None:
         conn.execute(f"ALTER TABLE verdicts ADD COLUMN {col} {definition}")
         conn.commit()
     except sqlite3.OperationalError:
-        pass  # Column already exists.
+        logger.debug("suppressed exception in _add_col", exc_info=True)
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -175,7 +178,9 @@ class ArbiterStore:
                     key = str(d).split(":")[0].strip()
                     issue_counts[key] = issue_counts.get(key, 0) + 1
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in patterns_for_project", exc_info=True
+                )
 
         total = len(rows)
         avg_score = sum(scores) / total if total else 0.0
@@ -183,7 +188,9 @@ class ArbiterStore:
 
         lines = [f"Last session: {total} evaluations, avg score {avg_score:.2f}"]
         if verdict_counts.get("revise", 0) > total * 0.4:
-            lines.append("High revision rate — model output quality was frequently flagged")
+            lines.append(
+                "High revision rate — model output quality was frequently flagged"
+            )
         if verdict_counts.get("kill", 0) > 5:
             lines.append(
                 f"Multiple kills ({verdict_counts['kill']}) — safety or resource violations detected"
@@ -193,7 +200,6 @@ class ArbiterStore:
             lines.append(f"Common failures: {issue_str}")
 
         return "; ".join(lines)
-
 
     def stats(self, *, session_id: str = "") -> dict[str, Any]:
         """Aggregate verdict stats."""

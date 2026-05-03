@@ -96,4 +96,4 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 {"user_id": user_id},
             )
         except Exception:
-            pass
+            logger.debug("suppressed exception in _record_rejection", exc_info=True)

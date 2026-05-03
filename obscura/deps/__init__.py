@@ -214,7 +214,7 @@ def audit(
             ),
         )
     except Exception:
-        pass
+        logger.debug("suppressed exception in audit", exc_info=True)
 
     # Store in memory for the /audit/logs endpoint
     log_entry: dict[str, str | dict[str, str] | None] = {
@@ -263,7 +263,7 @@ def record_sync_metric(status: str) -> None:
         m = get_metrics()
         m.sync_operations_total.add(1, {"status": status})
     except Exception:
-        pass
+        logger.debug("suppressed exception in record_sync_metric", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

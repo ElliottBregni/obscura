@@ -22,6 +22,10 @@ from obscura.cli.renderer.modern.theme import (
     Style,
 )
 from obscura.core.types import AgentEvent
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Renderer function type: event + terminal width → ANSI lines or None
 ResultLinesFn = Callable[[AgentEvent, int], list[str] | None]
@@ -65,6 +69,7 @@ def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     try:
         data_raw: Any = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
+        logger.debug("suppressed exception in _edit_result_lines", exc_info=True)
         return None
 
     if not isinstance(data_raw, dict):
@@ -82,7 +87,11 @@ def _edit_result_lines(event: AgentEvent, width: int) -> list[str] | None:
     summary = str(diff.get("summary", ""))
     hunks_raw: Any = diff.get("hunks", [])
     hunks: list[dict[str, Any]] = (
-        [cast(dict[str, Any], h) for h in cast(list[Any], hunks_raw) if isinstance(h, dict)]
+        [
+            cast(dict[str, Any], h)
+            for h in cast(list[Any], hunks_raw)
+            if isinstance(h, dict)
+        ]
         if isinstance(hunks_raw, list)
         else []
     )
@@ -353,6 +362,9 @@ class ToolRendererRegistry:
             try:
                 return fn(event, width)
             except Exception:
+                logger.debug(
+                    "suppressed exception in render_result_lines", exc_info=True
+                )
                 return None
         return None
 

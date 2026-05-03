@@ -15,6 +15,10 @@ from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _INDEX_FILE = Path.home() / ".obscura" / "agents" / "sessions" / "INDEX.jsonl"
 _OBSCURA_HOME = Path.home() / ".obscura"
@@ -87,6 +91,7 @@ def _load_index_entries(agent: str | None = None) -> list[dict[str, Any]]:
         try:
             payload_raw: object = json.loads(line)
         except json.JSONDecodeError:
+            logger.debug("suppressed exception in _load_index_entries", exc_info=True)
             continue
         if not isinstance(payload_raw, dict):
             continue
@@ -231,7 +236,7 @@ def _index_to_vector_memory(
                     },
                 )
     except Exception:
-        pass  # vector indexing is best-effort
+        logger.debug("suppressed exception in _index_to_vector_memory", exc_info=True)
 
 
 def sync_and_ingest_system_sessions(

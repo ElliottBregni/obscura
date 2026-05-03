@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, cast
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ArbiterVerdict(StrEnum):
@@ -86,7 +89,9 @@ class ArbiterConfig:
         from pathlib import Path
 
         settings: dict[str, Any] = {}
-        settings_path = Path(path) if path else Path.home() / ".obscura" / "settings.json"
+        settings_path = (
+            Path(path) if path else Path.home() / ".obscura" / "settings.json"
+        )
         if settings_path.is_file():
             try:
                 raw: Any = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -96,7 +101,7 @@ class ArbiterConfig:
                     if isinstance(arbiter_section, dict):
                         settings = cast(dict[str, Any], arbiter_section)
             except (json.JSONDecodeError, OSError):
-                pass
+                logger.debug("suppressed exception in from_settings", exc_info=True)
 
         def _get(key: str, default: Any, caster: type) -> Any:
             # Settings file takes priority, then env, then default

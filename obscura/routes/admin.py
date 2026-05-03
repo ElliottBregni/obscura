@@ -20,6 +20,10 @@ from obscura.routes.workflows import (
     get_workflow_executions_store,
     get_workflows_store,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.rate_limiter import RateLimiter
@@ -287,6 +291,7 @@ async def cache_stats_get(
             },
         )
     except Exception:
+        logger.debug("suppressed exception in cache_stats_get", exc_info=True)
         return JSONResponse(content={"enabled": False})
 
 

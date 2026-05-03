@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def suggest_files(
@@ -125,6 +128,7 @@ def _find_importers(target: Path, max_results: int = 3) -> list[Path]:
                 if pattern.search(content):
                     results.append(py_file)
             except OSError:
+                logger.debug("suppressed exception in _find_importers", exc_info=True)
                 continue
 
     return results

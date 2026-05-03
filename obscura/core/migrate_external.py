@@ -101,6 +101,7 @@ def run_startup_migration(
     try:
         answer = input("Import now? [y/N/never] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
+        _log.debug("suppressed exception in run_startup_migration", exc_info=True)
         emit("")
         return
 
@@ -483,6 +484,7 @@ def _load_marker(scope: str, cwd: Path) -> dict[str, Any]:
     try:
         parsed: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        _log.debug("suppressed exception in _load_marker", exc_info=True)
         return {}
     return _coerce_str_keys(parsed)
 

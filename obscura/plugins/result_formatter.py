@@ -86,6 +86,7 @@ def format_tool_result(result: Any, spec: ToolSpec, level: str) -> Any:
         try:
             data = json.loads(data)
         except (json.JSONDecodeError, TypeError):
+            logger.debug("suppressed exception in format_tool_result", exc_info=True)
             return result
         was_string = True
 

@@ -1537,7 +1537,7 @@ class AgentLoop:
                             self._pending_correction = correction
             except Exception:
                 # Quality scan must never break the turn — best-effort.
-                pass
+                logger.debug("suppressed exception in _run_inner", exc_info=True)
 
             # Emit TURN_COMPLETE
             if _prev_event is not None:
@@ -2048,6 +2048,7 @@ class AgentLoop:
                 "plan_approval_callback": Session.plan_approval_callback,
             }
         except Exception:
+            logger.debug("suppressed exception in _read_host_callbacks", exc_info=True)
             defaults = {}
 
         # Per-instance overrides win over class state.
@@ -2281,7 +2282,9 @@ class AgentLoop:
                     )
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _execute_single_tool", exc_info=True
+                )
             return envelope
         except Exception as exc:
             logger.warning("Tool %s failed: %s", tc.name, exc)
@@ -2545,6 +2548,7 @@ class AgentLoop:
 
                 return toons.dumps(obj)
             except Exception:
+                logger.debug("suppressed exception in _encode", exc_info=True)
                 return json.dumps(obj, default=str)
 
         if result.status == "ok":
@@ -2694,6 +2698,9 @@ class AgentLoop:
                 try:
                     decoded = json.loads(text)
                 except json.JSONDecodeError:
+                    logger.debug(
+                        "suppressed exception in _coerce_to_dict", exc_info=True
+                    )
                     return {"_raw_input": value}
                 if isinstance(decoded, dict):
                     return cast(dict[str, Any], decoded)

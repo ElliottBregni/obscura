@@ -46,6 +46,7 @@ class NativeAdapter:
                 fn = _resolve_handler(spec.healthcheck.target)
                 return bool(fn())
             except Exception:
+                logger.debug("suppressed exception in healthcheck", exc_info=True)
                 return False
         return True
 

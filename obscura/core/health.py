@@ -21,6 +21,9 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -113,9 +116,11 @@ def _probe_import_error(handler_ref: str) -> str:
         return ""
     except ImportError as exc:
         # Extract module name from "No module named 'msal'"
+        logger.debug("suppressed exception in _probe_import_error", exc_info=True)
         match = re.search(r"No module named '([^']+)'", str(exc))
         return match.group(1) if match else str(exc)
     except Exception:
+        logger.debug("suppressed exception in _probe_import_error", exc_info=True)
         return ""
 
 

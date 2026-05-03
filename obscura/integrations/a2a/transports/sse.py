@@ -72,6 +72,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
                         "data": event.model_dump_json(),
                     }
             except A2AError as e:
+                logger.debug("suppressed exception in event_generator", exc_info=True)
                 yield {
                     "event": "error",
                     "data": json.dumps({"code": e.code, "message": e.message}),
@@ -102,6 +103,7 @@ def create_sse_router(service: A2AService) -> APIRouter:
                         "data": event.model_dump_json(),
                     }
             except A2AError as e:
+                logger.debug("suppressed exception in event_generator", exc_info=True)
                 yield {
                     "event": "error",
                     "data": json.dumps({"code": e.code, "message": e.message}),

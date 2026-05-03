@@ -317,15 +317,21 @@ class DreamConsolidator:
             try:
                 dream_tools.extend(get_system_tool_specs())
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _run_consolidation_agent", exc_info=True
+                )
             try:
                 dream_tools.extend(get_goal_tool_specs())
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _run_consolidation_agent", exc_info=True
+                )
             try:
                 dream_tools.extend(get_profile_tool_specs())
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _run_consolidation_agent", exc_info=True
+                )
 
             cfg = ObscuraConfig.load()
 
@@ -377,9 +383,13 @@ class DreamConsolidator:
                 return ts
         except Exception:
             # Fall back to mtime if file doesn't contain JSON or parse fails.
+            logger.debug("suppressed exception in _last_consolidated_at", exc_info=True)
             try:
                 return self._lock_file().stat().st_mtime
             except Exception:
+                logger.debug(
+                    "suppressed exception in _last_consolidated_at", exc_info=True
+                )
                 return 0.0
         return 0.0
 
@@ -394,6 +404,7 @@ class DreamConsolidator:
                 else Path.home() / ".obscura" / "events.db"
             )
         except Exception:
+            logger.debug("suppressed exception in _sessions_since", exc_info=True)
             events_db = Path.home() / ".obscura" / "events.db"
         if not events_db.exists():
             return 0
@@ -404,6 +415,7 @@ class DreamConsolidator:
             try:
                 since_iso = datetime.fromtimestamp(float(since_ts), tz=UTC).isoformat()
             except Exception:
+                logger.debug("suppressed exception in _sessions_since", exc_info=True)
                 since_iso = datetime.fromtimestamp(time.time(), tz=UTC).isoformat()
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM sessions WHERE created_at > ?",
@@ -413,6 +425,7 @@ class DreamConsolidator:
             conn.close()
             return count
         except Exception:
+            logger.debug("suppressed exception in _sessions_since", exc_info=True)
             return 0
 
     def _is_locked(self) -> bool:
@@ -430,9 +443,11 @@ class DreamConsolidator:
             pid = int(data.get("pid", 0))
         except Exception:
             # Backwards compatibility: file might contain plain PID.
+            logger.debug("suppressed exception in _is_locked", exc_info=True)
             try:
                 pid = int(self._lock_file().read_text(encoding="utf-8").strip())
             except Exception:
+                logger.debug("suppressed exception in _is_locked", exc_info=True)
                 return False
 
         try:
@@ -440,11 +455,14 @@ class DreamConsolidator:
             return True
         except ProcessLookupError:
             # PID does not exist -> stale lock
+            logger.debug("suppressed exception in _is_locked", exc_info=True)
             return False
         except PermissionError:
             # Unable to query PID -> assume it's held by another user/process
+            logger.debug("suppressed exception in _is_locked", exc_info=True)
             return True
         except Exception:
+            logger.debug("suppressed exception in _is_locked", exc_info=True)
             return False
 
     def _acquire_lock(self) -> bool:
@@ -460,6 +478,7 @@ class DreamConsolidator:
             os.replace(str(tmp), str(self._lock_file()))
             return True
         except Exception:
+            logger.debug("suppressed exception in _acquire_lock", exc_info=True)
             return False
 
     def _rollback_lock(self) -> None:
@@ -481,6 +500,9 @@ class DreamConsolidator:
             tmp.write_text(json.dumps(data), encoding="utf-8")
             os.replace(str(tmp), str(self._lock_file()))
         except Exception:
+            logger.debug(
+                "suppressed exception in _update_lock_timestamp", exc_info=True
+            )
             with contextlib.suppress(Exception):
                 self._lock_file().touch()
 

@@ -23,6 +23,10 @@ import inspect
 import os
 from collections.abc import Callable
 from typing import Any, Self, TypeVar, cast
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -81,6 +85,7 @@ def _trace_mod() -> Any | None:
     try:
         return importlib.import_module("opentelemetry.trace")
     except ImportError:
+        logger.debug("suppressed exception in _trace_mod", exc_info=True)
         return None
 
 
@@ -88,6 +93,7 @@ def _status_code() -> Any | None:
     try:
         return importlib.import_module("opentelemetry.trace").StatusCode
     except ImportError:
+        logger.debug("suppressed exception in _status_code", exc_info=True)
         return None
 
 
@@ -115,6 +121,7 @@ def traced(
 
                     tracer = trace.get_tracer(fn.__module__)
                 except ImportError:
+                    logger.debug("suppressed exception in async_wrapper", exc_info=True)
                     return await fn(*args, **kwargs)
 
                 with tracer.start_as_current_span(span_name) as span:
@@ -139,6 +146,7 @@ def traced(
 
                 tracer = trace.get_tracer(fn.__module__)
             except ImportError:
+                logger.debug("suppressed exception in sync_wrapper", exc_info=True)
                 return fn(*args, **kwargs)
 
             with tracer.start_as_current_span(span_name) as span:

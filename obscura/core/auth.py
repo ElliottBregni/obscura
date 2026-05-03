@@ -17,6 +17,10 @@ from pydantic import BaseModel, ConfigDict
 
 from obscura.auth import secrets as _secrets
 from obscura.core.types import Backend
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Auth configuration
@@ -83,6 +87,7 @@ def _resolve_cli_cmd(env_var: str, default_bin: str) -> list[str]:
         try:
             parts = shlex.split(raw)
         except ValueError:
+            logger.debug("suppressed exception in _resolve_cli_cmd", exc_info=True)
             parts = []
         if parts:
             return parts
@@ -138,7 +143,9 @@ def _resolve_github_token(
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                logger.debug(
+                    "suppressed exception in _resolve_github_token", exc_info=True
+                )
         try:
             result = subprocess.run(
                 [*gh_cmd, "auth", "token"],
@@ -150,7 +157,7 @@ def _resolve_github_token(
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            logger.debug("suppressed exception in _resolve_github_token", exc_info=True)
     else:
         # OAuth-first: gh auth token
         try:
@@ -164,7 +171,7 @@ def _resolve_github_token(
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            logger.debug("suppressed exception in _resolve_github_token", exc_info=True)
 
         if token_cmd:
             try:
@@ -178,7 +185,9 @@ def _resolve_github_token(
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                logger.debug(
+                    "suppressed exception in _resolve_github_token", exc_info=True
+                )
 
         for var in _COPILOT_ENV_VARS:
             token = _secrets.resolve(var)
@@ -226,7 +235,9 @@ def _resolve_anthropic_key(explicit: str | None) -> str:
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            logger.debug(
+                "suppressed exception in _resolve_anthropic_key", exc_info=True
+            )
 
     msg = (
         "Claude auth requires one of: "
@@ -250,6 +261,7 @@ def _has_claude_cli_oauth() -> bool:
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.debug("suppressed exception in _has_claude_cli_oauth", exc_info=True)
         return False
 
     if result.returncode != 0 or not result.stdout.strip():
@@ -258,6 +270,7 @@ def _has_claude_cli_oauth() -> bool:
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
+        logger.debug("suppressed exception in _has_claude_cli_oauth", exc_info=True)
         return False
 
     return bool(payload.get("loggedIn"))
@@ -287,7 +300,9 @@ def _resolve_openai_key(explicit: str | None) -> str:
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                logger.debug(
+                    "suppressed exception in _resolve_openai_key", exc_info=True
+                )
 
         oauth_token = _resolve_codex_oauth_token()
         if oauth_token:
@@ -316,7 +331,9 @@ def _resolve_openai_key(explicit: str | None) -> str:
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                pass
+                logger.debug(
+                    "suppressed exception in _resolve_openai_key", exc_info=True
+                )
 
     msg = (
         "OpenAI auth requires one of: "
@@ -340,6 +357,9 @@ def _resolve_codex_oauth_token() -> str | None:
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.debug(
+            "suppressed exception in _resolve_codex_oauth_token", exc_info=True
+        )
         return None
 
     status_text = f"{status.stdout}\n{status.stderr}"
@@ -355,6 +375,9 @@ def _resolve_codex_oauth_token() -> str | None:
     try:
         payload = json.loads(auth_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
+        logger.debug(
+            "suppressed exception in _resolve_codex_oauth_token", exc_info=True
+        )
         return None
 
     tokens = cast("object", payload.get("tokens"))
@@ -383,6 +406,7 @@ def _has_codex_cli_oauth() -> bool:  # pyright: ignore[reportUnusedFunction]
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.debug("suppressed exception in _has_codex_cli_oauth", exc_info=True)
         return False
 
     status_text = f"{status.stdout}\n{status.stderr}"

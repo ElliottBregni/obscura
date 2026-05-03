@@ -8,6 +8,9 @@ from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
 
+logger = logging.getLogger(__name__)
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -93,8 +96,10 @@ def tail_entries(n: int = 50) -> list[dict[str, Any]]:
                     dq.append(parsed)
                 except Exception:
                     # keep raw line if JSON parse fails
+                    logger.debug("suppressed exception in tail_entries", exc_info=True)
                     dq.append({"raw": line})
     except Exception:
+        logger.debug("suppressed exception in tail_entries", exc_info=True)
         return []
     return list(dq)
 

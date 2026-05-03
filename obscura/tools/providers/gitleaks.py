@@ -51,6 +51,8 @@ async def _handler_scan_repo(**kwargs: Any) -> dict[str, Any]:
                 "clean": len(findings) == 0,
             }
         except (json.JSONDecodeError, ValueError):
+            logger.debug("suppressed exception in _handler_scan_repo", exc_info=True)
             return {"output": out.strip(), "clean": "no leaks" in out.lower()}
     except Exception as e:
+        logger.debug("suppressed exception in _handler_scan_repo", exc_info=True)
         return {"error": str(e)}

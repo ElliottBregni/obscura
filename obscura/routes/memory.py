@@ -14,6 +14,10 @@ from obscura.deps import audit
 from obscura.memory import MemoryStore
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["memory"])
 
@@ -224,6 +228,7 @@ async def memory_transaction(
             else:
                 errors.append({"idx": idx, "error": f"Unknown operation: {op_type}"})
         except Exception as e:
+            logger.debug("suppressed exception in memory_transaction", exc_info=True)
             errors.append({"idx": idx, "error": str(e)})
 
     return JSONResponse(
@@ -296,6 +301,7 @@ async def memory_import(
                 store.set(key, value, namespace=ns)
                 imported += 1
             except Exception as e:
+                logger.debug("suppressed exception in memory_import", exc_info=True)
                 errors.append({"namespace": ns, "key": key, "error": str(e)})
 
     audit(

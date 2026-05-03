@@ -72,10 +72,14 @@ class KairosState:
             filtered: dict[str, Any] = {k: v for k, v in raw.items() if k in known}
             state = cls(**filtered)
             # Enforce caps on load so old bloated state files are cleaned up
-            state.project_roots_seen = list(dict.fromkeys(state.project_roots_seen))[-100:]
+            state.project_roots_seen = list(dict.fromkeys(state.project_roots_seen))[
+                -100:
+            ]
             if len(state.common_errors) > 50:
                 sorted_errors = sorted(
-                    state.common_errors.items(), key=lambda x: x[1], reverse=True,
+                    state.common_errors.items(),
+                    key=lambda x: x[1],
+                    reverse=True,
                 )
                 state.common_errors = dict(sorted_errors[:50])
             return state
@@ -125,7 +129,9 @@ class KairosState:
         # Prune least common if over limit
         if len(self.common_errors) > max_tracked:
             sorted_errors = sorted(
-                self.common_errors.items(), key=lambda x: x[1], reverse=True,
+                self.common_errors.items(),
+                key=lambda x: x[1],
+                reverse=True,
             )
             self.common_errors = dict(sorted_errors[:max_tracked])
 
@@ -172,4 +178,5 @@ class KairosState:
             )
             return elapsed >= min_hours and sessions_since >= min_sessions
         except (ValueError, TypeError):
+            logger.debug("suppressed exception in can_dream", exc_info=True)
             return True

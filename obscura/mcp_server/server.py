@@ -10,6 +10,10 @@ from fastmcp import FastMCP
 
 from obscura.mcp_server.client import ObscuraAPIClient
 from obscura.mcp_server.config import ObscuraMCPServerConfig
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Module-level singletons (created once at import time)
@@ -82,6 +86,7 @@ async def send_prompt(
         result = await _api.post("/api/v1/send", json=payload)
         return result.get("text", json.dumps(result))
     except Exception as e:
+        logger.debug("suppressed exception in send_prompt", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -106,6 +111,7 @@ async def list_sessions(backend: str | None = None) -> str:
         result = await _api.get("/api/v1/sessions", **params)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in list_sessions", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -122,6 +128,7 @@ async def create_session(backend: str = "copilot") -> str:
         result = await _api.post("/api/v1/sessions", json={"backend": backend})
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in create_session", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -156,6 +163,7 @@ async def list_agents(
         result = await _api.get("/api/v1/agents", **params)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in list_agents", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -189,6 +197,7 @@ async def spawn_agent(
         result = await _api.post("/api/v1/agents", json=payload)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in spawn_agent", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -205,6 +214,7 @@ async def get_agent(agent_id: str) -> str:
         result = await _api.get(f"/api/v1/agents/{agent_id}")
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in get_agent", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -221,6 +231,7 @@ async def stop_agent(agent_id: str) -> str:
         result = await _api.delete(f"/api/v1/agents/{agent_id}")
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in stop_agent", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -248,6 +259,7 @@ async def run_agent(
         result = await _api.post(f"/api/v1/agents/{agent_id}/run", json=payload)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in run_agent", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -264,6 +276,7 @@ async def list_agent_tools(agent_id: str) -> str:
         result = await _api.get(f"/api/v1/agents/{agent_id}/tools")
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in list_agent_tools", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -286,6 +299,7 @@ async def get_memory(namespace: str, key: str) -> str:
         result = await _api.get(f"/api/v1/memory/{namespace}/{key}")
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in get_memory", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -307,6 +321,7 @@ async def set_memory(namespace: str, key: str, value: str) -> str:
         )
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in set_memory", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -324,6 +339,7 @@ async def delete_memory(namespace: str, key: str) -> str:
         result = await _api.delete(f"/api/v1/memory/{namespace}/{key}")
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in delete_memory", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -343,6 +359,7 @@ async def list_memory_keys(namespace: str | None = None) -> str:
         result = await _api.get("/api/v1/memory", **params)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in list_memory_keys", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -359,6 +376,7 @@ async def search_memory(query: str) -> str:
         result = await _api.get("/api/v1/memory/search", q=query)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in search_memory", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -384,6 +402,7 @@ async def search_vector_memory(
         result = await _api.get("/api/v1/vector-memory/search", **params)
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in search_vector_memory", exc_info=True)
         _raise_tool_error(e)
         return ""
 
@@ -395,5 +414,6 @@ async def memory_stats() -> str:
         result = await _api.get("/api/v1/memory/stats")
         return json.dumps(result, indent=2)
     except Exception as e:
+        logger.debug("suppressed exception in memory_stats", exc_info=True)
         _raise_tool_error(e)
         return ""

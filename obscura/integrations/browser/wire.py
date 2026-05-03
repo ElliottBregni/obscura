@@ -33,6 +33,7 @@ async def read_frame(reader: asyncio.StreamReader) -> dict[str, Any] | None:
     try:
         header = await reader.readexactly(4)
     except asyncio.IncompleteReadError:
+        log.debug("suppressed exception in read_frame", exc_info=True)
         return None
     (length,) = struct.unpack("<I", header)
     if length == 0:

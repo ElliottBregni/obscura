@@ -14,6 +14,9 @@ from obscura.core.tools import tool
 from obscura.core.types import ToolSpec
 from obscura.tools.system._policy import Policy
 from obscura.tools.system._shell import Shell
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Sandbox:
@@ -132,6 +135,7 @@ class Sandbox:
         try:
             exec(func_source, sandbox_globals)  # noqa: S102
         except SyntaxError as exc:
+            logger.debug("suppressed exception in create_tool", exc_info=True)
             return Policy.json_error("syntax_error", detail=str(exc), line=exc.lineno)
 
         handler = sandbox_globals["_dynamic_handler"]
@@ -162,14 +166,15 @@ class Sandbox:
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Name of the dynamic tool."},
-                "args": {"type": "object", "description": "Arguments to pass as kwargs."},
+                "args": {
+                    "type": "object",
+                    "description": "Arguments to pass as kwargs.",
+                },
             },
             "required": ["name"],
         },
     )
-    async def call_dynamic_tool(
-        name: str, args: dict[str, Any] | None = None
-    ) -> str:
+    async def call_dynamic_tool(name: str, args: dict[str, Any] | None = None) -> str:
         clean_name = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
         spec = Sandbox.dynamic_tools.get(clean_name)
         if spec is None:
@@ -187,6 +192,7 @@ class Sandbox:
                 return result
             return json.dumps({"ok": True, "result": result})
         except Exception as exc:
+            logger.debug("suppressed exception in call_dynamic_tool", exc_info=True)
             return Policy.json_error(
                 "dynamic_tool_error", name=clean_name, detail=str(exc)
             )
@@ -282,9 +288,8 @@ class Sandbox:
         # Optionally save code to file first
         if save_as:
             save_path = Policy.resolve_path(save_as)
-            if (
-                not Policy.unsafe_full_access_enabled()
-                and not Policy.is_path_allowed(save_path)
+            if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+                save_path
             ):
                 return Policy.json_error("path_not_allowed", path=str(save_path))
             save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,6 +325,7 @@ class Sandbox:
                 timeout=timeout_seconds,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in code_sandbox", exc_info=True)
             proc.kill()
             await proc.wait()
             return json.dumps(

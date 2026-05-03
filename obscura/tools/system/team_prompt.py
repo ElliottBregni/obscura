@@ -12,6 +12,10 @@ from pathlib import Path
 
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _TEAM_PROMPT_FILENAMES = ("team_prompt.md", "team_prompt.txt", "team_prompt")
 
@@ -72,6 +76,7 @@ async def read_team_prompt(path: str = "") -> str:
     try:
         text = target.read_text(encoding="utf-8").strip()
     except OSError as exc:
+        logger.debug("suppressed exception in read_team_prompt", exc_info=True)
         return json.dumps({"ok": False, "error": "read_error", "detail": str(exc)})
 
     return json.dumps({"ok": True, "path": str(target), "text": text})

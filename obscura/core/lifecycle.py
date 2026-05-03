@@ -238,7 +238,7 @@ def make_tool_eval_hook() -> BeforeHook:
                         file_path=file_path,
                     )
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in _hook", exc_info=True)
             # No errors — record success to resolve past failures (#3)
             elif file_path and event.tool_name:
                 try:
@@ -250,7 +250,7 @@ def make_tool_eval_hook() -> BeforeHook:
                         file_path=file_path,
                     )
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in _hook", exc_info=True)
         except Exception:
             logger.debug("Tool eval hook error", exc_info=True)
         return event
@@ -314,7 +314,7 @@ def make_eval_memory_inject_hook() -> BeforeHook:
             if context:
                 event.text = context + "\n" + event.text if event.text else context
         except Exception:
-            pass
+            logger.debug("suppressed exception in _hook", exc_info=True)
         return event
 
     return _hook

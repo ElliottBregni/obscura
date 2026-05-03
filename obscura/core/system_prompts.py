@@ -7,6 +7,10 @@ runtime. Do not hardcode prompt text in this file.
 from __future__ import annotations
 
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Directory containing all prompt .txt files
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -99,6 +103,9 @@ def compose_environment_context(
     try:
         template = _load("environment_context")
     except FileNotFoundError:
+        logger.debug(
+            "suppressed exception in compose_environment_context", exc_info=True
+        )
         return ""
 
     ids = plugin_ids or []

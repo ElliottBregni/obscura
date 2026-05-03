@@ -349,7 +349,7 @@ class AgentSupervisor:
         try:
             await asyncio.Event().wait()  # block forever
         except asyncio.CancelledError:
-            pass
+            logger.debug("suppressed exception in run_forever", exc_info=True)
         finally:
             self._stopped = True
             for task in self._tasks:
@@ -394,7 +394,9 @@ class AgentSupervisor:
                     backoff = 1.0
                 else:
                     # Loop/aper agents exit cleanly when done — no restart needed.
-                    logger.info("[supervisor] agent '%s' exited cleanly", agent_def.name)
+                    logger.info(
+                        "[supervisor] agent '%s' exited cleanly", agent_def.name
+                    )
                     backoff = 1.0
                     break
 

@@ -16,6 +16,9 @@ from obscura.core.context_window import (
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 from obscura.tools.system.file_state import is_unchanged, record_read
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class FsRead:
@@ -38,6 +41,7 @@ class FsRead:
                 start = max(1, int(pages))
                 end = start
         except (ValueError, TypeError):
+            logger.debug("suppressed exception in parse_page_range", exc_info=True)
             start = 1
             end = min(total, 1)
         return start, end
@@ -96,7 +100,9 @@ class FsRead:
     )
     async def list_directory(path: str) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not target.exists():
             return Policy.json_error("path_not_found", path=str(target))
@@ -109,6 +115,9 @@ class FsRead:
                 try:
                     size = child.stat().st_size if child.is_file() else 0
                 except OSError:
+                    logger.debug(
+                        "suppressed exception in list_directory", exc_info=True
+                    )
                     size = 0
                 entries.append(
                     {
@@ -120,6 +129,7 @@ class FsRead:
                     },
                 )
         except PermissionError:
+            logger.debug("suppressed exception in list_directory", exc_info=True)
             return Policy.json_error("permission_denied", path=str(target))
         return json.dumps({"ok": True, "path": str(target), "entries": entries})
 
@@ -180,7 +190,9 @@ class FsRead:
         pages: str = "",
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not target.exists():
             return Policy.json_error("path_not_found", path=str(target))
@@ -191,7 +203,9 @@ class FsRead:
         read_offset = offset if offset > 0 else None
         read_limit = limit if limit > 0 else None
         if is_unchanged(target, offset=read_offset, limit=read_limit):
-            return json.dumps({"ok": True, "kind": "file_unchanged", "path": str(target)})
+            return json.dumps(
+                {"ok": True, "kind": "file_unchanged", "path": str(target)}
+            )
 
         suffix = target.suffix.lower()
 
@@ -226,6 +240,7 @@ class FsRead:
             try:
                 import pdfplumber  # pyright: ignore[reportMissingImports]
             except ImportError:
+                logger.debug("suppressed exception in read_text_file", exc_info=True)
                 return Policy.json_error(
                     "missing_dependency",
                     detail="PDF reading requires pdfplumber. Install with: uv pip install pdfplumber",
@@ -237,7 +252,9 @@ class FsRead:
                     total_pages: int = len(pdf_any.pages)
                     # Parse page range.
                     if pages:
-                        start_page, end_page = FsRead.parse_page_range(pages, total_pages)
+                        start_page, end_page = FsRead.parse_page_range(
+                            pages, total_pages
+                        )
                     else:
                         start_page, end_page = 1, min(total_pages, 20)
                     extracted: list[str] = []
@@ -246,6 +263,7 @@ class FsRead:
                         extracted.append(page_text)
                     text = "\n\n--- Page Break ---\n\n".join(extracted)
             except Exception as exc:
+                logger.debug("suppressed exception in read_text_file", exc_info=True)
                 return Policy.json_error("pdf_read_error", detail=str(exc))
             record_read(target, offset=read_offset, limit=read_limit)
             return json.dumps(
@@ -283,6 +301,7 @@ class FsRead:
                         },
                     )
             except Exception as exc:
+                logger.debug("suppressed exception in read_text_file", exc_info=True)
                 return Policy.json_error("notebook_parse_error", detail=str(exc))
             record_read(target, offset=read_offset, limit=read_limit)
             return json.dumps(
@@ -311,7 +330,9 @@ class FsRead:
             end = (start + limit) if limit > 0 else total_lines
             selected = all_lines[start:end]
             # Add line numbers.
-            numbered = "".join(f"{start + i + 1:>6}\t{ln}" for i, ln in enumerate(selected))
+            numbered = "".join(
+                f"{start + i + 1:>6}\t{ln}" for i, ln in enumerate(selected)
+            )
             text = numbered
             truncated = end < total_lines
 
@@ -352,7 +373,10 @@ class FsRead:
                     "description": "Exact or partial filename to match.",
                 },
                 "max_results": {"type": "integer"},
-                "file_type": {"type": "string", "description": "'file', 'dir', or 'any'."},
+                "file_type": {
+                    "type": "string",
+                    "description": "'file', 'dir', or 'any'.",
+                },
             },
             "required": [],
         },
@@ -386,11 +410,15 @@ class FsRead:
                 pattern = str(PurePosixPath(*rel_parts))
             else:
                 # No glob chars — treat pattern as a literal absolute path lookup.
-                path = str(PurePosixPath(*base_parts[:-1])) if len(base_parts) > 1 else "/"
+                path = (
+                    str(PurePosixPath(*base_parts[:-1])) if len(base_parts) > 1 else "/"
+                )
                 pattern = base_parts[-1] if base_parts else "**/*"
 
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not target.exists():
             return Policy.json_error("path_not_found", path=str(target))
@@ -416,6 +444,7 @@ class FsRead:
                 timeout=30.0,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in find_files", exc_info=True)
             return Policy.json_error(
                 "timeout",
                 path=str(target),
@@ -443,8 +472,14 @@ class FsRead:
                     },
                 )
             except OSError:
+                logger.debug("suppressed exception in find_files", exc_info=True)
                 results.append(
-                    {"path": str(fp), "name": fp.name, "is_dir": fp.is_dir(), "size": 0},
+                    {
+                        "path": str(fp),
+                        "name": fp.name,
+                        "is_dir": fp.is_dir(),
+                        "size": 0,
+                    },
                 )
 
         return json.dumps(
@@ -470,7 +505,9 @@ class FsRead:
     )
     async def file_info(path: str) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not target.exists():
             return Policy.json_error("path_not_found", path=str(target))
@@ -494,6 +531,7 @@ class FsRead:
             try:
                 info["symlink_target"] = str(target.readlink())
             except OSError:
+                logger.debug("suppressed exception in file_info", exc_info=True)
                 info["symlink_target"] = None
         if target.is_file():
             info["extension"] = target.suffix
@@ -513,7 +551,10 @@ class FsRead:
                     "type": "integer",
                     "description": "Max recursion depth (default 3).",
                 },
-                "include": {"type": "string", "description": "Glob filter for filenames."},
+                "include": {
+                    "type": "string",
+                    "description": "Glob filter for filenames.",
+                },
                 "show_hidden": {"type": "boolean"},
                 "max_entries": {"type": "integer"},
             },
@@ -528,7 +569,9 @@ class FsRead:
         max_entries: int = 500,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not target.exists():
             return Policy.json_error("path_not_found", path=str(target))
@@ -538,10 +581,12 @@ class FsRead:
         try:
             max_depth = int(max_depth)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in tree_directory", exc_info=True)
             max_depth = 3
         try:
             max_entries = int(max_entries)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in tree_directory", exc_info=True)
             max_entries = 500
         depth = max(1, min(max_depth, 10))
         limit = max(1, min(max_entries, 5000))
@@ -558,6 +603,7 @@ class FsRead:
                     key=lambda p: (not p.is_dir(), p.name.lower()),
                 )
             except PermissionError:
+                logger.debug("suppressed exception in _walk", exc_info=True)
                 return
             visible = [c for c in children if show_hidden or not c.name.startswith(".")]
             for i, child in enumerate(visible):
@@ -565,7 +611,11 @@ class FsRead:
                     return
                 is_last = i == len(visible) - 1
                 connector = "└── " if is_last else "├── "
-                if child.is_file() and include and not fnmatch.fnmatch(child.name, include):
+                if (
+                    child.is_file()
+                    and include
+                    and not fnmatch.fnmatch(child.name, include)
+                ):
                     continue
                 size_str = f" ({child.stat().st_size}B)" if child.is_file() else ""
                 lines.append(f"{prefix}{connector}{child.name}{size_str}")

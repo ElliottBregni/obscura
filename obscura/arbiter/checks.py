@@ -20,6 +20,10 @@ from obscura.core.eval_checks import (
     check_written_json,
     check_written_yaml_toml,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Keyword extraction (for drift detection)
@@ -124,52 +128,52 @@ def _stem(word: str) -> str:
     # Longest suffixes first so they fire before shorter overlapping rules.
     _RULES: tuple[tuple[str, str, int], ...] = (
         # 7-char
-        ("ational", "ate",  4),
+        ("ational", "ate", 4),
         # 6-char
-        ("tional",  "tion", 4),
-        ("encies",  "ence", 4),
-        ("ancing",  "ance", 4),
+        ("tional", "tion", 4),
+        ("encies", "ence", 4),
+        ("ancing", "ance", 4),
         # 5-char — pluralise before singular so "migrations"→"migrate"
-        ("ations",  "ate",  4),
-        ("ation",   "ate",  4),
-        ("izing",   "ize",  4),
-        ("ising",   "ise",  4),
-        ("ating",   "ate",  4),
-        ("ities",   "ity",  4),
-        ("iness",   "y",    4),
-        ("ments",   "",     5),
-        ("ators",   "ate",  4),
+        ("ations", "ate", 4),
+        ("ation", "ate", 4),
+        ("izing", "ize", 4),
+        ("ising", "ise", 4),
+        ("ating", "ate", 4),
+        ("ities", "ity", 4),
+        ("iness", "y", 4),
+        ("ments", "", 5),
+        ("ators", "ate", 4),
         # 4-char
-        ("ness",    "",     5),
-        ("ment",    "",     5),
-        ("tion",    "",     5),  # min 5: "function"→"func"(4) rejected → stays "function"
-        ("sion",    "",     5),
-        ("ious",    "",     5),
-        ("eous",    "",     5),
-        ("ible",    "",     5),
-        ("able",    "",     5),
-        ("ally",    "",     5),
-        ("ical",    "",     5),
-        ("ator",    "ate",  4),
-        ("ures",    "",     4),  # failures→fail
+        ("ness", "", 5),
+        ("ment", "", 5),
+        ("tion", "", 5),  # min 5: "function"→"func"(4) rejected → stays "function"
+        ("sion", "", 5),
+        ("ious", "", 5),
+        ("eous", "", 5),
+        ("ible", "", 5),
+        ("able", "", 5),
+        ("ally", "", 5),
+        ("ical", "", 5),
+        ("ator", "ate", 4),
+        ("ures", "", 4),  # failures→fail
         # 3-char
-        ("ing",     "",     4),
-        ("ies",     "y",    4),
-        ("ors",     "or",   4),
-        ("ers",     "er",   4),
-        ("ent",     "",     5),
-        ("ant",     "",     5),
-        ("ous",     "",     5),
-        ("ive",     "",     5),
-        ("ize",     "",     4),
-        ("ise",     "",     4),
+        ("ing", "", 4),
+        ("ies", "y", 4),
+        ("ors", "or", 4),
+        ("ers", "er", 4),
+        ("ent", "", 5),
+        ("ant", "", 5),
+        ("ous", "", 5),
+        ("ive", "", 5),
+        ("ize", "", 4),
+        ("ise", "", 4),
         # 2-char
-        ("ed",      "",     4),
-        ("ly",      "",     4),
-        ("es",      "",     5),
-        ("er",      "",     4),
+        ("ed", "", 4),
+        ("ly", "", 4),
+        ("es", "", 5),
+        ("er", "", 4),
         # 1-char (last resort)
-        ("s",       "",     4),
+        ("s", "", 4),
     )
 
     for suffix, replacement, min_len in _RULES:
@@ -711,7 +715,7 @@ def _run_file_check(path: str, *, skip_pyright: bool = True) -> str:
                 if r:
                     errors.append(r)
             except ImportError:
-                pass
+                logger.debug("suppressed exception in _run_file_check", exc_info=True)
             # Pyright (slow, optional).
             if not skip_pyright:
                 try:
@@ -721,7 +725,9 @@ def _run_file_check(path: str, *, skip_pyright: bool = True) -> str:
                     if r:
                         errors.append(r)
                 except ImportError:
-                    pass
+                    logger.debug(
+                        "suppressed exception in _run_file_check", exc_info=True
+                    )
         elif path.endswith((".yaml", ".yml", ".toml")):
             r = check_written_yaml_toml("write_file", tool_input, "")
             if r:
@@ -737,6 +743,7 @@ def _run_file_check(path: str, *, skip_pyright: bool = True) -> str:
 
         return " | ".join(errors) if errors else ""
     except Exception:
+        logger.debug("suppressed exception in _run_file_check", exc_info=True)
         return ""
 
 

@@ -15,6 +15,10 @@ import time
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from obscura.core.types import ToolSpec
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -322,7 +326,7 @@ class ToolRegistry:
 
                 Registry.set_tool_registry(self)
             except ImportError:
-                pass
+                logger.debug("suppressed exception in register", exc_info=True)
 
     def register_alias(self, alias: str, canonical: str) -> None:
         """Map *alias* to an already-registered *canonical* tool name.
@@ -604,6 +608,7 @@ def _traced_tool_call(
 
         tracer = get_tracer("obscura.tools")
     except Exception:
+        logger.debug("suppressed exception in _traced_tool_call", exc_info=True)
         return fn(*args, **kwargs)
 
     with tracer.start_as_current_span(f"tool.{_trace_name}") as span:
@@ -621,7 +626,7 @@ def _traced_tool_call(
                 span.set_status(StatusCode.ERROR, str(exc))
                 span.record_exception(exc)
             except ImportError:
-                pass
+                logger.debug("suppressed exception in _traced_tool_call", exc_info=True)
             raise
 
 
@@ -637,6 +642,7 @@ async def _traced_tool_call_async(
 
         tracer = get_tracer("obscura.tools")
     except Exception:
+        logger.debug("suppressed exception in _traced_tool_call_async", exc_info=True)
         return await fn(*args, **kwargs)
 
     with tracer.start_as_current_span(f"tool.{_trace_name}") as span:
@@ -654,7 +660,9 @@ async def _traced_tool_call_async(
                 span.set_status(StatusCode.ERROR, str(exc))
                 span.record_exception(exc)
             except ImportError:
-                pass
+                logger.debug(
+                    "suppressed exception in _traced_tool_call_async", exc_info=True
+                )
             raise
 
 
@@ -667,4 +675,4 @@ def _record_tool_metric(tool_name: str, status: str, duration: float) -> None:
         m.tool_calls_total.add(1, {"tool_name": tool_name, "status": status})
         m.tool_duration_seconds.record(duration, {"tool_name": tool_name})
     except Exception:
-        pass
+        logger.debug("suppressed exception in _record_tool_metric", exc_info=True)

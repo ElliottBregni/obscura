@@ -60,7 +60,8 @@ from obscura.auth.cli_session import (
 )
 
 _SSO_AUTH_HOST = os.environ.get(
-    "OBSCURA_SSO_AUTH_HOST", "https://auth.modernized-ai.com",
+    "OBSCURA_SSO_AUTH_HOST",
+    "https://auth.modernized-ai.com",
 ).rstrip("/")
 
 logger = logging.getLogger(__name__)
@@ -568,6 +569,7 @@ def secrets_strict_env(tail: int, clear: bool) -> None:
         try:
             entry: dict[str, Any] = cast(dict[str, Any], json.loads(raw))
         except ValueError:
+            logger.debug("suppressed exception in secrets_strict_env", exc_info=True)
             click.echo(f"  [malformed] {raw}")
             continue
         ts = entry.get("ts", "?")
@@ -910,6 +912,9 @@ def secrets_cloud_pull_all() -> None:
         try:
             ok = _secrets.store(candidate, value)
         except _secrets.SecretsValidationError as exc:
+            logger.debug(
+                "suppressed exception in secrets_cloud_pull_all", exc_info=True
+            )
             click.secho(f"  skipped {candidate}: {exc}", fg="yellow")
             continue
         if ok:

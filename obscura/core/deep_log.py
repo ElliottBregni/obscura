@@ -96,7 +96,7 @@ class DeepLogger:
                 self._file_handle.write(json.dumps(entry, default=str) + "\n")
             self._file_handle.flush()
         except Exception:
-            pass
+            logger.debug("suppressed exception in flush", exc_info=True)
         self._buffer.clear()
 
     def close(self) -> None:

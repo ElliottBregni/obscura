@@ -74,6 +74,7 @@ def default_socket_dir() -> Path:
         try:
             user = getpass.getuser()
         except Exception:
+            log.debug("suppressed exception in default_socket_dir", exc_info=True)
             user = str(os.getuid()) if hasattr(os, "getuid") else "default"
         d = Path("/tmp") / "obscura-browser" / user
     d.mkdir(parents=True, exist_ok=True)
@@ -151,6 +152,7 @@ class SocketBridge:
                 try:
                     msg = await read_frame(reader)
                 except asyncio.IncompleteReadError:
+                    log.debug("suppressed exception in _handle_client", exc_info=True)
                     break
                 if msg is None:
                     break
@@ -187,9 +189,7 @@ class SocketBridge:
                         )
                         continue
                     args = cast("dict[str, Any]", raw_args)
-                    task = asyncio.create_task(
-                        self._dispatch(writer, cid, name, args)
-                    )
+                    task = asyncio.create_task(self._dispatch(writer, cid, name, args))
                     self._inflight[peer].add(task)
                     task.add_done_callback(
                         lambda t, p=peer: self._inflight.get(p, set()).discard(t)
@@ -224,6 +224,7 @@ class SocketBridge:
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            log.debug("suppressed exception in _dispatch", exc_info=True)
             await self._send(
                 writer,
                 {"type": "error", "id": cid, "message": f"{type(e).__name__}: {e}"},

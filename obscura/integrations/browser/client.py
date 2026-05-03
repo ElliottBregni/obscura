@@ -203,7 +203,9 @@ class BrowserBridgeClient:
         self._pending[cid] = fut
         await self._send({"type": "call", "id": cid, "name": name, "args": args or {}})
         try:
-            return await asyncio.wait_for(fut, timeout=timeout) if timeout else await fut
+            return (
+                await asyncio.wait_for(fut, timeout=timeout) if timeout else await fut
+            )
         except TimeoutError as e:
             msg = f"browser bridge call '{name}' timed out after {timeout}s"
             raise BrowserBridgeError(msg) from e
@@ -347,9 +349,7 @@ async def register_browser_tools(
     ``name_prefix`` lets callers namespace tools (e.g. ``"ext_"``) when the
     bridge tools collide with names already in the registry.
     """
-    client = await BrowserBridgeClient.connect(
-        profile_id=profile_id, browser=browser
-    )
+    client = await BrowserBridgeClient.connect(profile_id=profile_id, browser=browser)
     try:
         specs = await client.list_tools()
     except Exception:
@@ -409,6 +409,7 @@ async def attach_if_running(
     try:
         tools = await client.list_tools()
     except Exception:
+        log.debug("suppressed exception in attach_if_running", exc_info=True)
         tools = []
     status: dict[str, Any] = {
         "browser": entry.get("browser"),

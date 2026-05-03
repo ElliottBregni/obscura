@@ -176,7 +176,7 @@ class TelegramAdapter:
         try:
             await self._client.send_chat_action(chat_id, "typing")
         except Exception:
-            pass  # Non-critical
+            logger.debug("suppressed exception in send_typing", exc_info=True)
 
     async def register_webhook(self, webhook_url: str) -> bool:
         """Register this bot's webhook with Telegram."""

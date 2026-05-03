@@ -157,6 +157,7 @@ def _format_arg_value(val: Any) -> str:
         try:
             formatted = json.dumps(val, indent=2, ensure_ascii=False)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in _format_arg_value", exc_info=True)
             formatted = str(cast(object, val))
     else:
         formatted = str(cast(object, val))
@@ -233,7 +234,9 @@ def _render_tool_panel(tool_name: str, tool_input: dict[str, Any]) -> None:
                     console.print(syn)
                     return
                 except Exception:
-                    pass
+                    logger.debug(
+                        "suppressed exception in _render_tool_panel", exc_info=True
+                    )
 
             for line in val_lines:
                 safe_line: str = markup_escape(_sanitize_text(line))
@@ -412,6 +415,7 @@ async def _run_text_input(placeholder: str = "") -> str:
         with patch_stdout(raw=True):
             return (await session.prompt_async("  \u25b8 ")).strip()
     except (EOFError, KeyboardInterrupt):
+        logger.debug("suppressed exception in _run_text_input", exc_info=True)
         return ""
 
 
@@ -507,6 +511,7 @@ def _is_interactive() -> bool:
     try:
         return sys.stdin.isatty()
     except Exception:
+        logger.debug("suppressed exception in _is_interactive", exc_info=True)
         return False
 
 
@@ -649,6 +654,10 @@ async def ask_multi_select(request: MultiSelectRequest) -> WidgetResult:
 # ---------------------------------------------------------------------------
 
 import re as _re
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Matches lines like "1. Option A", "2) Option B", "- Option C"
 _NUMBERED_ITEM_RE = _re.compile(

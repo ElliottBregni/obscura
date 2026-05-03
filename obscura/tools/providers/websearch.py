@@ -45,8 +45,10 @@ async def _run_websearch(*args: str) -> dict[str, Any]:
                 return cast(dict[str, Any], parsed)
             return {"output": parsed}
         except (json.JSONDecodeError, ValueError):
+            logger.debug("suppressed exception in _run_websearch", exc_info=True)
             return {"output": out.strip()}
     except Exception as e:
+        logger.debug("suppressed exception in _run_websearch", exc_info=True)
         return {"error": str(e)}
 
 

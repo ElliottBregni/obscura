@@ -45,7 +45,9 @@ def register_pretool_guard(hooks_manager: object, guard_func: _GuardFn) -> None:
             hm.bind_handler("PRE_TOOL_USE", _handler, when="before")
             return
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in register_pretool_guard", exc_info=True
+            )
 
     # Try register/bind pair
     if hasattr(hm, "register") and hasattr(hm, "bind"):
@@ -54,7 +56,9 @@ def register_pretool_guard(hooks_manager: object, guard_func: _GuardFn) -> None:
             hm.bind("PRE_TOOL_USE", _handler)
             return
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in register_pretool_guard", exc_info=True
+            )
 
     # Attach to events dict
     if hasattr(hm, "events"):

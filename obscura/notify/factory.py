@@ -4,6 +4,10 @@ import os
 from typing import TYPE_CHECKING, cast
 
 from .sqlite_impl import SQLiteStorage
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from .storage import Storage
@@ -15,6 +19,7 @@ def _default_db_url() -> str:
         from config.notify import get_notify_db_url  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
     except ImportError:
         # Fallback: a file in the user's home, mirroring the obscura runtime layout.
+        logger.debug("suppressed exception in _default_db_url", exc_info=True)
         return f"sqlite:///{os.path.expanduser('~/.obscura/notify.db')}"
     return cast(str, get_notify_db_url())
 

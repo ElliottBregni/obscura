@@ -26,6 +26,7 @@ async def _discover(params: dict[str, Any]) -> dict[str, Any]:
             r.raise_for_status()
             return r.json()  # type: ignore[no-any-return]
     except Exception as e:
+        logger.debug("suppressed exception in _discover", exc_info=True)
         return {"error": str(e)}
 
 

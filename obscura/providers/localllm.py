@@ -471,6 +471,7 @@ class LocalLLMBackend(BackendToolHostMixin):
                 "models_available": len(models.data),
             }
         except Exception as e:
+            logger.debug("suppressed exception in health_check", exc_info=True)
             return {
                 "status": "unhealthy",
                 "base_url": self._base_url,
@@ -494,14 +495,14 @@ class LocalLLMBackend(BackendToolHostMixin):
             models = await self._client.models.list()
         except Exception:
             # Server unreachable or no models endpoint — empty list is fine.
+            logger.debug("suppressed exception in list_models", exc_info=True)
             return []
 
         out: list[RegistryModelInfo] = []
         for model in models.data:
             model_id = getattr(model, "id", "") or "unknown"
             supports_tools = any(
-                keyword in model_id.lower()
-                for keyword in ("tool", "function", "agent")
+                keyword in model_id.lower() for keyword in ("tool", "function", "agent")
             )
             supports_vision = "vision" in model_id.lower()
             out.append(
@@ -559,7 +560,7 @@ class LocalLLMBackend(BackendToolHostMixin):
             if models.data:
                 return models.data[0].id
         except Exception:
-            pass
+            logger.debug("suppressed exception in _discover_model", exc_info=True)
         return None
 
     def _build_create_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -600,6 +601,7 @@ class LocalLLMBackend(BackendToolHostMixin):
                 try:
                     tool_input = json.loads(tc.function.arguments)
                 except (json.JSONDecodeError, TypeError):
+                    logger.debug("suppressed exception in _to_message", exc_info=True)
                     tool_input = {"raw": tc.function.arguments}
                 blocks.append(
                     ContentBlock(
@@ -630,7 +632,7 @@ class LocalLLMBackend(BackendToolHostMixin):
                 else:
                     callback(context)
             except Exception:
-                pass
+                logger.debug("suppressed exception in _run_hooks", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -706,6 +708,7 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
             return cast("dict[str, Any]", parsed)
         return {"raw": raw}
     except json.JSONDecodeError:
+        logger.debug("suppressed exception in _parse_tool_input", exc_info=True)
         return {"raw": raw}
 
 
@@ -714,12 +717,16 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 from obscura.telemetry.traces import NoOpTracer, get_tracer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_backend_tracer() -> Any:
     try:
         return get_tracer("obscura.localllm_backend")
     except Exception:
+        logger.debug("suppressed exception in _get_backend_tracer", exc_info=True)
         return NoOpTracer()
 
 
@@ -728,4 +735,4 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _set_span_attr", exc_info=True)

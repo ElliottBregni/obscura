@@ -24,9 +24,6 @@ from typing import TYPE_CHECKING, Any, cast
 from rich.table import Table
 
 from obscura.agent.definitions import resolve_all_definitions
-from obscura.arbiter.hooks import get_engine as _get_arbiter_engine
-from obscura.arbiter.store import ArbiterStore
-from obscura.arbiter.watchdog import ArbiterWatchdog
 from obscura.auth import secrets as _secrets
 from obscura.auth.cli_user import current_cli_user
 from obscura.cli.app.diff_engine import DiffEngine, DiffHunk
@@ -38,14 +35,9 @@ from obscura.cli.control_commands import (
     cmd_status,
 )
 from obscura.cli.mcp_commands import handle_mcp_command
-from obscura.cli.vector_memory_bridge import auto_save_turn
-from obscura.cli.widgets import (
-    AttentionWidgetRequest,
-    ModelQuestionRequest,
-    ToolConfirmRequest,
-    ask_model_question,
-    confirm_attention,
-    confirm_tool,
+from obscura.cli.vector_memory_bridge import (
+    CLI_NAMESPACE,
+    clear_mcp_noise_memories,
 )
 from obscura.cli.render import (
     TOOL_COLOR,
@@ -86,11 +78,6 @@ from obscura.core.context_window import (
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
-from obscura.core.migrate_external import (
-    clear_decisions as _migrate_clear_decisions,
-    migrate_all as _migrate_all,
-    scan as _migrate_scan,
-)
 from obscura.core.paths import (
     resolve_all_commands_dirs,
     resolve_all_skills_dirs,
@@ -104,41 +91,16 @@ from obscura.core.permission_modes import PermissionMode
 from obscura.core.templates import list_templates, load_template
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
-from obscura.core.workflows import list_workflows, load_workflow, run_workflow
-from obscura.core.workspace import (
-    WorkspaceExistsError,
-    bootstrap_all_builtins,
-    init_workspace,
-)
-from obscura.integrations.a2a.client import A2AClient
-from obscura.kairos.background_sessions import (
-    kill_session as _kill_session,
-    logs as _bg_logs,
-    ps as _bg_ps,
-)
-from obscura.kairos.engine import (
-    is_kairos_enabled as _is_kairos_enabled_cmd,
-    set_kairos_mode,
-)
 from obscura.kairos.goals import GoalBoard
-from obscura.kairos.uds_messaging import (
-    discover_peers as _uds_discover_peers,
-    send_message as uds_send,
-)
-from obscura.kairos.undercover import UndercoverMode
-from obscura.kairos.user_profile import UserProfile
-from obscura.kairos.vault_sync import VaultSync
 from obscura.manifest.models import AgentManifest
-from obscura.plugins.capabilities import resolve_allowed_tools_from_config
 from obscura.plugins.loader import PluginLoader
 from obscura.plugins.registry import PluginEntry, PluginRegistryService
-from obscura.profile.builder import ProfileBuilder
-from obscura.profile.models import ProfileCategory
-from obscura.profile.store import ProfileStore
-from obscura.tools import worktree_observer, worktree_registry
 from obscura.tools.dynamic_discovery import DynamicToolDiscovery
-from obscura.tools.system import Policy, get_system_tool_specs
-from obscura.tools.system.file_state import record_file_access
+from obscura.tools.system import get_system_tool_specs
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import (
@@ -165,6 +127,7 @@ def _safe_list_tools(ctx: REPLContext) -> list[Any]:
     try:
         tools: Any = ctx.client.list_tools()
     except Exception:
+        logger.debug("suppressed exception in _safe_list_tools", exc_info=True)
         return []
     if not isinstance(tools, list):
         return []
@@ -408,14 +371,11 @@ class REPLContext:
 
     # Right-side menu UI state (cmd_menu)
     ui_right_menu_enabled: bool = field(default=True, repr=False)
-    ui_menu_items: dict[str, bool] = field(
-        default_factory=_empty_bool_dict, repr=False
-    )
+    ui_menu_items: dict[str, bool] = field(default_factory=_empty_bool_dict, repr=False)
 
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self.mode_manager is None:
-
             self.mode_manager = ModeManager(TUIMode.CODE)
         return self.mode_manager
 
@@ -432,7 +392,6 @@ class REPLContext:
         """Get or create the AgentRuntime, wiring InteractionBus to CLI."""
         if self.runtime is None:
             from obscura.agent.agents import AgentRuntime
-            from obscura.auth.cli_user import current_cli_user
 
             user = current_cli_user()
             self.runtime = AgentRuntime(user)
@@ -485,8 +444,6 @@ class REPLContext:
         )
         await new_client.start()
         if self.tools_enabled:
-            from obscura.tools.system import get_system_tool_specs
-
             all_specs = get_system_tool_specs()
             mm = self.mode_manager
             mode_allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
@@ -499,7 +456,7 @@ class REPLContext:
 
                 cap_allowed = resolve_allowed_tools_from_config()
             except Exception:
-                pass
+                logger.debug("suppressed exception in recreate_client", exc_info=True)
             for spec in all_specs:
                 # Mode filter (None = all modes allowed)
                 if mode_allowed is not None and spec.name not in mode_allowed:
@@ -589,7 +546,6 @@ class REPLContext:
     def _get_all_skill_loaders(self) -> list[LazySkillLoader]:
         """Get or create skill loaders for all skill directories."""
         if self._dollar_skill_loaders is None:
-
             self._dollar_skill_loaders = [
                 LazySkillLoader(d) for d in resolve_all_skills_dirs()
             ]
@@ -598,9 +554,9 @@ class REPLContext:
     def _get_builtin_skills(self) -> dict[str, str]:
         """Return built-in default skills as {name: content}."""
         try:
-
             return DEFAULT_SKILLS
         except ImportError:
+            logger.debug("suppressed exception in _get_builtin_skills", exc_info=True)
             return {}
 
     def resolve_dollar_skill(self, name: str) -> str | None:
@@ -650,7 +606,6 @@ class REPLContext:
     def _get_command_loader(self) -> LazyCommandLoader:
         """Get or create the lazy @command loader."""
         if self._lazy_command_loader is None:
-
             self._lazy_command_loader = LazyCommandLoader(resolve_all_commands_dirs())
         return self._lazy_command_loader
 
@@ -881,6 +836,7 @@ async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
     try:
         data = target.read_bytes()
     except PermissionError:
+        logger.debug("suppressed exception in cmd_cat", exc_info=True)
         print_error(f"Permission denied: {target}")
         return None
 
@@ -907,6 +863,7 @@ async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
         console.print(syntax)
     except Exception:
         # Fallback to plain text if lexer not found
+        logger.debug("suppressed exception in cmd_cat", exc_info=True)
         console.print(text)
 
     return None
@@ -917,15 +874,16 @@ async def cmd_tail_trace(args: str, _ctx: REPLContext) -> str | None:
     try:
         n = int(args.strip()) if args.strip() else 50
     except Exception:
+        logger.debug("suppressed exception in cmd_tail_trace", exc_info=True)
         n = 50
     try:
-
         out = tail_pretty(n)
         if not out:
             print_info("No trace entries found.")
         else:
             console.print(out)
     except Exception:
+        logger.debug("suppressed exception in cmd_tail_trace", exc_info=True)
         print_error("Failed to read trace log.")
     return None
 
@@ -1020,6 +978,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
                 table.add_row(str(i), status, t.name, desc)
             console.print(table)
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_tools", exc_info=True)
             print_error(f"Failed to list tools: {exc}")
     elif sub == "enable":
         if not sub_arg:
@@ -1178,7 +1137,6 @@ async def cmd_plan(args: str, ctx: REPLContext) -> str | None:
         "it touches and any risks."
     )
 
-
     collected: list[str] = []
     try:
         async for event in ctx.client.run_loop(prompt):
@@ -1186,6 +1144,7 @@ async def cmd_plan(args: str, ctx: REPLContext) -> str | None:
             if hasattr(event, "text") and event.text:
                 collected.append(event.text)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_plan", exc_info=True)
         print_error(str(exc))
         return None
 
@@ -1309,7 +1268,6 @@ async def _diff_accept_reject(
         print_info("No file changes.")
         return None
 
-
     engine = DiffEngine()
     # Build flat hunk list
     all_hunks: list[tuple[dict[str, str], DiffHunk]] = []
@@ -1345,7 +1303,6 @@ async def _diff_side_by_side(ctx: REPLContext) -> str | None:
     from rich.panel import Panel
     from rich.syntax import Syntax
     from rich.text import Text
-
 
     if not ctx.file_changes:
         print_info("No file changes to display.")
@@ -1455,13 +1412,12 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
     console.print(f"Mode: {mm.current.value}")
     # Visual context usage bar.
     try:
-
         cw = get_context_window(ctx.model or "default")
         usage_pct = tokens / cw if cw > 0 else 0.0
 
         console.print(f"  Context: {context_bar(usage_pct)}")
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_context", exc_info=True)
     if tokens > 80_000:
         console.print("[yellow]Warning: context is large. Consider /compact[/]")
     return None
@@ -1525,7 +1481,6 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     summary = ""
     extracted_memories: list[dict[str, str]] = []
     try:
-
         # Convert message_history tuples to dicts for compact_history.
         msg_dicts: list[Any] = [{"role": r, "content": t} for r, t in old]
         _backend_obj = (
@@ -1553,7 +1508,7 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
                 summary = content_str
                 break
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_compact", exc_info=True)
 
     # Fallback: build text summary if LLM didn't produce one.
     if not summary:
@@ -1575,7 +1530,7 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
                 if key and value:
                     console.print(f"  [dim]Memory extracted: {key}[/]")
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_compact", exc_info=True)
 
     # Fresh session with summary prepended.
     ctx.message_history = ctx.message_history[-keep:]
@@ -1761,7 +1716,9 @@ async def _session_interactive_switch(
         if selected is not None:
             await _do_session_switch(selected.id, ctx)
     except Exception:
-        pass
+        logger.debug(
+            "suppressed exception in _session_interactive_switch", exc_info=True
+        )
 
 
 async def _session_switch_by_id(
@@ -1811,11 +1768,13 @@ async def _do_session_switch(session_id: str, ctx: REPLContext) -> None:
         print_ok(f"Switched to session: {session_id[:12]}")
     except Exception:
         # reset_session failed — backend might be dead; full recreate
+        logger.debug("suppressed exception in _do_session_switch", exc_info=True)
         try:
             await ctx.recreate_client(ctx.backend, ctx.model)
             print_ok(f"Switched to session: {session_id[:12]} (reconnected)")
         except Exception as exc:
             # Can't recover — revert
+            logger.debug("suppressed exception in _do_session_switch", exc_info=True)
             ctx.session_id = old_id
             print_error(f"Failed to switch session: {exc}")
             return
@@ -1942,7 +1901,6 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # Load manifest from merged agents config (global-wins, local adds)
-    from obscura.manifest.models import AgentManifest  # noqa: PLC0415
     from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
 
     manifest_loaded = False
@@ -2003,6 +1961,7 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                 return None
 
         except Exception as e:
+            logger.debug("suppressed exception in _agent_spawn", exc_info=True)
             print_warning(f"Failed to load manifest for '{name}': {e}")
 
     # Fallback: spawn with SDK defaults (with warning)
@@ -2074,12 +2033,12 @@ async def _agent_run(args: str, ctx: REPLContext) -> str | None:
         print_error(f"Agent not found: {target}")
         return None
 
-
     try:
         async for event in agent.stream_loop(prompt):
             render_event(event)
         console.print()
     except Exception as exc:
+        logger.debug("suppressed exception in _agent_run", exc_info=True)
         print_error(str(exc))
     return None
 
@@ -2157,6 +2116,7 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
                 if max_turns <= 0:
                     raise ValueError
             except ValueError:
+                logger.debug("suppressed exception in cmd_delegate", exc_info=True)
                 print_error("--max-turns must be a positive integer.")
                 return None
             i += 2
@@ -2166,6 +2126,7 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
                 if max_passes <= 0:
                     raise ValueError
             except ValueError:
+                logger.debug("suppressed exception in cmd_delegate", exc_info=True)
                 print_error("--passes must be a positive integer.")
                 return None
             passes_explicit = True
@@ -2245,12 +2206,15 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
                     max_passes=max_passes,
                 )
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_delegate", exc_info=True)
         print_error("Delegation failed: " + str(exc))
         return None
     finally:
         with contextlib.suppress(Exception):
             await agent.stop()
-    _inject_context = getattr(ctx.client, "inject_context", None) if ctx.client else None
+    _inject_context = (
+        getattr(ctx.client, "inject_context", None) if ctx.client else None
+    )
     if collected_output and callable(_inject_context):
         summary = "\n".join(collected_output)
         _inject_context("[Delegated to " + model + "]\n" + summary)
@@ -2364,7 +2328,6 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # Load merged agent configs once outside the loop (global-wins, local adds)
-    from obscura.manifest.models import AgentManifest  # noqa: PLC0415
     from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
 
     all_agent_configs = load_agent_configs(include_disabled=True)
@@ -2403,6 +2366,7 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
                 )
                 manifest_loaded = True
             except Exception:
+                logger.debug("suppressed exception in _fleet_spawn", exc_info=True)
                 agent = None
 
         if not manifest_loaded:
@@ -2453,7 +2417,6 @@ async def _fleet_run(args: str, ctx: REPLContext) -> str | None:
         print_error("No running agents. Use /fleet spawn first.")
         return None
 
-
     # Color rotation for agents
     colors = ["cyan", "magenta", "yellow", "green", "blue", "red"]
 
@@ -2464,10 +2427,12 @@ async def _fleet_run(args: str, ctx: REPLContext) -> str | None:
             async for event in agent.stream_loop(prompt):
                 renderer.handle(event)
         except KeyboardInterrupt:
+            logger.debug("suppressed exception in _fleet_run", exc_info=True)
             renderer.finish()
             console.print("[dim][interrupted][/]")
             break
         except Exception as exc:
+            logger.debug("suppressed exception in _fleet_run", exc_info=True)
             renderer.finish()
             print_error(f"{agent.config.name}: {exc}")
         else:
@@ -2511,6 +2476,7 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
                 if max_turns <= 0:
                     raise ValueError
             except ValueError:
+                logger.debug("suppressed exception in _fleet_delegate", exc_info=True)
                 print_error("--max-turns must be a positive integer.")
                 return None
             i += 2
@@ -2520,6 +2486,7 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
                 if max_passes <= 0:
                     raise ValueError
             except ValueError:
+                logger.debug("suppressed exception in _fleet_delegate", exc_info=True)
                 print_error("--passes must be a positive integer.")
                 return None
             passes_explicit = True
@@ -2550,7 +2517,6 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
     if agent is None:
         print_error(f"Agent not found: {target}")
         return None
-
 
     renderer = LabeledStreamRenderer(agent.config.name, "cyan")
     try:
@@ -2588,9 +2554,11 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
                     max_passes=max_passes,
                 )
     except KeyboardInterrupt:
+        logger.debug("suppressed exception in _fleet_delegate", exc_info=True)
         renderer.finish()
         console.print("[dim][interrupted][/]")
     except Exception as exc:
+        logger.debug("suppressed exception in _fleet_delegate", exc_info=True)
         renderer.finish()
         print_error(str(exc))
     else:
@@ -2847,7 +2815,6 @@ async def _swarm_run_agent(
     ctx: REPLContext,
 ) -> tuple[str, str]:
     """Spawn, loop, and stop a single swarm agent. Returns (name, output)."""
-    from obscura.manifest.models import AgentManifest
 
     name = assignment.agent_name
     agent = None
@@ -2900,6 +2867,7 @@ async def _swarm_run_agent(
         return (name, result_text)
 
     except Exception as exc:
+        logger.debug("suppressed exception in _swarm_run_agent", exc_info=True)
         error_msg = f"Error: {exc}"
         print_error(f"  {name}: {error_msg}")
         return (name, error_msg)
@@ -2922,6 +2890,7 @@ async def _swarm_synthesize(
         message = await ctx.client.send(prompt)
         return message.text
     except Exception:
+        logger.debug("suppressed exception in _swarm_synthesize", exc_info=True)
         return agent_results
 
 
@@ -2974,6 +2943,7 @@ async def _swarm_background(
         print_ok(f"Swarm [{swarm_id}] complete — /swarm status to see results")
 
     except Exception as exc:
+        logger.debug("suppressed exception in _swarm_background", exc_info=True)
         run["status"] = "failed"
         run["error"] = str(exc)
         print_error(f"Swarm [{swarm_id}] failed: {exc}")
@@ -3112,6 +3082,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
         else:
             assignments = _swarm_plan_fast(task, agent_configs)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_swarm", exc_info=True)
         print_error(f"Swarm planning failed: {exc}")
         return None
 
@@ -3212,6 +3183,7 @@ async def cmd_discover(args: str, ctx: REPLContext) -> str | None:
             "[dim]Categories: web, filesystem, git, database, ai, cloud, search[/]\n",
         )
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_discover", exc_info=True)
         print_error(f"Discovery failed: {exc}")
 
     return None
@@ -3228,6 +3200,7 @@ async def cmd_mcp(args: str, ctx: REPLContext) -> str | None:
     try:
         args_list = shlex.split(args) if args.strip() else []
     except ValueError:
+        logger.debug("suppressed exception in cmd_mcp", exc_info=True)
         args_list = args.split()
 
     handle_mcp_command(args_list)
@@ -3254,6 +3227,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     try:
         tokens = shlex.split(args) if args and args.strip() else []
     except ValueError:
+        logger.debug("suppressed exception in cmd_plugin", exc_info=True)
         tokens = args.split()
 
     if not tokens:
@@ -3263,10 +3237,9 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     sub = tokens[0]
 
     try:
-        from obscura.plugins.registry import PluginEntry, PluginRegistryService
-
         registry = PluginRegistryService()
     except Exception:
+        logger.debug("suppressed exception in cmd_plugin", exc_info=True)
         print_error("Plugin management not available.")
         return None
 
@@ -3275,8 +3248,6 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
 
         # Include discovered builtins that aren't in the registry
         try:
-            from obscura.plugins.loader import PluginLoader
-
             loader = PluginLoader()
             registered_ids = {p.id for p in plugins}
             for spec in loader.discover_builtins():
@@ -3285,7 +3256,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
                     plugins[-1].enabled = True
                     plugins[-1].state = "enabled"
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_plugin", exc_info=True)
 
         # Include discovered Claude Code plugins
         try:
@@ -3299,7 +3270,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
                     plugins[-1].enabled = True
                     plugins[-1].state = "enabled"
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_plugin", exc_info=True)
 
         if not plugins:
             print_info("No plugins registered.")
@@ -3364,6 +3335,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
                         f"Plugin {plugin_name} not found in marketplace {marketplace_name}"
                     )
             except Exception as exc:
+                logger.debug("suppressed exception in cmd_plugin", exc_info=True)
                 print_error(f"Marketplace install failed: {exc}")
             return None
 
@@ -3386,6 +3358,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
                 else:
                     print_error("Could not parse Claude Code plugin manifest")
             except Exception as exc:
+                logger.debug("suppressed exception in cmd_plugin", exc_info=True)
                 print_error(f"Install failed: {exc}")
             return None
 
@@ -3473,6 +3446,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
 
             resolver = MarketplaceResolver()
         except Exception:
+            logger.debug("suppressed exception in cmd_plugin", exc_info=True)
             print_error("Marketplace support not available.")
             return None
 
@@ -3577,6 +3551,7 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
     try:
         tokens = shlex.split(args) if args and args.strip() else []
     except ValueError:
+        logger.debug("suppressed exception in cmd_pack", exc_info=True)
         tokens = args.split()
 
     if not tokens:
@@ -3587,15 +3562,13 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
 
     if sub == "list":
         try:
-            from obscura.core.compiler.loader import load_specs_dirs
-            from obscura.core.paths import resolve_all_specs_dirs
-
             dirs = resolve_all_specs_dirs()
             if not dirs:
                 print_info("No specs directories found.")
                 return None
             registry = load_specs_dirs(dirs)
         except Exception:
+            logger.debug("suppressed exception in cmd_pack", exc_info=True)
             print_error("Could not load specs.")
             return None
 
@@ -3619,12 +3592,10 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
             return None
         pack_name = tokens[1]
         try:
-            from obscura.core.compiler.loader import load_specs_dirs
-            from obscura.core.paths import resolve_all_specs_dirs
-
             dirs = resolve_all_specs_dirs()
             registry = load_specs_dirs(dirs) if dirs else None
         except Exception:
+            logger.debug("suppressed exception in cmd_pack", exc_info=True)
             registry = None
 
         if registry is None:
@@ -3719,6 +3690,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
     try:
         tokens = shlex.split(args) if args and args.strip() else []
     except ValueError:
+        logger.debug("suppressed exception in cmd_inspect", exc_info=True)
         tokens = args.split()
 
     if not tokens:
@@ -3735,10 +3707,9 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             print_error("Usage: /inspect workspace <name>")
             return None
         try:
-            from obscura.core.compiler import compile_workspace
-
             ws = compile_workspace(resource_name, strict=False)
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_inspect", exc_info=True)
             print_error(f"Cannot compile workspace '{resource_name}': {exc}")
             return None
 
@@ -3820,12 +3791,10 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
         # Try compiled workspace first
         agent = None
         try:
-            from obscura.core.compiler import compile_workspace
-
             ws = compile_workspace("default", strict=False)
             agent = next((a for a in ws.agents if a.name == resource_name), None)
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_inspect", exc_info=True)
 
         if agent is not None:
             console.print(f"\n[bold cyan]Agent: {agent.name}[/]")
@@ -3890,6 +3859,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             configs = load_agent_configs(include_disabled=True)
             cfg = configs.get(resource_name)
         except Exception:
+            logger.debug("suppressed exception in cmd_inspect", exc_info=True)
             cfg = None
 
         if cfg:
@@ -3930,7 +3900,6 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             print_error("Usage: /inspect capability <cap-id>")
             return None
         try:
-            from obscura.plugins.loader import PluginLoader
             from obscura.plugins.registries.capability_index import CapabilityIndex
 
             loader = PluginLoader()
@@ -3939,6 +3908,7 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
                 for cap in spec.capabilities:
                     ci.register(cap, spec.id)
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_inspect", exc_info=True)
             print_error(f"Cannot load capabilities: {exc}")
             return None
 
@@ -3966,12 +3936,10 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             print_error("Usage: /inspect pack <name>")
             return None
         try:
-            from obscura.core.compiler.loader import load_specs_dirs
-            from obscura.core.paths import resolve_all_specs_dirs
-
             dirs = resolve_all_specs_dirs()
             registry = load_specs_dirs(dirs) if dirs else None
         except Exception:
+            logger.debug("suppressed exception in cmd_inspect", exc_info=True)
             registry = None
 
         if registry is None:
@@ -4037,6 +4005,7 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
     try:
         tokens = shlex.split(args) if args and args.strip() else []
     except ValueError:
+        logger.debug("suppressed exception in cmd_capability", exc_info=True)
         tokens = args.split()
 
     if not tokens:
@@ -4048,13 +4017,12 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
     try:
         from obscura.plugins.registries import CapabilityIndex
     except ImportError:
+        logger.debug("suppressed exception in cmd_capability", exc_info=True)
         print_error("Capability management not available.")
         return None
 
     if sub == "list":
         try:
-            from obscura.plugins.loader import PluginLoader
-
             loader = PluginLoader()
             specs = loader.discover_builtins()
             ci = CapabilityIndex()
@@ -4076,6 +4044,7 @@ async def cmd_capability(args: str, ctx: REPLContext) -> str | None:
                 if cap.tools:
                     console.print(f"    Tools: {', '.join(cap.tools)}")
         except Exception as e:
+            logger.debug("suppressed exception in cmd_capability", exc_info=True)
             print_error(f"Failed to list capabilities: {e}")
         return None
 
@@ -4153,6 +4122,7 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
+        logger.debug("suppressed exception in _a2a_discover", exc_info=True)
         print_error(
             "A2A integration not available. Install with: pip install obscura[a2a]",
         )
@@ -4186,6 +4156,7 @@ async def _a2a_discover(url: str, ctx: REPLContext) -> str | None:
                     console.print(f"  • [bold]{skill.name}[/bold]: {skill.description}")
 
     except Exception as exc:
+        logger.debug("suppressed exception in _a2a_discover", exc_info=True)
         print_error(f"Discovery failed: {exc}")
     return None
 
@@ -4202,6 +4173,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
+        logger.debug("suppressed exception in _a2a_send", exc_info=True)
         print_error("A2A integration not available")
         return None
 
@@ -4223,6 +4195,7 @@ async def _a2a_send(args: str, ctx: REPLContext) -> str | None:
                                 console.print(_part_text)
 
     except Exception as exc:
+        logger.debug("suppressed exception in _a2a_send", exc_info=True)
         print_error(f"Send failed: {exc}")
     return None
 
@@ -4239,6 +4212,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
+        logger.debug("suppressed exception in _a2a_stream", exc_info=True)
         print_error("A2A integration not available")
         return None
 
@@ -4254,6 +4228,7 @@ async def _a2a_stream(args: str, ctx: REPLContext) -> str | None:
                     )
 
     except Exception as exc:
+        logger.debug("suppressed exception in _a2a_stream", exc_info=True)
         print_error(f"Stream failed: {exc}")
     return None
 
@@ -4267,6 +4242,7 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
     try:
         from obscura.integrations.a2a.client import A2AClient
     except ImportError:
+        logger.debug("suppressed exception in _a2a_list_tasks", exc_info=True)
         print_error("A2A integration not available")
         return None
 
@@ -4295,6 +4271,7 @@ async def _a2a_list_tasks(url: str, ctx: REPLContext) -> str | None:
                 print_info(f"More tasks available (cursor: {next_cursor[:12]}...)")
 
     except Exception as exc:
+        logger.debug("suppressed exception in _a2a_list_tasks", exc_info=True)
         print_error(f"List failed: {exc}")
     return None
 
@@ -4331,6 +4308,7 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
             for k, v in stats.items():
                 console.print(f"  [dim]{k}:[/] {v}")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_memory", exc_info=True)
             print_error(f"Could not get stats: {exc}")
 
     elif subcmd == "search":
@@ -4352,15 +4330,11 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
                         f"  [bold]{i}.[/] (score: {r.score:.2f}) {text_preview}",
                     )
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_memory", exc_info=True)
             print_error(f"Search failed: {exc}")
 
     elif subcmd == "clear":
         try:
-            from obscura.cli.vector_memory_bridge import (
-                CLI_NAMESPACE,
-                clear_mcp_noise_memories,
-            )
-
             scope = rest.strip().lower()
             if scope in {"mcp", "mcp-logs", "mcp_logs"}:
                 count = clear_mcp_noise_memories(ctx.vector_store)
@@ -4371,6 +4345,7 @@ async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
                 count = ctx.vector_store.clear_namespace(CLI_NAMESPACE)
                 print_ok(f"Cleared {count} auto-saved memories from CLI namespace.")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_memory", exc_info=True)
             print_error(f"Clear failed: {exc}")
 
     else:
@@ -4440,6 +4415,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
         ws = init_workspace(force=force)
         print_ok(f"Workspace initialised at {ws}")
     except WorkspaceExistsError:
+        logger.debug("suppressed exception in cmd_init", exc_info=True)
         if not force:
             print_warning(
                 ".obscura/ already exists. Use /init --force to reinitialise.",
@@ -4448,6 +4424,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
                 return None
             # Still run bootstrap even if workspace exists
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_init", exc_info=True)
         print_error(f"Init failed: {exc}")
         return None
 
@@ -4472,6 +4449,7 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
                     "may fail at runtime. Install missing deps manually.",
                 )
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_init", exc_info=True)
             print_warning(f"Bootstrap step failed: {exc}")
 
     # Phase 2: Generate OBSCURA.md if it doesn't exist
@@ -4486,19 +4464,18 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
             if project_md.exists():
                 print_ok(f"Created {project_md}")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_init", exc_info=True)
             print_warning(f"OBSCURA.md generation failed: {exc}")
 
     # Phase 3: Show agent definitions
     try:
-        from obscura.agent.definitions import resolve_all_definitions
-
         defs = resolve_all_definitions()
         if defs:
             print_info(f"Agent definitions available: {len(defs)}")
             for name, defn in sorted(defs.items())[:8]:
                 print_info(f"  {name}: {defn.description[:60]}")
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_init", exc_info=True)
 
     print_ok("Initialization complete. Type /help for commands.")
     return None
@@ -4582,7 +4559,6 @@ async def _running_detail(
 
     # ── Current thinking delta / active text ──
     try:
-
         active_text = get_active_text()
         if active_text:
             preview = active_text[-500:]
@@ -4596,11 +4572,10 @@ async def _running_detail(
             )
             parts.append(Text(preview, style="dim italic"))
     except Exception:
-        pass
+        logger.debug("suppressed exception in _running_detail", exc_info=True)
 
     # ── Recent trace events ──
     try:
-
         entries = tail_entries(30)
         if entries:
             parts.append(Text(""))
@@ -4629,7 +4604,7 @@ async def _running_detail(
                 parts.append(Text.from_markup(line))
                 shown += 1
     except Exception:
-        pass
+        logger.debug("suppressed exception in _running_detail", exc_info=True)
 
     # ── Recent session events from event store ──
     try:
@@ -4672,7 +4647,7 @@ async def _running_detail(
                         line += f" [dim]{detail}[/]"
                     parts.append(Text.from_markup(line))
     except Exception:
-        pass
+        logger.debug("suppressed exception in _running_detail", exc_info=True)
 
     if not parts:
         parts.append(Text("  No data available.", style="dim"))
@@ -4697,7 +4672,7 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
                 await agent.stop()
                 stopped += 1
             except Exception:
-                pass
+                logger.debug("suppressed exception in cmd_kill", exc_info=True)
 
     # 2. Cancel all swarm tasks
     for _sid, run in list(ctx.swarm_runs.items()):
@@ -4868,7 +4843,7 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
                 )
             lines.append(ctbl)
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_running", exc_info=True)
 
     # ------------------------------------------------------------------
     # 3b. Other independent sessions
@@ -4904,7 +4879,7 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
                 )
             lines.append(stbl)
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_running", exc_info=True)
 
     # ------------------------------------------------------------------
     # Assemble panel
@@ -4961,7 +4936,7 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
                 if match:
                     await _running_detail(match[0], ctx)
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_running", exc_info=True)
 
     return None
 
@@ -4982,6 +4957,7 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
     try:
         import obscura.plugins.broker  # noqa: F401  # pyright: ignore[reportUnusedImport]
     except ImportError:
+        logger.debug("suppressed exception in cmd_audit", exc_info=True)
         print_error("Broker module not available.")
         return None
 
@@ -5004,7 +4980,7 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
         if _ctx.supervisor and hasattr(_ctx.supervisor, "_broker"):
             broker = _ctx.supervisor._broker  # noqa: SLF001
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_audit", exc_info=True)
 
     if broker is None:
         print_info("No active broker in this session — no audit entries yet.")
@@ -5061,9 +5037,9 @@ async def cmd_health(_args: str, _ctx: REPLContext) -> str | None:
     Usage: /health
     """
     try:
-        from obscura.plugins.loader import PluginLoader
-        from obscura.plugins.registry import PluginEntry, PluginRegistryService
+        from obscura.integrations.a2a.client import A2AClient  # noqa: F401  # pyright: ignore[reportUnusedImport]
     except ImportError:
+        logger.debug("suppressed exception in cmd_health", exc_info=True)
         print_error("Plugin system not available.")
         return None
 
@@ -5081,7 +5057,7 @@ async def cmd_health(_args: str, _ctx: REPLContext) -> str | None:
                 entry.state = "enabled"
                 plugins.append(entry)
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_health", exc_info=True)
 
     if not plugins:
         print_info("No plugins found.")
@@ -5143,6 +5119,7 @@ async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
     try:
         pass
     except ImportError:
+        logger.debug("suppressed exception in cmd_broker", exc_info=True)
         print_error("Broker module not available.")
         return None
 
@@ -5151,7 +5128,7 @@ async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
         if _ctx.supervisor and hasattr(_ctx.supervisor, "_broker"):
             broker = _ctx.supervisor._broker  # noqa: SLF001
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_broker", exc_info=True)
 
     if broker is None:
         print_info("No active broker in this session.")
@@ -5249,7 +5226,6 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
         print_info(f"No tools matching '{query}'.")
         return None
 
-
     table = Table(
         title=f"Tools matching '{query}' ({len(results)} found)",
         expand=False,
@@ -5287,6 +5263,7 @@ async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
     try:
         mode = PermissionMode(mode_str)
     except ValueError:
+        logger.debug("suppressed exception in cmd_permissions", exc_info=True)
         print_error(
             f"Unknown mode: {mode_str}. Options: default, plan, accept_edits, bypass",
         )
@@ -5364,7 +5341,7 @@ async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
                 if preview:
                     console.print(f"[dim]Last: {preview}...[/]")
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_resume", exc_info=True)
         return None
 
     print_info("Resume with: /resume <search> or /session <id>")
@@ -5455,7 +5432,6 @@ async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
     )
 
     # Agent definitions
-    from obscura.agent.definitions import resolve_all_definitions
 
     defs = resolve_all_definitions()
     checks.append(("Agent definitions", "[green]OK[/]", f"{len(defs)} types available"))
@@ -5491,6 +5467,7 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     try:
         level = EffortLevel(level_str)
     except ValueError:
+        logger.debug("suppressed exception in cmd_effort", exc_info=True)
         print_error(f"Unknown level: {level_str}. Options: low, medium, high, max")
         return None
     ctx.effort_level = level.value
@@ -5499,15 +5476,15 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     # Show ultrathink banner for max effort.
     if level == EffortLevel.MAX:
         try:
-
             ultrathink_banner()
         except Exception:
+            logger.debug("suppressed exception in cmd_effort", exc_info=True)
             print_ok(f"⚡ ULTRATHINK activated (budget: {budget:,} tokens)")
     else:
         try:
-
             console.print(f"  {effort_badge(level.value)}  (budget: {budget:,} tokens)")
         except Exception:
+            logger.debug("suppressed exception in cmd_effort", exc_info=True)
             print_ok(f"Effort: {level.value} (thinking budget: {budget:,} tokens)")
     return None
 
@@ -5539,6 +5516,7 @@ async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
             os.kill(pid, 0)
             return True
         except (OSError, ProcessLookupError):
+            logger.debug("suppressed exception in _is_alive", exc_info=True)
             return False
 
     if sub in ("", "on"):
@@ -5656,6 +5634,7 @@ Do NOT use --amend, --no-verify, or -i flags. Do NOT commit .env or credential f
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_commit", exc_info=True)
         print_error(str(exc))
     return None
 
@@ -5693,11 +5672,11 @@ Provide a thorough review covering:
 
 Be concise. Focus on real issues, not style preferences."""
 
-
     try:
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_review", exc_info=True)
         print_error(str(exc))
     return None
 
@@ -5782,11 +5761,11 @@ EOF
 
 Do NOT use --force. Do NOT push to {base} directly."""
 
-
     try:
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_pr", exc_info=True)
         print_error(str(exc))
     return None
 
@@ -5839,11 +5818,11 @@ async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
 
 Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
 
-
     try:
         async for event in ctx.client.run_loop(prompt):
             render_event(event)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_security_review", exc_info=True)
         print_error(str(exc))
     return None
 
@@ -6034,6 +6013,7 @@ Rules:
                 if hasattr(event, "text") and event.text:
                     output_lines.append(event.text)
         except Exception as exc:
+            logger.debug("suppressed exception in _run_specialist", exc_info=True)
             output_lines.append(f"Error: {exc}")
         return name, "".join(output_lines)
 
@@ -6097,12 +6077,12 @@ One paragraph overall assessment. Mention total files reviewed: {total_files}.
 {all_findings[:20000]}
 """
 
-
     console.print(Rule("[bold white]UNIFIED REPORT[/]", style="white"))
     try:
         async for event in ctx.client.run_loop(verifier_prompt):
             render_event(event)
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_ultrareview", exc_info=True)
         print_error(f"Verification pass failed: {exc}")
 
     return None
@@ -6189,7 +6169,6 @@ async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_template(args: str, ctx: REPLContext) -> str | None:
     """Manage and run task templates. Usage: /template list|run <name>|new <name>."""
-    from obscura.core.templates import list_templates, load_template
 
     parts = args.strip().split(None, 1)
     sub = parts[0] if parts else "list"
@@ -6225,6 +6204,7 @@ async def cmd_template(args: str, ctx: REPLContext) -> str | None:
             async for event in ctx.client.run_loop(prompt):
                 render_event(event)
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_template", exc_info=True)
             print_error(str(exc))
         return None
 
@@ -6248,7 +6228,6 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
         return None
     # Show a summary of all tool calls from the session.
     if hasattr(collapser, "_group") or True:
-
         tracker = get_cost_tracker()
         print_info(
             tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.",
@@ -6268,7 +6247,6 @@ async def cmd_goals(args: str, ctx: REPLContext) -> str | None:
       /goals abandon <id>   Abandon a goal
       /goals edit <id>      Open goal file in $EDITOR
     """
-    from obscura.kairos.goals import GoalBoard
 
     board = GoalBoard()
     tokens = [t for t in args.strip().split(None, 1) if t]
@@ -6449,6 +6427,7 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
                         f"[dim]{e.target_id}[/] score={e.score.composite:.2f}{fb}"
                     )
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_arbiter", exc_info=True)
             print_error(f"Could not read Arbiter status: {exc}")
         return None
 
@@ -6486,6 +6465,7 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
                     f"[dim]{row['target_id']}[/] score={row['composite']:.2f}{fb_str}"
                 )
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_arbiter", exc_info=True)
             print_error(f"Could not read verdicts: {exc}")
         return None
 
@@ -6505,6 +6485,7 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
                     pct = (cnt / stats["total"] * 100) if stats["total"] else 0
                     console.print(f"  {v:10s}: {cnt:4d} ({pct:.0f}%)")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_arbiter", exc_info=True)
             print_error(f"Could not read stats: {exc}")
         return None
 
@@ -6523,6 +6504,7 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
             for r in results:
                 console.print(f"  {r}")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_arbiter", exc_info=True)
             print_error(f"Watchdog sweep failed: {exc}")
         return None
 
@@ -6553,6 +6535,9 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
                 try:
                     data = json.loads(sp.read_text(encoding="utf-8"))
                 except Exception:
+                    logger.debug(
+                        "suppressed exception in _write_setting", exc_info=True
+                    )
                     data = {}
             # dot-notation like "kairos.enabled"
             parts = k.split(".")
@@ -6564,7 +6549,7 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
             cur[parts[-1]] = v
             sp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         except Exception:
-            pass
+            logger.debug("suppressed exception in _write_setting", exc_info=True)
 
     tokens = [t for t in args.strip().split() if t]
     if not tokens or tokens[0] == "status":
@@ -6629,7 +6614,6 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_attribution(_args: str, _ctx: REPLContext) -> str | None:
     """Show AI commit attribution summary."""
-    from obscura.core.commit_attribution import get_attribution_tracker
 
     tracker = get_attribution_tracker()
     summary = tracker.summary()
@@ -6702,9 +6686,10 @@ async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
     result = kill_session(sid)
     print_info(result)
     return None
+
+
 async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
     """Show context-aware file suggestions based on recent activity."""
-    from obscura.core.context_suggestions import suggest_files
     from obscura.tools.system.file_state import (
         get_recently_modified_files,
         get_recently_read_files,
@@ -6917,6 +6902,7 @@ async def cmd_rewind(args: str, ctx: REPLContext) -> str | None:
             Path(fc["path"]).write_text(fc["original"])
             rewound += 1
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_rewind", exc_info=True)
             print_error(f"Failed to rewind {fc['path']}: {exc}")
 
     ctx.file_changes = ctx.file_changes[:-n] if n < len(ctx.file_changes) else []
@@ -6939,6 +6925,7 @@ async def cmd_rename(args: str, ctx: REPLContext) -> str | None:
         print_ok(f"Session renamed: {title}")
     except Exception:
         # Fallback: store in metadata if update_summary doesn't exist.
+        logger.debug("suppressed exception in cmd_rename", exc_info=True)
         print_ok(f"Session title set: {title}")
     return None
 
@@ -6962,6 +6949,7 @@ async def cmd_tag(args: str, ctx: REPLContext) -> str | None:
                 tags.append(tag)
                 print_ok(f"Tag added: {tag}")
     except Exception:
+        logger.debug("suppressed exception in cmd_tag", exc_info=True)
         print_ok(f"Tagged session: {tag}")
     return None
 
@@ -6973,6 +6961,7 @@ async def cmd_version(_args: str, _ctx: REPLContext) -> str | None:
 
         ver = pkg_version("obscura")
     except Exception:
+        logger.debug("suppressed exception in cmd_version", exc_info=True)
         ver = "dev"
 
     console.print(f"[bold]Obscura[/] {ver}")
@@ -7022,11 +7011,13 @@ async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
                     print_error("Clipboard command failed. Try: brew install xclip")
             except FileNotFoundError:
                 # Fallback: write to file.
+                logger.debug("suppressed exception in cmd_copy", exc_info=True)
                 out_path = Path.home() / ".obscura" / "output" / "last_response.txt"
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 out_path.write_text(text, encoding="utf-8")
                 print_ok(f"Saved to {out_path}")
             except Exception as exc:
+                logger.debug("suppressed exception in cmd_copy", exc_info=True)
                 print_error(f"Copy failed: {exc}")
             return None
 
@@ -7087,7 +7078,6 @@ async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
     """View deep logs. Usage: /log [tail N | path | stats]."""
-    from obscura.core.deep_log import dlog
 
     sub = args.strip().lower()
 
@@ -7161,6 +7151,7 @@ async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
             else:
                 console.print(f"  [dim]{time_str}[/] {etype}: {json.dumps(data)[:80]}")
         except Exception:
+            logger.debug("suppressed exception in cmd_log", exc_info=True)
             console.print(f"  [dim]{line[:100]}[/]")
 
     console.print(
@@ -7204,10 +7195,9 @@ async def _oneshot_stream(client: Any, prompt: str, idle_timeout: float = 60.0) 
     try:
         while True:
             try:
-                chunk = await asyncio.wait_for(
-                    stream.__anext__(), timeout=idle_timeout
-                )
+                chunk = await asyncio.wait_for(stream.__anext__(), timeout=idle_timeout)
             except StopAsyncIteration:
+                logger.debug("suppressed exception in _oneshot_stream", exc_info=True)
                 break
             except TimeoutError:
                 raise _OneshotStalled("".join(parts), idle_timeout) from None
@@ -7219,7 +7209,7 @@ async def _oneshot_stream(client: Any, prompt: str, idle_timeout: float = 60.0) 
             try:
                 await aclose()
             except Exception:
-                pass
+                logger.debug("suppressed exception in _oneshot_stream", exc_info=True)
     return "".join(parts)
 
 
@@ -7247,6 +7237,7 @@ async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
         else:
             print_info("(no response)")
     except _OneshotStalled as stalled:
+        logger.debug("suppressed exception in cmd_btw", exc_info=True)
         if stalled.partial:
             from rich.markdown import Markdown as RichMarkdown
 
@@ -7259,6 +7250,7 @@ async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
                 f"Side question stalled — no output for {stalled.idle_timeout:.0f}s."
             )
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_btw", exc_info=True)
         print_error(f"Side question failed: {exc}")
     return None
 
@@ -7303,6 +7295,7 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
         else:
             print_info("(no summary generated)")
     except _OneshotStalled as stalled:
+        logger.debug("suppressed exception in cmd_summary", exc_info=True)
         if stalled.partial:
             from rich.markdown import Markdown as RichMarkdown
 
@@ -7311,10 +7304,9 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
         else:
-            print_error(
-                f"Summary stalled — no output for {stalled.idle_timeout:.0f}s."
-            )
+            print_error(f"Summary stalled — no output for {stalled.idle_timeout:.0f}s.")
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_summary", exc_info=True)
         print_error(f"Summary failed: {exc}")
     return None
 
@@ -7458,14 +7450,16 @@ async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
                 if prompt_or_cmd.startswith("/"):
                     await handle_command(prompt_or_cmd, ctx)
                 else:
-
                     try:
                         async for event in ctx.client.run_loop(prompt_or_cmd):
                             render_event(event)
                     except Exception as exc:
+                        logger.debug(
+                            "suppressed exception in _loop_body", exc_info=True
+                        )
                         print_error(f"Loop error: {exc}")
         except asyncio.CancelledError:
-            pass
+            logger.debug("suppressed exception in _loop_body", exc_info=True)
 
     task = asyncio.get_event_loop().create_task(_loop_body())
     _loop_tasks[label] = task
@@ -7487,7 +7481,7 @@ def _parse_interval(s: str) -> float | None:
         if s.endswith("h"):
             return float(s[:-1]) * 3600
     except ValueError:
-        pass
+        logger.debug("suppressed exception in _parse_interval", exc_info=True)
     return None
 
 
@@ -7611,11 +7605,11 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
         if prompt.startswith("/"):
             await handle_command(prompt, ctx)
         else:
-
             try:
                 async for event in ctx.client.run_loop(prompt):
                     render_event(event)
             except Exception as exc:
+                logger.debug("suppressed exception in cmd_schedule", exc_info=True)
                 print_error(f"Schedule run error: {exc}")
         sched["last_run"] = __import__("datetime").datetime.now(UTC).isoformat()
         (schedule_dir / f"{sched['id']}.json").write_text(
@@ -7652,7 +7646,7 @@ def _load_schedules(sdir: Path) -> list[dict[str, Any]]:
         try:
             schedules.append(json.loads(f.read_text(encoding="utf-8")))
         except Exception:
-            pass
+            logger.debug("suppressed exception in _load_schedules", exc_info=True)
     return schedules
 
 
@@ -7671,7 +7665,7 @@ def _delete_schedule(sdir: Path, prefix: str) -> bool:
                 f.unlink()
                 return True
         except Exception:
-            pass
+            logger.debug("suppressed exception in _delete_schedule", exc_info=True)
     return False
 
 
@@ -7805,6 +7799,7 @@ async def cmd_worktree(args: str, _ctx: REPLContext) -> str | None:
         /worktree sweep           — mark dead-PID entries as orphan
         /worktree cleanup         — sweep + prune missing paths + drop orphan dirs
     """
+
     from obscura.tools import worktree_observer, worktree_registry
 
     parts = args.strip().split(None, 1)
@@ -7938,6 +7933,7 @@ async def cmd_config(args: str, _ctx: REPLContext) -> str | None:
 
             console.print(Syntax(json.dumps(data, indent=2), "json", theme="monokai"))
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_config", exc_info=True)
             print_error(f"Failed to read settings: {exc}")
         return None
 
@@ -7975,6 +7971,7 @@ async def cmd_config(args: str, _ctx: REPLContext) -> str | None:
     try:
         value: Any = json.loads(value_str)
     except json.JSONDecodeError:
+        logger.debug("suppressed exception in cmd_config", exc_info=True)
         value = value_str
 
     parts_list = key.split(".")
@@ -8161,7 +8158,6 @@ async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
 
 async def cmd_whoami(_args: str, _ctx: REPLContext) -> str | None:
     """Show the currently authenticated Supabase user. Usage: /whoami."""
-    from obscura.cli.auth_commands import CREDENTIALS_PATH, load_session
 
     session = load_session()
     if session is None:
@@ -8197,7 +8193,6 @@ async def cmd_secrets(args: str, _ctx: REPLContext) -> str | None:
     Env vars always win over keyring, so Docker/CI keep working unchanged.
     For hidden-input ``set``, prefer ``obscura-auth secrets set <NAME>``.
     """
-    from obscura.auth import secrets as _secrets
 
     raw_tokens = args.strip().split()
     force = "--force" in raw_tokens
@@ -8258,6 +8253,7 @@ async def cmd_secrets(args: str, _ctx: REPLContext) -> str | None:
         try:
             stored = _secrets.store(name, positional[2].strip())
         except _secrets.SecretsValidationError as exc:
+            logger.debug("suppressed exception in cmd_secrets", exc_info=True)
             print_error(str(exc))
             return None
         if not stored:
@@ -8287,6 +8283,7 @@ async def cmd_release_notes(_args: str, _ctx: REPLContext) -> str | None:
 
         ver = pkg_version("obscura")
     except Exception:
+        logger.debug("suppressed exception in cmd_release_notes", exc_info=True)
         ver = "dev"
 
     for candidate in [Path.cwd() / "CHANGELOG.md", Path.cwd().parent / "CHANGELOG.md"]:
@@ -8390,6 +8387,7 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
 
             ver = pkg_version("obscura")
         except Exception:
+            logger.debug("suppressed exception in cmd_bug", exc_info=True)
             ver = "dev"
         report = (
             f"## Bug Report\n\n"
@@ -8410,11 +8408,10 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
             )
             print_ok("Template copied to clipboard.")
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_bug", exc_info=True)
         return None
 
     # Default: show recent errors
-    from obscura.core.deep_log import dlog
 
     log_path = Path(dlog.log_path)
     if not log_path.exists():
@@ -8427,7 +8424,7 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
             if entry.get("type") == "error":
                 errors.append(f"  {entry.get('data', {}).get('message', '?')[:100]}")
         except Exception:
-            pass
+            logger.debug("suppressed exception in cmd_bug", exc_info=True)
         if len(errors) >= 10:
             break
     if errors:
@@ -8538,6 +8535,7 @@ async def cmd_goal(args: str, ctx: REPLContext) -> str | None:
             async for event in ctx.client.run_loop(check_prompt):
                 render_event(event)
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_goal", exc_info=True)
             print_error(str(exc))
         return None
 
@@ -8557,7 +8555,7 @@ async def cmd_goal(args: str, ctx: REPLContext) -> str | None:
             metadata={"goal": text},
         )
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_goal", exc_info=True)
     return None
 
 
@@ -8939,6 +8937,7 @@ async def cmd_token_budget(args: str, ctx: REPLContext) -> str | None:
             ctx._token_budget = None  # type: ignore[attr-defined]
             print_ok(f"Cost budget set: ${amount:.2f}")
         except ValueError:
+            logger.debug("suppressed exception in cmd_token_budget", exc_info=True)
             print_error("Invalid amount. Use: /token-budget $0.50")
         return None
 
@@ -8955,6 +8954,7 @@ async def cmd_token_budget(args: str, ctx: REPLContext) -> str | None:
         ctx._cost_budget = None  # type: ignore[attr-defined]
         print_ok(f"Token budget set: {budget:,}")
     except ValueError:
+        logger.debug("suppressed exception in cmd_token_budget", exc_info=True)
         print_error(
             "Invalid budget. Use: /token-budget 50000 or /token-budget 50k or /token-budget $0.50"
         )
@@ -8972,7 +8972,6 @@ async def cmd_tool_policy(args: str, ctx: REPLContext) -> str | None:
         /tool-policy deny <tool> [tool...]    — blacklist specific tools
         /tool-policy reset                   — restore default policy
     """
-    from obscura.core.tool_policy import ToolPolicy
 
     current: ToolPolicy | None = getattr(ctx.client, "_tool_policy", None)
     tokens = args.strip().split()
@@ -9041,6 +9040,7 @@ async def cmd_context_inject(args: str, ctx: REPLContext) -> str | None:
             )
             content = proc.stdout.decode("utf-8", errors="replace")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_context_inject", exc_info=True)
             print_error(f"Clipboard read failed: {exc}")
             return None
     else:
@@ -9051,6 +9051,7 @@ async def cmd_context_inject(args: str, ctx: REPLContext) -> str | None:
         try:
             content = path.read_text(encoding="utf-8", errors="replace")
         except Exception as exc:
+            logger.debug("suppressed exception in cmd_context_inject", exc_info=True)
             print_error(f"Failed to read: {exc}")
             return None
 
@@ -9124,6 +9125,7 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
         else:
             print_info("(no recap generated)")
     except _OneshotStalled as stalled:
+        logger.debug("suppressed exception in cmd_recap", exc_info=True)
         if stalled.partial:
             from rich.markdown import Markdown as RichMarkdown
 
@@ -9132,10 +9134,9 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
         else:
-            print_error(
-                f"Recap stalled — no output for {stalled.idle_timeout:.0f}s."
-            )
+            print_error(f"Recap stalled — no output for {stalled.idle_timeout:.0f}s.")
     except Exception as exc:
+        logger.debug("suppressed exception in cmd_recap", exc_info=True)
         print_error(f"Recap failed: {exc}")
     return None
 
@@ -9309,7 +9310,6 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
 
     # Vector-backed profile.
     try:
-        from obscura.auth.cli_user import current_cli_user
         from obscura.profile.builder import ProfileBuilder
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
@@ -9329,7 +9329,7 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
         if prefs:
             communication_style = "; ".join(f.value for f in prefs[:3])
     except Exception:
-        pass
+        logger.debug("suppressed exception in _resolve_phantom_identity", exc_info=True)
 
     # Markdown fallback for name.
     if name == "the user":
@@ -9344,17 +9344,17 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
                 if profile_summary.startswith("(no"):
                     profile_summary = UserProfile().active_summary(max_lines=20)
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in _resolve_phantom_identity", exc_info=True
+            )
 
     # Goals.
     try:
-        from obscura.kairos.goals import GoalBoard
-
         gs = GoalBoard().active_summary(max_lines=8)
         if gs:
             goals_summary = gs
     except Exception:
-        pass
+        logger.debug("suppressed exception in _resolve_phantom_identity", exc_info=True)
 
     return name, profile_summary, communication_style, goals_summary
 
@@ -9471,6 +9471,7 @@ async def cmd_phantom(args: str, ctx: REPLContext) -> str | None:
             try:
                 new_level = int(modifier)
             except ValueError:
+                logger.debug("suppressed exception in cmd_phantom", exc_info=True)
                 print_error(
                     f"Unknown level: {modifier}. Use 1-5 or shadow/copilot/partner/lead/takeover."
                 )
@@ -9594,7 +9595,7 @@ def _phantom_mode_on(
 
         UndercoverMode().force(True)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _phantom_mode_on", exc_info=True)
 
 
 def _phantom_mode_off(ctx: REPLContext, mode: str) -> None:
@@ -9624,7 +9625,7 @@ def _phantom_mode_off(ctx: REPLContext, mode: str) -> None:
 
             UndercoverMode().auto()
         except Exception:
-            pass
+            logger.debug("suppressed exception in _phantom_mode_off", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -9783,6 +9784,7 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
                 ):
                     render_event(event)
             except Exception as exc:
+                logger.debug("suppressed exception in cmd_interview", exc_info=True)
                 print_error(str(exc))
                 break
 
@@ -9791,6 +9793,7 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
             try:
                 answer = await _interview_input()
             except (KeyboardInterrupt, EOFError):
+                logger.debug("suppressed exception in cmd_interview", exc_info=True)
                 print_info("\nInterview ended.")
                 break
 
@@ -9818,7 +9821,7 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
             await vs.sync()
             print_info("Vault synced with interview results.")
     except Exception:
-        pass
+        logger.debug("suppressed exception in cmd_interview", exc_info=True)
 
     return None
 
@@ -9831,6 +9834,7 @@ async def _interview_input() -> str:
         try:
             return input("  → ")
         except EOFError:
+            logger.debug("suppressed exception in _read", exc_info=True)
             return ""
 
     return await loop.run_in_executor(None, _read)

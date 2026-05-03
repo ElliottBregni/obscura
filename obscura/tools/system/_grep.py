@@ -12,6 +12,9 @@ from typing import Any
 
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Grep:
@@ -81,6 +84,7 @@ class Grep:
                 timeout=30.0,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in grep_via_ripgrep", exc_info=True)
             proc.kill()
             await proc.wait()
             return Policy.json_error("timeout", detail="ripgrep timed out after 30s")
@@ -103,6 +107,7 @@ class Grep:
                 try:
                     return Path(fp).stat().st_mtime
                 except OSError:
+                    logger.debug("suppressed exception in _mtime", exc_info=True)
                     return 0.0
 
             files = sorted(lines, key=_mtime, reverse=True)
@@ -127,6 +132,9 @@ class Grep:
                     try:
                         c = int(cnt.strip())
                     except ValueError:
+                        logger.debug(
+                            "suppressed exception in grep_via_ripgrep", exc_info=True
+                        )
                         c = 0
                     count_entries.append({"file": fp, "count": c})
                     total_matches += c
@@ -149,7 +157,9 @@ class Grep:
             # Format: file:line:content  or  file-line-content (context)
             parts = ln.split(":", 2) if ":" in ln else [ln]
             if len(parts) >= 3:
-                matches.append({"file": parts[0], "line": parts[1], "text": parts[2][:500]})
+                matches.append(
+                    {"file": parts[0], "line": parts[1], "text": parts[2][:500]}
+                )
             else:
                 matches.append({"text": ln[:500]})
 
@@ -181,6 +191,7 @@ class Grep:
         try:
             regex = re.compile(pattern, flags)
         except re.error as exc:
+            logger.debug("suppressed exception in grep_via_python", exc_info=True)
             return Policy.json_error("invalid_regex", pattern=pattern, detail=str(exc))
 
         _BINARY_EXTS = {
@@ -218,6 +229,7 @@ class Grep:
             try:
                 text = fp.read_text(encoding="utf-8", errors="replace")
             except (OSError, PermissionError):
+                logger.debug("suppressed exception in _search_file", exc_info=True)
                 return
             file_match_count = 0
             for lineno, line in enumerate(text.splitlines(), 1):
@@ -225,7 +237,11 @@ class Grep:
                     file_match_count += 1
                     if output_mode == "content":
                         matches.append(
-                            {"file": str(fp), "line": lineno, "text": line.rstrip()[:500]},
+                            {
+                                "file": str(fp),
+                                "line": lineno,
+                                "text": line.rstrip()[:500],
+                            },
                         )
             if file_match_count > 0:
                 file_counts[str(fp)] = file_match_count
@@ -250,6 +266,7 @@ class Grep:
                     timeout=30.0,
                 )
             except TimeoutError:
+                logger.debug("suppressed exception in grep_via_python", exc_info=True)
                 return Policy.json_error(
                     "timeout",
                     path=str(target),
@@ -410,7 +427,9 @@ class Grep:
         **kwargs: Any,
     ) -> str:
         target = Policy.resolve_path(path)
-        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(target):
+        if not Policy.unsafe_full_access_enabled() and not Policy.is_path_allowed(
+            target
+        ):
             return Policy.json_error("path_not_allowed", path=str(target))
         if not target.exists():
             return Policy.json_error("path_not_found", path=str(target))

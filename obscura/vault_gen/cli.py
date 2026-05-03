@@ -29,7 +29,9 @@ def _configure_logging(verbose: bool) -> None:
 
 @click.group()
 @click.version_option(package_name="vault-gen")
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
+@click.option(
+    "--verbose", "-v", is_flag=True, default=False, help="Enable debug logging."
+)
 @click.pass_context
 def main(ctx: click.Context, verbose: bool) -> None:
     """vault-gen: scaffold Obsidian-compatible git-backed repos for Obscura."""
@@ -65,9 +67,11 @@ def init(name: str, repo_type: str, destination: str | None) -> None:
     try:
         repo_path = generate_repo(config)
     except FileExistsError as exc:
+        log.debug("suppressed exception in init", exc_info=True)
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
     except Exception as exc:
+        log.debug("suppressed exception in init", exc_info=True)
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
 
@@ -142,6 +146,7 @@ def link(repo_path: str, obscura_path: str) -> None:
         access.link_obsura(op)
         click.echo(f"✓ Linked {git_root}  →  Obscura at {op}")
     except Exception as exc:
+        log.debug("suppressed exception in link", exc_info=True)
         click.echo(f"Warning: could not update Obscura config: {exc}", err=True)
         click.echo("Registry entry saved. Configure Obscura manually if needed.")
 
@@ -237,8 +242,18 @@ def sync() -> None:
 
 @sync.command("push")
 @click.argument("repo_name")
-@click.option("--adapter", "adapter_name", default=None, help="Adapter to use (default: all enabled).")
-@click.option("--dry-run", is_flag=True, default=False, help="Show what would change without applying.")
+@click.option(
+    "--adapter",
+    "adapter_name",
+    default=None,
+    help="Adapter to use (default: all enabled).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Show what would change without applying.",
+)
 def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
     """Push repo state to external backend(s)."""
     from obscura.vault_gen.access.repo import RepoAccess
@@ -269,6 +284,7 @@ def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
         try:
             adapter = registry.get_adapter(adapter_cfg.name)
         except KeyError as exc:
+            log.debug("suppressed exception in sync_push", exc_info=True)
             click.echo(f"Error: {exc}", err=True)
             continue
 
@@ -277,7 +293,9 @@ def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
             if not changes:
                 click.echo(f"[{adapter_cfg.name}] No changes.")
             else:
-                click.echo(f"[{adapter_cfg.name}] Would apply {len(changes)} change(s):")
+                click.echo(
+                    f"[{adapter_cfg.name}] Would apply {len(changes)} change(s):"
+                )
                 for c in changes:
                     click.echo(f"  {c.action:8s}  {c.path}  {c.detail}")
         else:
@@ -285,13 +303,17 @@ def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
             if result.success:
                 state.record_push(adapter_cfg.name, len(result.changes))
                 if result.changes:
-                    click.echo(f"[{adapter_cfg.name}] Pushed {len(result.changes)} change(s):")
+                    click.echo(
+                        f"[{adapter_cfg.name}] Pushed {len(result.changes)} change(s):"
+                    )
                     for c in result.changes:
                         click.echo(f"  {c.action:8s}  {c.path}")
                 else:
                     click.echo(f"[{adapter_cfg.name}] Already in sync.")
             else:
-                click.echo(f"[{adapter_cfg.name}] Push failed: {result.error}", err=True)
+                click.echo(
+                    f"[{adapter_cfg.name}] Push failed: {result.error}", err=True
+                )
 
     if not dry_run:
         state.save(repo_path)
@@ -299,7 +321,12 @@ def sync_push(repo_name: str, adapter_name: str | None, dry_run: bool) -> None:
 
 @sync.command("pull")
 @click.argument("repo_name")
-@click.option("--adapter", "adapter_name", default=None, help="Adapter to use (default: all enabled).")
+@click.option(
+    "--adapter",
+    "adapter_name",
+    default=None,
+    help="Adapter to use (default: all enabled).",
+)
 def sync_pull(repo_name: str, adapter_name: str | None) -> None:
     """Pull backend state into the repo."""
     from obscura.vault_gen.access.repo import RepoAccess
@@ -325,6 +352,7 @@ def sync_pull(repo_name: str, adapter_name: str | None) -> None:
         try:
             adapter = registry.get_adapter(adapter_cfg.name)
         except KeyError as exc:
+            log.debug("suppressed exception in sync_pull", exc_info=True)
             click.echo(f"Error: {exc}", err=True)
             continue
 
@@ -332,7 +360,9 @@ def sync_pull(repo_name: str, adapter_name: str | None) -> None:
         if result.success:
             state.record_pull(adapter_cfg.name, len(result.changes))
             if result.changes:
-                click.echo(f"[{adapter_cfg.name}] Pulled {len(result.changes)} change(s):")
+                click.echo(
+                    f"[{adapter_cfg.name}] Pulled {len(result.changes)} change(s):"
+                )
                 for c in result.changes:
                     click.echo(f"  {c.action:8s}  {c.path}")
             else:
@@ -345,7 +375,9 @@ def sync_pull(repo_name: str, adapter_name: str | None) -> None:
 
 @sync.command("diff")
 @click.argument("repo_name")
-@click.option("--adapter", "adapter_name", default=None, help="Adapter to diff against.")
+@click.option(
+    "--adapter", "adapter_name", default=None, help="Adapter to diff against."
+)
 def sync_diff(repo_name: str, adapter_name: str | None) -> None:
     """Show what would change on push without applying anything."""
     from obscura.vault_gen.access.repo import RepoAccess
@@ -370,6 +402,7 @@ def sync_diff(repo_name: str, adapter_name: str | None) -> None:
         try:
             adapter = registry.get_adapter(adapter_cfg.name)
         except KeyError as exc:
+            log.debug("suppressed exception in sync_diff", exc_info=True)
             click.echo(f"Error: {exc}", err=True)
             continue
 

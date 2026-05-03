@@ -14,6 +14,10 @@ import os
 import threading
 from dataclasses import dataclass
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _psycopg2: Any
 _RealDictCursor: Any
@@ -26,6 +30,7 @@ try:
     _psycopg2 = psycopg2
     _RealDictCursor = RealDictCursor
 except ImportError:
+    logger.debug("suppressed exception in <module>", exc_info=True)
     _has_psycopg2 = False
     _psycopg2 = None
     _RealDictCursor = None

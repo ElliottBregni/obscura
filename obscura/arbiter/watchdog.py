@@ -235,6 +235,7 @@ class ArbiterWatchdog:
         """
         actions: list[WatchdogAction] = []
         try:
+
             def _kw(text: str) -> set[str]:
                 words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())
                 return {_stem(w) for w in words if w not in _STOP_WORDS}
@@ -268,7 +269,7 @@ class ArbiterWatchdog:
                     kw1 = _kw(str(t1["subject"]))
                     if not kw1:
                         continue
-                    for t2 in tasks[i + 1:]:
+                    for t2 in tasks[i + 1 :]:
                         if t2["task_id"] in killed:
                             continue
                         kw2 = _kw(str(t2["subject"]))
@@ -290,7 +291,10 @@ class ArbiterWatchdog:
                                         f"with task in same goal '{goal_id}' "
                                         f"— '{str(victim['subject'])[:60]}'"
                                     ),
-                                    metadata={"goal_id": goal_id, "overlap_ratio": ratio},
+                                    metadata={
+                                        "goal_id": goal_id,
+                                        "overlap_ratio": ratio,
+                                    },
                                 )
                             )
         except Exception:
@@ -335,7 +339,9 @@ class ArbiterWatchdog:
                 ).fetchall()
 
                 for row in pending:
-                    blockers = {b.strip() for b in row["blocked_by"].split(",") if b.strip()}
+                    blockers = {
+                        b.strip() for b in row["blocked_by"].split(",") if b.strip()
+                    }
                     # All blockers must be completed for this task to be unblocked
                     if blockers and blockers.issubset(completed_ids):
                         conn.execute(
@@ -351,7 +357,10 @@ class ArbiterWatchdog:
                                     f"Critical path: promoted '{row['subject'][:60]}' "
                                     f"to high priority — all blockers completed"
                                 ),
-                                metadata={"old_priority": row["priority"], "new_priority": 25},
+                                metadata={
+                                    "old_priority": row["priority"],
+                                    "new_priority": 25,
+                                },
                             )
                         )
             finally:

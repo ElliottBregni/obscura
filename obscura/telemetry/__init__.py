@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import threading
 from typing import TYPE_CHECKING, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.config import ObscuraConfig
@@ -88,7 +92,7 @@ def _setup_logging(config: ObscuraConfig) -> None:
 
         configure_logging(config)
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _setup_logging", exc_info=True)
 
 
 def _setup_tracing(config: ObscuraConfig) -> None:
@@ -119,7 +123,7 @@ def _setup_tracing(config: ObscuraConfig) -> None:
         trace.set_tracer_provider(provider)
 
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _setup_tracing", exc_info=True)
 
 
 def _setup_metrics(config: ObscuraConfig) -> None:
@@ -150,7 +154,7 @@ def _setup_metrics(config: ObscuraConfig) -> None:
         metrics.set_meter_provider(provider)
 
     except ImportError:
-        pass
+        logger.debug("suppressed exception in _setup_metrics", exc_info=True)
 
 
 def _setup_fastapi_instrumentation(config: ObscuraConfig) -> None:
@@ -163,4 +167,6 @@ def _setup_fastapi_instrumentation(config: ObscuraConfig) -> None:
         instrumentor_mod: Any = import_module("opentelemetry.instrumentation.fastapi")
         instrumentor_mod.FastAPIInstrumentor().instrument()
     except (ImportError, AttributeError):
-        pass
+        logger.debug(
+            "suppressed exception in _setup_fastapi_instrumentation", exc_info=True
+        )

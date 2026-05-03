@@ -54,6 +54,7 @@ def _as_int(value: Any, default: int = 0) -> int:
     """Coerce *value* to ``int`` (returning *default* when not a non-bool int)."""
     return value if isinstance(value, int) and not isinstance(value, bool) else default
 
+
 # Default search paths for Claude Code plugins.
 _CLAUDE_PLUGIN_DIRS: list[Path] = [
     Path.home() / ".claude" / "plugins" / "cache",  # installed via Claude Code
@@ -349,9 +350,7 @@ class ClaudePluginLoader:
                 fm_str, body = _split_frontmatter(raw)
                 meta_obj: Any = yaml.safe_load(fm_str) if fm_str else {}
                 meta: dict[str, Any] = (
-                    cast(dict[str, Any], meta_obj)
-                    if isinstance(meta_obj, dict)
-                    else {}
+                    cast(dict[str, Any], meta_obj) if isinstance(meta_obj, dict) else {}
                 )
 
                 rel = md_file.relative_to(agents_dir)
@@ -432,16 +431,14 @@ class ClaudePluginLoader:
                                 continue
                             if isinstance(config_raw, dict):
                                 config = cast(dict[str, Any], config_raw)
-                                scoped_name = (
-                                    f"{CLAUDE_NS}:{plugin_name}:{server_name}"
-                                )
+                                scoped_name = f"{CLAUDE_NS}:{plugin_name}:{server_name}"
                                 if scoped_name not in servers:
                                     substituted = self._substitute_mcp_config(
                                         config, plugin_dir, plugin_data, user_config
                                     )
                                     servers[scoped_name] = substituted
             except Exception:
-                pass
+                logger.debug("suppressed exception in _load_mcp_servers", exc_info=True)
 
         return servers
 

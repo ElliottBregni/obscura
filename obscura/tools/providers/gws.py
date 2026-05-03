@@ -125,6 +125,8 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
         try:
             return cast(dict[str, Any], json.loads(output))
         except (json.JSONDecodeError, ValueError):
+            logger.debug("suppressed exception in GWSProvider", exc_info=True)
             return {"output": output.strip()}
     except Exception as e:
+        logger.debug("suppressed exception in GWSProvider", exc_info=True)
         return {"error": str(e)}

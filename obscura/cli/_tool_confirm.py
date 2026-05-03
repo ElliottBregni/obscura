@@ -87,6 +87,7 @@ def track_file_event(
             try:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
+                _log.debug("suppressed exception in track_file_event", exc_info=True)
                 before = ""
             ctx.pending_file_reads[ev.tool_use_id] = (path, before)
 
@@ -98,6 +99,7 @@ def track_file_event(
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
+            _log.debug("suppressed exception in track_file_event", exc_info=True)
             after = ""
         if after != before:
             ctx.add_file_change(path, before, after)
@@ -112,12 +114,12 @@ def track_file_event(
                         lines_removed=abs(added),
                     )
             except Exception:
-                pass
+                _log.debug("suppressed exception in track_file_event", exc_info=True)
             # Record in file history.
             try:
                 record_file_access(Path(path), "edit")
             except Exception:
-                pass
+                _log.debug("suppressed exception in track_file_event", exc_info=True)
 
 
 def maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:

@@ -22,6 +22,10 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from obscura.auth.secrets import safe_subprocess_env
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _TaskStatus = Literal["running", "completed", "failed", "stopped"]
 
@@ -109,12 +113,14 @@ class BackgroundTaskManager:
             task.exit_code = proc.returncode
             task.status = "completed" if proc.returncode == 0 else "failed"
         except TimeoutError:
+            logger.debug("suppressed exception in _watch", exc_info=True)
             proc.kill()
             await proc.wait()
             task.status = "failed"
             task.stderr = f"Timed out after {timeout}s"
             task.exit_code = -1
         except asyncio.CancelledError:
+            logger.debug("suppressed exception in _watch", exc_info=True)
             proc.kill()
             await proc.wait()
             task.status = "stopped"

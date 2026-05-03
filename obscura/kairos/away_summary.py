@@ -89,7 +89,7 @@ async def generate_away_summary(
         if llm_summary:
             return f"Welcome back. {llm_summary}"
     except Exception:
-        pass
+        logger.debug("suppressed exception in generate_away_summary", exc_info=True)
 
     # Fallback: extract first sentence of last assistant message.
     for role, text in reversed(recent):

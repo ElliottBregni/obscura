@@ -10,6 +10,10 @@ import fnmatch
 import os
 from pathlib import Path
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Sandboxing
@@ -48,6 +52,9 @@ def _is_within_allowed_roots(path: Path, roots: list[str]) -> bool:
         try:
             path.relative_to(root_path)
         except ValueError:
+            logger.debug(
+                "suppressed exception in _is_within_allowed_roots", exc_info=True
+            )
             continue
         return True
     return False
@@ -199,12 +206,14 @@ def search_files(
             if p.stat().st_size > max_file_size:
                 continue
         except OSError:
+            logger.debug("suppressed exception in search_files", exc_info=True)
             continue
 
         # Content search
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except (OSError, PermissionError):
+            logger.debug("suppressed exception in search_files", exc_info=True)
             continue
 
         # Find matching lines

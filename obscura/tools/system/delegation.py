@@ -187,6 +187,7 @@ async def _execute_delegation(
             },
         )
     except Exception as exc:
+        logger.debug("suppressed exception in _execute_delegation", exc_info=True)
         elapsed = round(time.monotonic() - t0, 2)
         return json.dumps(
             {

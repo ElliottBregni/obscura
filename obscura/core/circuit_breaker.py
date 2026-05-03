@@ -9,6 +9,9 @@ from __future__ import annotations
 import enum
 import threading
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(enum.Enum):
@@ -158,7 +161,7 @@ class CircuitBreaker:
                 {"backend": self._name, "to_state": "open"},
             )
         except Exception:
-            pass
+            logger.debug("suppressed exception in _record_trip", exc_info=True)
 
 
 class CircuitBreakerRegistry:

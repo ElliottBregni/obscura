@@ -53,7 +53,7 @@ class LSPClient:
                 await self.request("shutdown", None)
                 await self.notify("exit", None)
             except Exception:
-                pass
+                logger.debug("suppressed exception in shutdown", exc_info=True)
         if self._reader_task:
             self._reader_task.cancel()
         if self._process.returncode is None:
@@ -104,7 +104,7 @@ class LSPClient:
                             self._pending[rid].set_result(msg.get("result"))
                         del self._pending[rid]
         except (asyncio.CancelledError, ConnectionError):
-            pass
+            logger.debug("suppressed exception in _read_loop", exc_info=True)
 
     # --- High-level operations ---
 

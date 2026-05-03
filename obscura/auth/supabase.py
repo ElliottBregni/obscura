@@ -173,9 +173,7 @@ def extract_roles(
         seq = cast(list[Any] | tuple[Any, ...], raw)
         candidates = tuple(str(r) for r in seq if isinstance(r, str))
     elif isinstance(raw, str):
-        candidates = (
-            _DEFAULT_AUTHENTICATED_ROLES if raw == "authenticated" else (raw,)
-        )
+        candidates = _DEFAULT_AUTHENTICATED_ROLES if raw == "authenticated" else (raw,)
     else:
         candidates = _DEFAULT_AUTHENTICATED_ROLES
 

@@ -11,6 +11,10 @@ import time
 from typing import Any
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Max inline sizes before truncation.
 _MAX_BODY = 500_000
@@ -63,6 +67,7 @@ async def _http_json(
                 result["error"] = f"HTTP {resp.status_code}"
             return result
     except Exception as exc:
+        logger.debug("suppressed exception in _http_json", exc_info=True)
         elapsed = round(time.monotonic() - t0, 2)
         return {
             "ok": False,
@@ -109,6 +114,7 @@ def _run_cli(command: list[str]) -> dict[str, Any]:
             result["stderr_full_size"] = len(stderr)
         return result
     except subprocess.TimeoutExpired:
+        logger.debug("suppressed exception in _run_cli", exc_info=True)
         elapsed = round(time.monotonic() - t0, 2)
         return {
             "ok": False,
@@ -117,6 +123,7 @@ def _run_cli(command: list[str]) -> dict[str, Any]:
             "duration_seconds": elapsed,
         }
     except Exception as exc:
+        logger.debug("suppressed exception in _run_cli", exc_info=True)
         elapsed = round(time.monotonic() - t0, 2)
         return {
             "ok": False,
@@ -282,6 +289,7 @@ def fzf_filter(query: str, input_text: str, **_: Any) -> dict[str, Any]:
             "duration_seconds": round(time.monotonic() - t0, 2),
         }
     except Exception as exc:
+        logger.debug("suppressed exception in fzf_filter", exc_info=True)
         return {
             "ok": False,
             "error": type(exc).__name__,
@@ -317,6 +325,7 @@ def duckdb_query(query: str, database: str = ":memory:", **_: Any) -> dict[str, 
             "duration_seconds": round(time.monotonic() - t0, 2),
         }
     except Exception as exc:
+        logger.debug("suppressed exception in duckdb_query", exc_info=True)
         return {
             "ok": False,
             "error": type(exc).__name__,
@@ -343,6 +352,7 @@ def datafusion_query(query: str, **_: Any) -> dict[str, Any]:
             "duration_seconds": round(time.monotonic() - t0, 2),
         }
     except Exception as exc:
+        logger.debug("suppressed exception in datafusion_query", exc_info=True)
         return {
             "ok": False,
             "error": type(exc).__name__,

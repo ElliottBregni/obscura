@@ -85,7 +85,7 @@ async def _post_turn_handler(context: dict[str, Any]) -> dict[str, Any]:
     try:
         files_touched = get_recently_modified_files(limit=20)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _post_turn_handler", exc_info=True)
 
     score = await engine.evaluate(
         ArbiterCheckKind.MODEL_TURN,
@@ -166,6 +166,7 @@ async def _run_tests_on_complete() -> str:
             return f"Test failures after completion: {'; '.join(test_issues)}"
         return ""
     except Exception:
+        logger.debug("suppressed exception in _run_tests_on_complete", exc_info=True)
         return ""
 
 

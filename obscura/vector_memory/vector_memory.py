@@ -235,6 +235,7 @@ class VectorMemoryStore:
             _half_life_raw = os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS")
             half_life = float(_half_life_raw) if _half_life_raw is not None else None
         except Exception:
+            _log.debug("suppressed exception in _create_default_backend", exc_info=True)
             half_life = None
         config = BackendConfig(
             user_id=self.user_id,

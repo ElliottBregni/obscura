@@ -193,6 +193,7 @@ class NativeNotifier:
                 return buttons[idx]
         except ValueError:
             # Try matching by name
+            logger.debug("suppressed exception in _terminal_dialog", exc_info=True)
             for b in buttons:
                 if b.lower() == choice.lower():
                     return b

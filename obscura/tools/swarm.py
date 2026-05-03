@@ -203,6 +203,7 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                     )
                     _background_agents[agent_id]["result"] = result
                 except Exception as exc:
+                    logger.debug("suppressed exception in _bg_run", exc_info=True)
                     _background_agents[agent_id]["status"] = "failed"
                     _background_agents[agent_id]["error"] = str(exc)
 
@@ -252,7 +253,7 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                 cfg["max_turns"] = defn.max_turns
                 _definition_match = True
         except Exception:
-            pass
+            logger.debug("suppressed exception in _handler", exc_info=True)
         if cfg is None:
             cfg = ctx.agent_configs.get(agent_type)
         agent = None
@@ -330,7 +331,7 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                         parent_session_id=ctx.session_id or "",
                     )
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in _handler", exc_info=True)
 
             await agent.start()
 
@@ -346,7 +347,7 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                         agent.id, SessionStatus.COMPLETED
                     )
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in _handler", exc_info=True)
 
             result_text = "".join(output_lines)
             return json.dumps(
@@ -363,7 +364,7 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                 try:
                     await ctx.event_store.update_status(agent.id, SessionStatus.FAILED)
                 except Exception:
-                    pass
+                    logger.debug("suppressed exception in _handler", exc_info=True)
 
             logger.warning(
                 "spawn_subagent failed for '%s': %s",
@@ -465,7 +466,7 @@ async def _run_one_agent(
             cfg["tools"] = list(defn.tools)
             cfg["max_turns"] = defn.max_turns
     except Exception:
-        pass
+        logger.debug("suppressed exception in _run_one_agent", exc_info=True)
     if cfg is None:
         cfg = ctx.agent_configs.get(agent_type)
 
@@ -723,6 +724,7 @@ def make_send_message_tool(ctx: SwarmToolContext) -> ToolSpec:
                 },
             )
         except Exception as exc:
+            logger.debug("suppressed exception in _handler", exc_info=True)
             return json.dumps(
                 {
                     "ok": False,

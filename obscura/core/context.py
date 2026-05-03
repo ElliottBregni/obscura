@@ -28,6 +28,9 @@ from obscura.core.frontmatter import parse_frontmatter
 from obscura.core.paths import resolve_all_skills_dirs
 from obscura.core.types import ContentBlock, Message, Role
 
+logger = logging.getLogger(__name__)
+
+
 if TYPE_CHECKING:
     from obscura.core.types import Backend
 
@@ -395,12 +398,16 @@ def load_obscura_memory(session_id: str, db_path: Path, max_events: int = 50) ->
                     parts.append(f"  Data: {payload_str}")
                 parts.append("")
             except Exception:
+                logger.debug(
+                    "suppressed exception in load_obscura_memory", exc_info=True
+                )
                 continue  # Skip malformed events
 
         return "\n".join(parts)
 
     except Exception as e:
         # Fail gracefully if DB can't be read
+        logger.debug("suppressed exception in load_obscura_memory", exc_info=True)
         return f"# Session Memory\nWarning: Could not load session memory ({e})"
 
 
@@ -481,6 +488,9 @@ def load_session_messages(
                         current_assistant_text = []
 
             except Exception:
+                logger.debug(
+                    "suppressed exception in load_session_messages", exc_info=True
+                )
                 continue
 
         # Limit to recent turns
@@ -490,6 +500,5 @@ def load_session_messages(
         return messages
 
     except Exception as e:
-        logger = logging.getLogger(__name__)
         logger.warning(f"Could not load session messages: {e}")
         return []

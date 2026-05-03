@@ -123,6 +123,7 @@ class HeartbeatMonitor:
             try:
                 await asyncio.sleep(self._check_interval)
             except asyncio.CancelledError:
+                logger.debug("suppressed exception in _monitor_loop", exc_info=True)
                 break
 
     async def _check_all_agents(self) -> None:

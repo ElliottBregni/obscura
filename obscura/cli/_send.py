@@ -97,7 +97,7 @@ async def send_message(
     try:
         set_active_renderer(renderer)
     except Exception:
-        pass
+        _log.debug("suppressed exception in send_message", exc_info=True)
     accumulated: list[str] = []
 
     # Build confirm callback with permission mode integration.
@@ -113,7 +113,7 @@ async def send_message(
             if decision.auto_approved:
                 return True
         except Exception:
-            pass
+            _log.debug("suppressed exception in confirm_cb", exc_info=True)
         # 2. If confirm is enabled, prompt user.
         if ctx.confirm_enabled:
             return await cli_confirm(ctx, tc.name, tc.input)
@@ -195,7 +195,7 @@ async def send_message(
                 _lvl = EffortLevel(ctx.effort_level)
                 _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[_lvl]
             except (ValueError, KeyError):
-                pass
+                _log.debug("suppressed exception in _stream_with_retry", exc_info=True)
         _s = ctx.client.run_loop(
             augmented_text,
             max_turns=ctx.max_turns,
@@ -225,7 +225,9 @@ async def send_message(
                         tool_names=tool_names,
                     )
                 except Exception:
-                    pass
+                    _log.debug(
+                        "suppressed exception in _stream_with_retry", exc_info=True
+                    )
                 if event.kind == AgentEventKind.TEXT_DELTA:
                     _buf.append(event.text)
                     _stream_output_chars += len(event.text)
@@ -246,7 +248,9 @@ async def send_message(
                             result_preview=str(getattr(event, "tool_result", ""))[:200],
                         )
                 except Exception:
-                    pass
+                    _log.debug(
+                        "suppressed exception in _stream_with_retry", exc_info=True
+                    )
                 # Tool output collapsing
                 if event.kind == AgentEventKind.TOOL_CALL:
                     tool_name = getattr(event, "tool_name", "")
@@ -256,7 +260,9 @@ async def send_message(
                             ctx.collapser = ToolCollapser()
                         ctx.collapser.record(tool_name, tool_input)
                     except Exception:
-                        pass
+                        _log.debug(
+                            "suppressed exception in _stream_with_retry", exc_info=True
+                        )
                     # Tips: record tool type for targeted tips.
                     if _tip_scheduler is not None:
                         _FILE_TOOLS = {
@@ -278,7 +284,10 @@ async def send_message(
                             if summary:
                                 console.print(f"[dim]  {summary}[/]")
                         except Exception:
-                            pass
+                            _log.debug(
+                                "suppressed exception in _stream_with_retry",
+                                exc_info=True,
+                            )
                 # Track costs on turn completion.
                 if event.kind in (
                     AgentEventKind.TURN_COMPLETE,
@@ -304,9 +313,12 @@ async def send_message(
                                     ctx.model or ctx.backend,
                                 )
                             except Exception:
-                                pass
+                                _log.debug(
+                                    "suppressed exception in _stream_with_retry",
+                                    exc_info=True,
+                                )
         except KeyboardInterrupt:
-            pass
+            _log.debug("suppressed exception in _stream_with_retry", exc_info=True)
         except Exception as exc:
             _err = str(exc).lower()
             _is_ctx_err = any(
@@ -349,6 +361,9 @@ async def send_message(
                 try:
                     await ctx.client.reset_session()
                 except Exception:
+                    _log.debug(
+                        "suppressed exception in _stream_with_retry", exc_info=True
+                    )
                     with contextlib.suppress(Exception):
                         await ctx.recreate_client(ctx.backend, ctx.model)
                 return await _stream_with_retry(
@@ -361,13 +376,13 @@ async def send_message(
     try:
         accumulated = await _stream_with_retry()
     except KeyboardInterrupt:
-        pass
+        _log.debug("suppressed exception in send_message", exc_info=True)
     finally:
         renderer.finish()
         try:
             set_active_renderer(None)
         except Exception:
-            pass
+            _log.debug("suppressed exception in send_message", exc_info=True)
 
     console.print()  # newline after streaming
 
@@ -418,7 +433,7 @@ async def send_message(
                 console.print("[dim cyan]  Auto-compacting context...[/]")
                 await cmd_compact("4", ctx)
         except Exception:
-            pass
+            _log.debug("suppressed exception in send_message", exc_info=True)
 
     # Auto-title: generate session title after first exchange.
     if not _session_state["titled"] and len(ctx.message_history) >= 2:
@@ -435,7 +450,7 @@ async def send_message(
                     highlight=False,
                 )
         except Exception:
-            pass
+            _log.debug("suppressed exception in send_message", exc_info=True)
 
     # Parse plan if in PLAN mode
 
@@ -458,6 +473,6 @@ async def send_message(
                         streaming_status,
                     )
     except Exception:
-        pass
+        _log.debug("suppressed exception in send_message", exc_info=True)
 
     return response_text

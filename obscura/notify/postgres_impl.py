@@ -5,6 +5,10 @@ import time
 from typing import Any, cast
 
 from .storage import Message
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _asyncpg: Any
 try:
@@ -12,6 +16,7 @@ try:
 
     _asyncpg = asyncpg
 except ImportError:
+    logger.debug("suppressed exception in <module>", exc_info=True)
     _asyncpg = None
 
 
@@ -90,10 +95,13 @@ class PostgresStorage:
     async def list_pending(self, limit: int = 100) -> list[Message]:
         pool = self._require_pool()
         async with pool.acquire() as conn:
-            rows = cast("list[tuple[Any, ...]]", await conn.fetch(
-                "SELECT id,user_id,channel,payload,status,attempts FROM messages WHERE status IN ('queued','retry') ORDER BY created_at ASC LIMIT $1",
-                limit,
-            ))
+            rows = cast(
+                "list[tuple[Any, ...]]",
+                await conn.fetch(
+                    "SELECT id,user_id,channel,payload,status,attempts FROM messages WHERE status IN ('queued','retry') ORDER BY created_at ASC LIMIT $1",
+                    limit,
+                ),
+            )
             return [
                 Message(
                     id=cast(str, r[0]),

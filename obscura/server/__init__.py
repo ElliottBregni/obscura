@@ -146,6 +146,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 _live_router = _get_channel_router()
             except Exception:
                 # Router not yet initialized (no env creds); build a minimal one
+                logger.debug("suppressed exception in lifespan", exc_info=True)
                 _live_router = await build_channel_router()
                 init_channel_router(_live_router)
 
@@ -179,7 +180,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await app.state.a2a_server.shutdown()
             logger.info("A2A server stopped")
         except Exception:
-            pass
+            logger.debug("suppressed exception in lifespan", exc_info=True)
 
     # Cleanup heartbeat monitor
     if app.state._heartbeat_monitor:
@@ -187,7 +188,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             await app.state._heartbeat_monitor.stop()
             logger.info("Heartbeat monitor stopped")
         except Exception:
-            pass
+            logger.debug("suppressed exception in lifespan", exc_info=True)
 
     logger.info("Obscura SDK server shutting down")
 

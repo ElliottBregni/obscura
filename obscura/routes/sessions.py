@@ -143,6 +143,7 @@ async def ingest_sessions(
             store=store,
         )
     except Exception as exc:
+        logger.debug("suppressed exception in ingest_sessions", exc_info=True)
         audit(
             "session.ingest",
             user,
@@ -228,7 +229,9 @@ async def resume_session(
     session_id: str,
     request: Request,
     backend: str = "copilot",
-    user: Annotated[AuthenticatedUser | None, Depends(require_role("sessions:manage"))] = None,
+    user: Annotated[
+        AuthenticatedUser | None, Depends(require_role("sessions:manage"))
+    ] = None,
     oauth_gh_token: Annotated[str | None, Depends(get_oauth_github_token)] = None,
 ) -> JSONResponse:
     """Resume an existing session to validate liveness and access."""

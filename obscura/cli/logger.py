@@ -8,6 +8,8 @@ from typing import override
 
 from obscura.cli import render
 
+logger = logging.getLogger(__name__)
+
 
 def configure_logger(output_manager: object | None = None) -> logging.Logger:
     """Configure a central 'obscura' logger that routes INFO+ to the user-facing
@@ -40,7 +42,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
                 else:
                     out.capture_internal(msg)
             except Exception:
-                pass
+                logger.debug("suppressed exception in emit", exc_info=True)
 
     class DebugHandler(logging.Handler):
         @override
@@ -52,7 +54,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
                 # Always capture debug messages to the internal buffer
                 out.capture_internal(msg)
             except Exception:
-                pass
+                logger.debug("suppressed exception in emit", exc_info=True)
 
     ih = InfoHandler()
     ih.setLevel(logging.INFO)

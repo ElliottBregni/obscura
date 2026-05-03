@@ -61,6 +61,7 @@ def create_jsonrpc_router(service: A2AService) -> APIRouter:
                 "result": result,
             }
         except A2AError as e:
+            logger.debug("suppressed exception in handle_rpc", exc_info=True)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,

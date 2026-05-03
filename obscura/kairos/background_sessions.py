@@ -55,6 +55,7 @@ class BackgroundSessionRegistry:
                 for sid, entry in data.items():
                     self._sessions[sid] = BackgroundSession(**entry)
             except (json.JSONDecodeError, TypeError):
+                logger.debug("suppressed exception in _load", exc_info=True)
                 self._sessions = {}
 
     def _save(self) -> None:
@@ -110,6 +111,7 @@ def _is_pid_alive(pid: int) -> bool:
         os.kill(pid, 0)
         return True
     except (ProcessLookupError, PermissionError):
+        logger.debug("suppressed exception in _is_pid_alive", exc_info=True)
         return False
 
 
@@ -160,5 +162,6 @@ def kill_session(session_id: str) -> str:
         registry.update_status(session.session_id, "killed")
         return f"Killed session {session.session_id[:12]} (PID {session.pid})"
     except ProcessLookupError:
+        logger.debug("suppressed exception in kill_session", exc_info=True)
         registry.update_status(session.session_id, "failed")
         return f"Process already dead (PID {session.pid})"

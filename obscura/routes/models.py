@@ -22,6 +22,10 @@ from obscura.providers.moonshot import MoonshotBackend
 from obscura.providers.openai import OpenAIBackend
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.providers.registry import ModelInfo
@@ -78,6 +82,7 @@ async def list_models(
         try:
             backend = Backend(provider)
         except ValueError:
+            logger.debug("suppressed exception in list_models", exc_info=True)
             return JSONResponse(
                 status_code=400,
                 content={"detail": f"Unknown provider: {provider}"},
@@ -92,6 +97,7 @@ async def list_models(
                 models = await list_provider_models(backend, instance)
                 results[backend.value] = [_model_to_dict(m) for m in models]
             except Exception:
+                logger.debug("suppressed exception in list_models", exc_info=True)
                 results[backend.value] = []
 
     return JSONResponse(content={"models": results})
@@ -107,6 +113,7 @@ async def refresh_models(
         try:
             backend = Backend(provider)
         except ValueError:
+            logger.debug("suppressed exception in refresh_models", exc_info=True)
             return JSONResponse(
                 status_code=400,
                 content={"detail": f"Unknown provider: {provider}"},

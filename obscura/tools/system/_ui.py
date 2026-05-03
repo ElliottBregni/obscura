@@ -11,6 +11,9 @@ from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import tool
 from obscura.notifications.native import NativeNotifier
 from obscura.tools.system._policy import Policy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UI:
@@ -118,6 +121,7 @@ class UI:
             )
             return json.dumps({"ok": True, "selected": result})
         except Exception as exc:
+            logger.debug("suppressed exception in ask_user", exc_info=True)
             return Policy.json_error("ask_user_failed", detail=str(exc))
 
     @staticmethod
@@ -210,7 +214,9 @@ class UI:
             questions = [
                 {
                     "question": question,
-                    "options": [{"label": c, "description": ""} for c in (choices or [])],
+                    "options": [
+                        {"label": c, "description": ""} for c in (choices or [])
+                    ],
                 }
             ]
 
@@ -248,6 +254,7 @@ class UI:
                 answers[q_text] = result
             except TypeError:
                 # Callback doesn't support multi_select — fall back
+                logger.debug("suppressed exception in user_ask", exc_info=True)
                 try:
                     result = await cb(
                         question=prompt,
@@ -256,8 +263,10 @@ class UI:
                     )
                     answers[q_text] = result
                 except Exception as exc:
+                    logger.debug("suppressed exception in user_ask", exc_info=True)
                     answers[q_text] = f"error: {exc}"
             except Exception as exc:
+                logger.debug("suppressed exception in user_ask", exc_info=True)
                 answers[q_text] = f"error: {exc}"
 
         return json.dumps({"ok": True, "answers": answers})
@@ -292,6 +301,7 @@ class UI:
                 },
             )
         except Exception as exc:
+            logger.debug("suppressed exception in handle_ui_permission", exc_info=True)
             return Policy.json_error("permission_failed", detail=str(exc))
 
     @staticmethod
@@ -317,7 +327,7 @@ class UI:
                 )
                 delivered.append("tui")
             except Exception:
-                pass
+                logger.debug("suppressed exception in handle_ui_notify", exc_info=True)
 
         # OS notification channel — use NativeNotifier
         if "os" in resolved_channels:
@@ -337,7 +347,7 @@ class UI:
                 )
                 delivered.append("os")
             except Exception:
-                pass
+                logger.debug("suppressed exception in handle_ui_notify", exc_info=True)
 
         # Terminal bell
         if "bell" in resolved_channels:
@@ -360,7 +370,7 @@ class UI:
                     await proc.communicate()
                     delivered.append("sound")
             except Exception:
-                pass
+                logger.debug("suppressed exception in handle_ui_notify", exc_info=True)
 
         return json.dumps({"ok": True, "delivered": True, "channels": delivered})
 
@@ -387,6 +397,7 @@ class UI:
             )
             return json.dumps({"ok": True, "selected": result.get("selected", "")})
         except Exception as exc:
+            logger.debug("suppressed exception in handle_ui_question", exc_info=True)
             return Policy.json_error("question_failed", detail=str(exc))
 
     @staticmethod
@@ -402,7 +413,9 @@ class UI:
                 detail="Interactive UI not available.",
             )
         if not choices:
-            return Policy.json_error("no_choices", detail="Multi-select requires choices.")
+            return Policy.json_error(
+                "no_choices", detail="Multi-select requires choices."
+            )
         try:
             result = await cb(
                 mode="multi_select",
@@ -411,6 +424,9 @@ class UI:
             )
             return json.dumps({"ok": True, "selected": result.get("selected", [])})
         except Exception as exc:
+            logger.debug(
+                "suppressed exception in handle_ui_multi_select", exc_info=True
+            )
             return Policy.json_error("multi_select_failed", detail=str(exc))
 
     @staticmethod

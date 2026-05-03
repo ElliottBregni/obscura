@@ -19,6 +19,9 @@ from typing import Any, cast
 from obscura.auth.cli_session import get_access_token, load_session
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.supabase import extract_roles
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CliAuthError(RuntimeError):
@@ -85,6 +88,7 @@ def _decode_jwt_unverified(token: str) -> dict[str, Any] | None:
         body = base64.urlsafe_b64decode(payload + padding)
         decoded = json.loads(body)
     except (ValueError, json.JSONDecodeError):
+        logger.debug("suppressed exception in _decode_jwt_unverified", exc_info=True)
         return None
     if isinstance(decoded, dict):
         return cast(dict[str, Any], decoded)

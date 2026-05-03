@@ -307,6 +307,7 @@ class NativeNotificationChannel(AlertChannel):
             )
             return True
         except Exception:
+            logger.debug("suppressed exception in test", exc_info=True)
             return False
 
 

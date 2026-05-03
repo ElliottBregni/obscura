@@ -145,6 +145,7 @@ class ProfileStore:
                 try:
                     category = ProfileCategory(category_str)
                 except ValueError:
+                    logger.debug("suppressed exception in get_all_facts", exc_info=True)
                     category = ProfileCategory.LEARNED
 
                 fact = ProfileFact(

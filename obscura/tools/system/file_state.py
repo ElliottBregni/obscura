@@ -11,6 +11,10 @@ from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,6 +41,7 @@ def record_read(
     try:
         mtime = path.stat().st_mtime
     except OSError:
+        logger.debug("suppressed exception in record_read", exc_info=True)
         return
     _read_state[resolved] = (time.time(), mtime)
     _dedup_cache[(resolved, offset, limit)] = mtime
@@ -59,6 +64,7 @@ def check_staleness(path: Path) -> str | None:
     try:
         current_mtime = path.stat().st_mtime
     except OSError:
+        logger.debug("suppressed exception in check_staleness", exc_info=True)
         return None
     if current_mtime > read_mtime:
         return (
@@ -86,6 +92,7 @@ def is_unchanged(
     try:
         return path.stat().st_mtime == prev_mtime
     except OSError:
+        logger.debug("suppressed exception in is_unchanged", exc_info=True)
         return False
 
 

@@ -446,6 +446,9 @@ class Kairos:
                 try:
                     result = await self._task_runner.run(task, goal)
                 except BudgetExceededError as exc:
+                    logger.debug(
+                        "suppressed exception in _execute_tasks", exc_info=True
+                    )
                     yield KairosEvent(
                         kind=KairosEventKind.BUDGET_EXCEEDED,
                         goal_id=goal.goal_id,
@@ -455,6 +458,9 @@ class Kairos:
                     return
                 except InterventionRequiredError as exc:
                     # Transition goal to BLOCKED so status queries show it correctly
+                    logger.debug(
+                        "suppressed exception in _execute_tasks", exc_info=True
+                    )
                     self._store.update_goal_status(goal.goal_id, GoalStatus.BLOCKED)
                     iv_event = KairosEvent(
                         kind=KairosEventKind.INTERVENTION_RAISED,
@@ -597,14 +603,13 @@ class Kairos:
             f"Goal: {goal.title}\n"
             f"Task: {exc.task_id[:8] if exc.task_id else '?'}\n"
             f"Reason: {exc}\n"
-            f"Reply: obscura kairos respond {goal.goal_id} {exc.intervention_id} \"<your answer>\""
+            f'Reply: obscura kairos respond {goal.goal_id} {exc.intervention_id} "<your answer>"'
         )
         try:
             from obscura.integrations.imessage.client import IMessageClient
+
             client = IMessageClient(contacts=[recipient])
-            await asyncio.wait_for(
-                client.send_message(recipient, msg), timeout=10.0
-            )
+            await asyncio.wait_for(client.send_message(recipient, msg), timeout=10.0)
             logger.info(
                 "Intervention alert sent to %s for goal %s",
                 recipient,

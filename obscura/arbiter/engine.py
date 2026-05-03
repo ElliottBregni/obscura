@@ -306,9 +306,7 @@ class ArbiterEngine:
                 task_subject=task_subject,
                 task_description=task_description,
                 tool_call_count=int(context.get("tool_call_count", 0)),
-                files_touched=cast(
-                    "Sequence[str]", context.get("files_touched") or []
-                ),
+                files_touched=cast("Sequence[str]", context.get("files_touched") or []),
                 turn_count=int(context.get("turn_count", 0)),
             )
             scores.append(scope_score)
@@ -460,6 +458,9 @@ class ArbiterEngine:
         try:
             return int(os.environ.get("OBSCURA_PHANTOM_LEVEL", "0"))
         except (ValueError, TypeError):
+            logger.debug(
+                "suppressed exception in _resolve_phantom_level", exc_info=True
+            )
             return 0
 
     # ------------------------------------------------------------------
@@ -544,20 +545,22 @@ class ArbiterEngine:
                 entry += f" — {feedback_short}"
             DailyLog().append(entry, source="arbiter")
         except Exception:
-            pass
+            logger.debug("suppressed exception in _log_to_daily", exc_info=True)
 
     # ------------------------------------------------------------------
     # Agent self-awareness
     # ------------------------------------------------------------------
 
-
     def _load_historical_patterns(self) -> None:
         """Load cross-session patterns from previous runs for this project."""
         try:
             import os
+
             project_root = os.getcwd()
             self._project_root = project_root
-            self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
+            self._historical_patterns = ArbiterStore().patterns_for_project(
+                project_root
+            )
             if self._historical_patterns:
                 logger.info(
                     "Arbiter: loaded historical patterns for %s — %s",
@@ -587,7 +590,8 @@ class ArbiterEngine:
             details = "; ".join(event.score.details[:3]) if event.score.details else ""
             summary = feedback[:120] if feedback else details[:120]
             lines.append(
-                f"- [{v.upper()}] {event.kind.value}: {summary}" if summary
+                f"- [{v.upper()}] {event.kind.value}: {summary}"
+                if summary
                 else f"- [{v.upper()}] {event.kind.value}"
             )
 
@@ -628,7 +632,9 @@ class ArbiterEngine:
                     f"Review recent verdicts and adjust approach._"
                 )
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in get_recent_verdict_summary", exc_info=True
+            )
 
         return "\n".join(lines)
 

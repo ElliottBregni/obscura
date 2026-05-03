@@ -106,7 +106,13 @@ class Mcp:
         server_names = [s.server_name for s in report.statuses]
         if not server_names:
             return json.dumps(
-                {"ok": True, "dry_run": dry_run, "scanned": [], "killed": [], "failed": []},
+                {
+                    "ok": True,
+                    "dry_run": dry_run,
+                    "scanned": [],
+                    "killed": [],
+                    "failed": [],
+                },
             )
 
         # We need the original commands. They're not in the report — rescan via
@@ -146,11 +152,7 @@ class Mcp:
                     "server": name,
                     "match_count": len(procs),
                     "to_kill": [p.pid for p in kill_set],
-                    "kept": (
-                        [candidates[-1].pid]
-                        if not force and candidates
-                        else []
-                    ),
+                    "kept": ([candidates[-1].pid] if not force and candidates else []),
                 },
             )
             pids_to_kill.extend(p.pid for p in kill_set)

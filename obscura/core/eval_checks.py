@@ -45,6 +45,7 @@ def check_python_syntax(
         source = open(path, encoding="utf-8").read()
         ast.parse(source, filename=path)
     except SyntaxError as exc:
+        logger.debug("suppressed exception in check_python_syntax", exc_info=True)
         return f"\n⚠ Python syntax error: {exc.msg} (line {exc.lineno})"
     return None
 
@@ -68,7 +69,7 @@ def check_python_ruff(
         if proc.returncode != 0 and proc.stdout.strip():
             return f"\n⚠ ruff check errors:\n{proc.stdout.strip()}"
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        logger.debug("suppressed exception in check_python_ruff", exc_info=True)
     return None
 
 
@@ -123,9 +124,11 @@ def check_python_pyright(
                         msgs.append(f"  line {line}: {e.get('message', '?')}")
                     return "\n⚠ pyright type errors:\n" + "\n".join(msgs)
             except json.JSONDecodeError:
-                pass
+                logger.debug(
+                    "suppressed exception in check_python_pyright", exc_info=True
+                )
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        logger.debug("suppressed exception in check_python_pyright", exc_info=True)
     return None
 
 
@@ -142,6 +145,7 @@ def check_python_imports(
         source = open(path, encoding="utf-8").read()
         tree = ast.parse(source, filename=path)
     except SyntaxError:
+        logger.debug("suppressed exception in check_python_imports", exc_info=True)
         return None  # handled by check_python_syntax
 
     bad_imports: list[str] = []
@@ -170,6 +174,7 @@ def _can_import(module_name: str) -> bool:
         spec = importlib.util.find_spec(module_name)
         return spec is not None
     except (ModuleNotFoundError, ValueError):
+        logger.debug("suppressed exception in _can_import", exc_info=True)
         return False
 
 
@@ -194,6 +199,9 @@ def check_written_yaml_toml(
             with open(path) as f:
                 yaml.safe_load(f)
         except Exception as exc:
+            logger.debug(
+                "suppressed exception in check_written_yaml_toml", exc_info=True
+            )
             return f"\n⚠ Invalid YAML: {exc}"
     elif path.endswith(".toml"):
         try:
@@ -202,6 +210,9 @@ def check_written_yaml_toml(
             with open(path, "rb") as f:
                 tomllib.load(f)
         except Exception as exc:
+            logger.debug(
+                "suppressed exception in check_written_yaml_toml", exc_info=True
+            )
             return f"\n⚠ Invalid TOML: {exc}"
     return None
 
@@ -219,6 +230,7 @@ def check_written_json(
         with open(path) as f:
             json.load(f)
     except Exception as exc:
+        logger.debug("suppressed exception in check_written_json", exc_info=True)
         return f"\n⚠ Invalid JSON: {exc}"
     return None
 
@@ -245,6 +257,7 @@ def check_shell_syntax(
             if not first_line.startswith("#!") or "sh" not in first_line:
                 return None
         except Exception:
+            logger.debug("suppressed exception in check_shell_syntax", exc_info=True)
             return None
     try:
         proc = subprocess.run(
@@ -256,7 +269,7 @@ def check_shell_syntax(
         if proc.returncode != 0 and proc.stderr.strip():
             return f"\n⚠ Shell syntax error:\n{proc.stderr.strip()}"
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        logger.debug("suppressed exception in check_shell_syntax", exc_info=True)
     return None
 
 
@@ -283,7 +296,7 @@ def check_dockerfile(
             lines = proc.stdout.strip().splitlines()[:5]
             return "\n⚠ hadolint warnings:\n" + "\n".join(lines)
     except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+        logger.debug("suppressed exception in check_dockerfile", exc_info=True)
     return None
 
 

@@ -74,6 +74,9 @@ class UnixSocketServicer:
                 try:
                     request = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError as exc:
+                    logger.debug(
+                        "suppressed exception in handle_connection", exc_info=True
+                    )
                     await _write_json(
                         writer,
                         {
@@ -121,6 +124,9 @@ class UnixSocketServicer:
                             },
                         )
                 except A2AError as exc:
+                    logger.debug(
+                        "suppressed exception in handle_connection", exc_info=True
+                    )
                     await _write_json(
                         writer,
                         {
@@ -136,9 +142,9 @@ class UnixSocketServicer:
                         },
                     )
         except asyncio.IncompleteReadError:
-            pass
+            logger.debug("suppressed exception in handle_connection", exc_info=True)
         except ConnectionResetError:
-            pass
+            logger.debug("suppressed exception in handle_connection", exc_info=True)
         finally:
             writer.close()
             with contextlib.suppress(Exception):

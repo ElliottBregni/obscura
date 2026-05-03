@@ -7,6 +7,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 ApprovalStatus = Literal["pending", "approved", "denied", "expired"]
 
@@ -119,6 +123,7 @@ async def wait_for_tool_approval(
     try:
         await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
     except TimeoutError:
+        logger.debug("suppressed exception in wait_for_tool_approval", exc_info=True)
         async with _approvals_lock:
             current = _approvals_by_id.get(approval_id)
             if current is not None and current.status == "pending":

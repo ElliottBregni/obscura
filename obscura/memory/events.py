@@ -107,6 +107,7 @@ class InProcessSink:
             self._queue.put_nowait(event)
         except Full:
             # drop-oldest: preserve recency, never block the writer
+            _log.debug("suppressed exception in emit", exc_info=True)
             with contextlib.suppress(Empty):
                 self._queue.get_nowait()
             with contextlib.suppress(Full):

@@ -302,7 +302,9 @@ def agent_manifest_from_frontmatter(
         raw_filter: Any = skills_dict.get("filter")
         if isinstance(raw_filter, list):
             raw_filter_list: list[Any] = cast("list[Any]", raw_filter)
-            skill_caps = [f"skill.{str(name).replace('-', '_')}" for name in raw_filter_list]
+            skill_caps = [
+                f"skill.{str(name).replace('-', '_')}" for name in raw_filter_list
+            ]
             existing_caps: CapabilityConfig = kwargs.get(
                 "capabilities",
                 CapabilityConfig(),

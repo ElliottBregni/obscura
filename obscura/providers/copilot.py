@@ -520,7 +520,7 @@ class CopilotBackend(BackendToolHostMixin):
                 lines.append("")
                 lines.append(cap_section)
         except Exception:
-            pass
+            logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
         return "\n".join(lines)
 
     # -- Hooks ---------------------------------------------------------------
@@ -638,6 +638,7 @@ class CopilotBackend(BackendToolHostMixin):
                             result_type="success",
                         )
                     except Exception as exc:
+                        logger.debug("suppressed exception in wrapped", exc_info=True)
                         return CopilotToolResult(
                             text_result_for_llm=f"Tool error: {exc}",
                             result_type="failure",
@@ -914,11 +915,14 @@ public_make_handler = _make_handler
 
 from obscura.telemetry.traces import NoOpTracer, get_tracer
 
+logger = logging.getLogger(__name__)
+
 
 def _get_backend_tracer() -> Any:
     try:
         return get_tracer("obscura.copilot_backend")
     except Exception:
+        logger.debug("suppressed exception in _get_backend_tracer", exc_info=True)
         return NoOpTracer()
 
 
@@ -927,7 +931,7 @@ def _set_span_attr(span: Any, key: str, value: Any) -> None:
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
     except Exception:
-        pass
+        logger.debug("suppressed exception in _set_span_attr", exc_info=True)
 
 
 # Export telemetry helpers for tests

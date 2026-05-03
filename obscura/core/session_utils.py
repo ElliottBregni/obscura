@@ -67,7 +67,7 @@ async def generate_session_title(
                 title = title[:57] + "..."
             return title
     except (TimeoutError, Exception):
-        pass
+        logger.debug("suppressed exception in generate_session_title", exc_info=True)
     return ""
 
 
@@ -114,8 +114,12 @@ def list_active_sessions() -> list[dict[str, Any]]:
                 sessions.append(data)
             except (ProcessLookupError, PermissionError):
                 # Dead PID — clean up stale lock.
+                logger.debug(
+                    "suppressed exception in list_active_sessions", exc_info=True
+                )
                 lock_file.unlink(missing_ok=True)
         except Exception:
+            logger.debug("suppressed exception in list_active_sessions", exc_info=True)
             lock_file.unlink(missing_ok=True)
     return sessions
 
@@ -153,6 +157,9 @@ async def stream_with_idle_timeout(
             chunk = await asyncio.wait_for(aiter.__anext__(), timeout=idle_timeout)
             yield chunk
         except StopAsyncIteration:
+            logger.debug(
+                "suppressed exception in stream_with_idle_timeout", exc_info=True
+            )
             return
         except TimeoutError:
             logger.warning("Stream idle timeout after %.0fs — aborting", idle_timeout)

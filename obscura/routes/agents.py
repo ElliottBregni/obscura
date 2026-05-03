@@ -36,6 +36,10 @@ from obscura.schemas.templates import (
     TemplateCreateRequest,
     TemplateUpdateRequest,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -558,6 +562,7 @@ async def agents_bulk_spawn(
                 bulk=True,
             )
         except Exception as e:
+            logger.debug("suppressed exception in agents_bulk_spawn", exc_info=True)
             errors.append({"index": idx, "name": cfg.get("name"), "error": str(e)})
 
     return JSONResponse(
@@ -595,6 +600,7 @@ async def agents_bulk_stop(
             stopped.append(agent_id)
             audit("agent.stop", user, f"agent:{agent_id}", "stop", "success", bulk=True)
         except Exception as e:
+            logger.debug("suppressed exception in agents_bulk_stop", exc_info=True)
             errors.append({"agent_id": agent_id, "error": str(e)})
 
     return JSONResponse(
@@ -636,6 +642,7 @@ async def agents_bulk_tag(
             agent.config.tags = new_tags
             tagged.append(agent_id)
         except Exception as e:
+            logger.debug("suppressed exception in agents_bulk_tag", exc_info=True)
             errors.append({"agent_id": agent_id, "error": str(e)})
 
     return JSONResponse(
@@ -815,7 +822,7 @@ def _compose_system_prompt(template: dict[str, Any]) -> str:
         if env_section:
             custom_sections.append(env_section)
     except Exception:
-        pass  # graceful degradation — env context is optional
+        logger.debug("suppressed exception in _compose_system_prompt", exc_info=True)
 
     return compose_default_prompt(
         base=user_prompt,
@@ -1087,6 +1094,7 @@ async def agent_stream(
                 }
             yield {"event": "done", "data": ""}
         except Exception as e:
+            logger.debug("suppressed exception in _event_generator", exc_info=True)
             yield {"event": "error", "data": json.dumps({"text": str(e)})}
 
     return EventSourceResponse(_event_generator())

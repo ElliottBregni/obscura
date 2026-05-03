@@ -11,6 +11,10 @@ import random
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from obscura.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -110,4 +114,4 @@ def _record_retry(attempt: int) -> None:
 
         get_metrics().retry_attempts.add(1, {"attempt": str(attempt)})
     except Exception:
-        pass
+        logger.debug("suppressed exception in _record_retry", exc_info=True)

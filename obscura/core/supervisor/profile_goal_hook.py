@@ -88,7 +88,9 @@ def register_profile_goal_hooks(
             if engine is not None:
                 summary = engine.get_recent_verdict_summary(limit=3)
                 if summary:
-                    context["_arbiter_context"] = "## Recent Arbiter Verdicts\n" + summary
+                    context["_arbiter_context"] = (
+                        "## Recent Arbiter Verdicts\n" + summary
+                    )
                     logger.debug("Injected arbiter verdict summary")
         except Exception:
             logger.debug("Could not inject arbiter context", exc_info=True)

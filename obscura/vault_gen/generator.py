@@ -143,19 +143,20 @@ def _git_init(dest: Path, config: RepoConfig) -> None:
     def run(*args: str) -> str:
         result = subprocess.run(list(args), cwd=dest, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(
-                f"`{' '.join(args)}` failed:\n{result.stderr.strip()}"
-            )
+            raise RuntimeError(f"`{' '.join(args)}` failed:\n{result.stderr.strip()}")
         return result.stdout
 
     run("git", "init")
 
     # Set a local identity if no global git user is configured, so the initial
     # commit doesn't fail in CI or fresh environments.
-    has_email = subprocess.run(
-        ["git", "config", "--global", "user.email"],
-        capture_output=True,
-    ).returncode == 0
+    has_email = (
+        subprocess.run(
+            ["git", "config", "--global", "user.email"],
+            capture_output=True,
+        ).returncode
+        == 0
+    )
     if not has_email:
         run("git", "config", "user.email", "vault-gen@local")
         run("git", "config", "user.name", "vault-gen")

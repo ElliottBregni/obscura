@@ -207,7 +207,7 @@ async def animate_spinner(status: StreamingStatus) -> None:
             if app is not None:
                 app.invalidate()
         except Exception:
-            pass
+            logger.debug("suppressed exception in animate_spinner", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,7 @@ def _get_git_branch() -> str:  # pyright: ignore[reportUnusedFunction]
             branch = result.stdout.strip()
             return branch if branch and branch != "HEAD" else ""
     except Exception:
-        pass
+        logger.debug("suppressed exception in _get_git_branch", exc_info=True)
     return ""
 
 
@@ -434,6 +434,10 @@ from obscura.cli.renderer.modern.theme import (
     TEAL as _C_TEAL,
     TEXT as _C_TEXT,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 PROMPT_STYLE = Style.from_dict(
     {
@@ -497,7 +501,7 @@ def _expand_preview_action() -> None:
         console.print(Markdown(text))
         console.print()
     except Exception:
-        pass
+        logger.debug("suppressed exception in _expand_preview_action", exc_info=True)
 
 
 def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
@@ -522,7 +526,7 @@ def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
             _expand_preview_action()
     except Exception:
         # ignore invalid key spec
-        pass
+        logger.debug("suppressed exception in _make_key_bindings", exc_info=True)
 
     # Expand last thinking block
     @kb.add("c-t")
@@ -569,7 +573,7 @@ def _expand_thinking_action() -> None:
         )
         console.print()
     except Exception:
-        pass
+        logger.debug("suppressed exception in _expand_thinking_action", exc_info=True)
 
 
 # Public helper for tests to call expand action
@@ -729,6 +733,9 @@ def create_prompt_session(
                 try:
                     model_text = get_model_space_delta()
                 except Exception:
+                    logger.debug(
+                        "suppressed exception in create_prompt_session", exc_info=True
+                    )
                     model_text = ""
             hud = PromptHUDState(
                 model_text=model_text,
@@ -740,6 +747,7 @@ def create_prompt_session(
             )
             _static_hud_html = _render_menu_line(80, hud, PromptLayoutConfig())
         except Exception:
+            logger.debug("suppressed exception in create_prompt_session", exc_info=True)
             _static_hud_html = None
 
     def _toolbar() -> HTML:
@@ -804,6 +812,7 @@ async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
         with patch_stdout(raw=True):
             return (await session.prompt_async(message)).strip().lower()
     except (EOFError, KeyboardInterrupt):
+        logger.debug("suppressed exception in confirm_prompt_async", exc_info=True)
         return "n"
 
 

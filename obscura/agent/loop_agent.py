@@ -216,6 +216,7 @@ class LoopAgent:
                     return None
                 return msg
             except TimeoutError:
+                logger.debug("suppressed exception in _get_next_input", exc_info=True)
                 continue
         return None
 

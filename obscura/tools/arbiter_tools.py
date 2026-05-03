@@ -16,6 +16,10 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.arbiter.hooks import get_engine
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -58,6 +62,7 @@ async def arbiter_status(last_n: int = 10) -> str:
         ]
         return json.dumps({"ok": True, **status})
     except Exception as exc:
+        logger.debug("suppressed exception in arbiter_status", exc_info=True)
         return json.dumps({"ok": False, "error": str(exc)})
 
 
@@ -130,6 +135,7 @@ async def arbiter_appeal(target_id: str, reasoning: str) -> str:
             }
         )
     except Exception as exc:
+        logger.debug("suppressed exception in arbiter_appeal", exc_info=True)
         return json.dumps({"ok": False, "error": str(exc)})
 
 
@@ -182,7 +188,9 @@ async def query_arbiter_verdicts(
     try:
         db_path: Path = resolve_obscura_home() / "arbiter.db"
         if not db_path.exists():
-            return json.dumps({"ok": True, "verdicts": [], "message": "No arbiter.db found."})
+            return json.dumps(
+                {"ok": True, "verdicts": [], "message": "No arbiter.db found."}
+            )
 
         limit = max(1, min(limit, 100))
 
@@ -222,13 +230,19 @@ async def query_arbiter_verdicts(
                         try:
                             r[field_name] = json.loads(r[field_name])
                         except (json.JSONDecodeError, TypeError):
-                            pass
+                            logger.debug(
+                                "suppressed exception in query_arbiter_verdicts",
+                                exc_info=True,
+                            )
                 verdicts_out.append(r)
 
-            return json.dumps({"ok": True, "count": len(verdicts_out), "verdicts": verdicts_out})
+            return json.dumps(
+                {"ok": True, "count": len(verdicts_out), "verdicts": verdicts_out}
+            )
         finally:
             conn.close()
     except Exception as exc:
+        logger.debug("suppressed exception in query_arbiter_verdicts", exc_info=True)
         return json.dumps({"ok": False, "error": str(exc)})
 
 

@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from .render import console
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 SOFT_BUDGET = 50_000
 
@@ -29,6 +33,7 @@ def emit_context_warnings(ctx: Any, tokens: int, context_window: int) -> None:
     try:
         pct = (tokens / context_window) * 100 if context_window > 0 else 0
     except Exception:
+        logger.debug("suppressed exception in emit_context_warnings", exc_info=True)
         pct = 0
 
     thresholds = (25, 50, 75)

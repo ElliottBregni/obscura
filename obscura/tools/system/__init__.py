@@ -50,6 +50,10 @@ from obscura.tools.system.intelligence import (
     context_snapshot,
     policy_probe,
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _tool_registry_ref: Any = None
 
@@ -128,6 +132,7 @@ async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) ->
                 timeout=timeout_seconds,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in task", exc_info=True)
             proc.kill()
             await proc.wait()
             return json.dumps({"ok": False, "error": "timeout", "prompt": prompt})
@@ -144,6 +149,7 @@ async def task(prompt: str, target: str = "", timeout_seconds: float = 120.0) ->
             },
         )
     except Exception as exc:
+        logger.debug("suppressed exception in task", exc_info=True)
         return json.dumps(
             {
                 "ok": False,
@@ -174,8 +180,7 @@ def _parse_json_path(query: str) -> list[str | int]:
 
 @tool(
     "json_query",
-    "Query a JSON file or string using dot-notation paths "
-    "(e.g. 'data.users[0].name').",
+    "Query a JSON file or string using dot-notation paths (e.g. 'data.users[0].name').",
     {
         "type": "object",
         "properties": {
@@ -214,11 +219,13 @@ async def json_query(
             raw = target.read_text(encoding="utf-8")
             obj: Any = json.loads(raw)
         except json.JSONDecodeError as exc:
+            logger.debug("suppressed exception in json_query", exc_info=True)
             return Policy.json_error("invalid_json", path=str(target), detail=str(exc))
     elif data:
         try:
             obj = json.loads(data)
         except json.JSONDecodeError as exc:
+            logger.debug("suppressed exception in json_query", exc_info=True)
             return Policy.json_error("invalid_json", detail=str(exc))
     else:
         return Policy.json_error("no_input", detail="Provide either path or data.")
@@ -234,6 +241,7 @@ async def json_query(
             else:
                 return Policy.json_error("invalid_path", query=query, at=part)
         except (KeyError, IndexError, ValueError, TypeError) as exc:
+            logger.debug("suppressed exception in json_query", exc_info=True)
             return Policy.json_error(
                 "path_not_found_in_data",
                 query=query,
@@ -248,6 +256,7 @@ async def json_query(
     try:
         result_str = json.dumps(current)
     except (TypeError, ValueError):
+        logger.debug("suppressed exception in json_query", exc_info=True)
         result_str = str(current)
 
     return json.dumps(
@@ -314,6 +323,7 @@ async def notebook_edit(
     try:
         nb_data = cast("dict[str, Any]", json.loads(target.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError) as exc:
+        logger.debug("suppressed exception in notebook_edit", exc_info=True)
         return Policy.json_error("notebook_parse_error", detail=str(exc))
 
     cells = cast("list[dict[str, Any]]", nb_data.get("cells", []))
@@ -321,6 +331,7 @@ async def notebook_edit(
     try:
         cell_index = int(cell_index)
     except (TypeError, ValueError):
+        logger.debug("suppressed exception in notebook_edit", exc_info=True)
         cell_index = 0
 
     if edit_mode == "delete":
@@ -448,6 +459,7 @@ async def config_tool(
                 json.loads(settings_path.read_text(encoding="utf-8")),
             )
         except (json.JSONDecodeError, OSError):
+            logger.debug("suppressed exception in config_tool", exc_info=True)
             settings = {}
 
     if action == "list":
@@ -522,6 +534,7 @@ async def write_agent_shared(path: str, text: str) -> str:
     try:
         candidate.relative_to(shared_root)
     except ValueError:
+        logger.debug("suppressed exception in write_agent_shared", exc_info=True)
         return Policy.json_error(
             "path_not_allowed",
             detail="Resolved path escapes vault/shared/",
@@ -542,6 +555,7 @@ async def write_agent_shared(path: str, text: str) -> str:
             backup_path.write_bytes(old_bytes)
             backed_up = True
         except OSError as exc:
+            logger.debug("suppressed exception in write_agent_shared", exc_info=True)
             return Policy.json_error(
                 "backup_failed",
                 path=str(candidate),
@@ -562,6 +576,7 @@ async def write_agent_shared(path: str, text: str) -> str:
         candidate.parent.mkdir(parents=True, exist_ok=True)
         candidate.write_text(final_text, encoding="utf-8")
     except OSError as exc:
+        logger.debug("suppressed exception in write_agent_shared", exc_info=True)
         return Policy.json_error("write_failed", path=str(candidate), detail=str(exc))
 
     return json.dumps(
@@ -623,8 +638,7 @@ class Registry:
                 "query": {
                     "type": "string",
                     "description": (
-                        "Search query. 'select:name' for exact match, "
-                        "or keywords."
+                        "Search query. 'select:name' for exact match, or keywords."
                     ),
                 },
                 "max_results": {
@@ -652,6 +666,7 @@ class Registry:
         try:
             max_results = int(max_results)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in tool_search", exc_info=True)
             max_results = 5
         cap = max(1, min(max_results, 50))
 
@@ -916,34 +931,73 @@ _ask_user_callback = UI.ask_user_callback
 _ask_user_called = UI.ask_user_called
 _user_interact_callback = UI.user_interact_callback
 
+
 # Compatibility stub for copilot_query (some tests import it directly).
 # Returns a JSON error payload to avoid calling external services during tests.
 @tool(
     "copilot_query",
     "Query the Copilot/GPT backend (stub). Returns a JSON string.",
-    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+    {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
 )
 async def copilot_query(query: str) -> str:
     try:
         return json.dumps({"ok": False, "error": "copilot_unavailable", "query": query})
     except Exception:
+        logger.debug("suppressed exception in copilot_query", exc_info=True)
         return json.dumps({"ok": False, "error": "copilot_stub_error"})
+
 
 # Backward-compatible git helpers
 async def git_status(*, cwd: str = "", short: bool = True) -> str:
     return await Git.git("status", short=short, cwd=cwd)
 
-async def git_diff(*, cwd: str = "", staged: bool = False, stat_only: bool = False, ref: str = "", path: str = "") -> str:
-    return await Git.git("diff", staged=staged, stat_only=stat_only, ref=ref, path=path, cwd=cwd)
 
-async def git_log(*, cwd: str = "", max_count: int = 10, oneline: bool = True, ref: str = "", author: str = "", since: str = "") -> str:
-    return await Git.git("log", max_count=max_count, oneline=oneline, ref=ref, author=author, since=since, cwd=cwd)
+async def git_diff(
+    *,
+    cwd: str = "",
+    staged: bool = False,
+    stat_only: bool = False,
+    ref: str = "",
+    path: str = "",
+) -> str:
+    return await Git.git(
+        "diff", staged=staged, stat_only=stat_only, ref=ref, path=path, cwd=cwd
+    )
 
-async def git_commit(message: str, *, cwd: str = "", files: list[str] | None = None) -> str:
+
+async def git_log(
+    *,
+    cwd: str = "",
+    max_count: int = 10,
+    oneline: bool = True,
+    ref: str = "",
+    author: str = "",
+    since: str = "",
+) -> str:
+    return await Git.git(
+        "log",
+        max_count=max_count,
+        oneline=oneline,
+        ref=ref,
+        author=author,
+        since=since,
+        cwd=cwd,
+    )
+
+
+async def git_commit(
+    message: str, *, cwd: str = "", files: list[str] | None = None
+) -> str:
     return await Git.git("commit", message=message, files=files or ["."], cwd=cwd)
+
 
 async def git_branch(sub_action: str = "list", *, ref: str = "", cwd: str = "") -> str:
     return await Git.git("branch", sub_action=sub_action, ref=ref, cwd=cwd)
+
 
 @tool(
     "manage_crontab",
@@ -966,13 +1020,22 @@ async def manage_crontab(action: str, marker: str = "", entry: str = "") -> str:
         return json.dumps({"ok": True, "entries": []})
     return json.dumps({"ok": False, "error": "not_implemented", "action": action})
 
+
 # Backward-compatible command helpers
 async def run_python(code: str, *, cwd: str = "", timeout_seconds: float = 30.0) -> str:
     return await Shell.run_python3(code, cwd=cwd, timeout_seconds=timeout_seconds)
 
-async def run_npx(args: list[str] | None = None, *, cwd: str = "", timeout_seconds: float = 60.0) -> str:
-    return await Shell.run_command("npx", args=args or [], cwd=cwd, timeout_seconds=timeout_seconds)
+
+async def run_npx(
+    args: list[str] | None = None, *, cwd: str = "", timeout_seconds: float = 60.0
+) -> str:
+    return await Shell.run_command(
+        "npx", args=args or [], cwd=cwd, timeout_seconds=timeout_seconds
+    )
+
 
 # Security lookup stub (legacy name used by tests)
 async def security_lookup(query: str) -> str:
-    return json.dumps({"ok": False, "error": "security_lookup_unavailable", "query": query})
+    return json.dumps(
+        {"ok": False, "error": "security_lookup_unavailable", "query": query}
+    )

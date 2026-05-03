@@ -26,6 +26,10 @@ from obscura.arbiter.notify import fire_task_complete
 from obscura.core.background_tasks import get_background_task_manager
 from obscura.core.task_queue import TaskQueue, _open  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
 from obscura.core.tools import tool
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -54,6 +58,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
             try:
                 d[key] = json.loads(d[key])
             except Exception:
+                logger.debug("suppressed exception in _row_to_dict", exc_info=True)
                 d[key] = {} if key == "metadata" else []
     return d
 
@@ -520,7 +525,7 @@ async def queue_complete(task_id: str, output: str = "") -> str:
             if result and result.get("arbiter_feedback"):
                 arbiter_feedback = str(result["arbiter_feedback"])
         except ImportError:
-            pass
+            logger.debug("suppressed exception in queue_complete", exc_info=True)
 
     payload: dict[str, Any] = {"ok": True, "task_id": task_id, "status": "completed"}
     if arbiter_feedback:
@@ -626,7 +631,7 @@ def _sync_goal_progress(task_id: str) -> None:
             board.sync_task_progress(goal_id)
             board.update(goal_id, last_worked=datetime.now(UTC).isoformat())
     except Exception:
-        pass
+        logger.debug("suppressed exception in _sync_goal_progress", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

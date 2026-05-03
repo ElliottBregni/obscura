@@ -102,6 +102,7 @@ class AgentLoopScenarioExecutor:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            logger.debug("suppressed exception in execute", exc_info=True)
             loop = None
 
         if loop is not None and loop.is_running():
@@ -173,6 +174,7 @@ class AgentLoopScenarioExecutor:
                         details += f"Text not found: {step.text!r}. "
 
         except Exception as exc:
+            logger.debug("suppressed exception in _execute_async", exc_info=True)
             passed = False
             details = f"Execution error: {exc}"
 

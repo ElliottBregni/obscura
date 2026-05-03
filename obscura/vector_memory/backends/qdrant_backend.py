@@ -43,6 +43,7 @@ def _payload_dict(payload: Any) -> dict[str, Any]:
         return {}
     return cast(dict[str, Any], payload)
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,7 +151,7 @@ class QdrantBackend:
                 if "created_at" in existing_payload:
                     existing_created_at = str(existing_payload["created_at"])
         except Exception:
-            pass  # new point — use now
+            logger.debug("suppressed exception in store_vector", exc_info=True)
 
         payload: dict[str, Any] = {
             "namespace": key.namespace,
@@ -208,6 +209,7 @@ class QdrantBackend:
                         to_delete.append(p.id)
                 except Exception:
                     # Ignore malformed payloads
+                    logger.debug("suppressed exception in purge_expired", exc_info=True)
                     continue
             if to_delete:
                 self.client.delete(self.collection_name, to_delete)
@@ -271,7 +273,9 @@ class QdrantBackend:
             )
             metadata = cast(dict[str, Any], payload.get("metadata", {}))
             return VectorEntry(
-                key=MemoryKey(namespace=str(payload["namespace"]), key=str(payload["key"])),
+                key=MemoryKey(
+                    namespace=str(payload["namespace"]), key=str(payload["key"])
+                ),
                 text=str(payload["text"]),
                 embedding=embedding,
                 metadata=metadata,
@@ -282,6 +286,7 @@ class QdrantBackend:
                 else None,
             )
         except Exception:
+            logger.debug("suppressed exception in get_vector", exc_info=True)
             return None
 
     def search_vectors(
@@ -323,6 +328,7 @@ class QdrantBackend:
             try:
                 created = datetime.fromisoformat(str(payload["created_at"]))
             except Exception:
+                logger.debug("suppressed exception in search_vectors", exc_info=True)
                 created = now
             accessed_at_str = payload.get("accessed_at")
             accessed_at = (
@@ -439,7 +445,7 @@ class QdrantBackend:
                 [point_id],
             )
         except Exception:
-            pass  # best-effort
+            logger.debug("suppressed exception in touch_vector", exc_info=True)
 
     def list_by_type(
         self,
@@ -465,6 +471,7 @@ class QdrantBackend:
             try:
                 created = datetime.fromisoformat(str(payload["created_at"]))
             except Exception:
+                logger.debug("suppressed exception in list_by_type", exc_info=True)
                 continue
             if older_than is not None and created >= older_than:
                 continue

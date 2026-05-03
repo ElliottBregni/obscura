@@ -6,6 +6,10 @@ import time
 from typing import Any, cast
 
 from .storage import Message
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 _aiosqlite: Any
 try:
@@ -13,6 +17,7 @@ try:
 
     _aiosqlite = aiosqlite
 except ImportError:
+    logger.debug("suppressed exception in <module>", exc_info=True)
     _aiosqlite = None
 
 # Maximum retry attempts before moving a message to the dead letter queue.

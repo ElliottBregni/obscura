@@ -10,6 +10,10 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Registry aliases for --registry flag
 REGISTRY_ALIASES: dict[str, str] = {
@@ -91,6 +95,7 @@ class MCPSoCatalogProvider:
                             if isinstance(val, list):
                                 return cast("list[dict[str, Any]]", val)
             except Exception:
+                logger.debug("suppressed exception in _try_api", exc_info=True)
                 continue
         return None
 
@@ -204,6 +209,7 @@ class MCPSoCatalogProvider:
                         if len(entries) >= limit:
                             break
                 except Exception:
+                    logger.debug("suppressed exception in fetch_top", exc_info=True)
                     break
 
             current_page += 1

@@ -217,12 +217,14 @@ def _wrap_unary(
         try:
             return await fn(request)
         except A2AError as e:
+            logger.debug("suppressed exception in handler", exc_info=True)
             import grpc
 
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(json.dumps({"code": e.code, "message": e.message}))
             return ""
         except Exception as e:
+            logger.debug("suppressed exception in handler", exc_info=True)
             import grpc
 
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -242,11 +244,13 @@ def _wrap_stream(
             async for item in fn(request):
                 yield item
         except A2AError as e:
+            logger.debug("suppressed exception in handler", exc_info=True)
             import grpc
 
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(json.dumps({"code": e.code, "message": e.message}))
         except Exception as e:
+            logger.debug("suppressed exception in handler", exc_info=True)
             import grpc
 
             context.set_code(grpc.StatusCode.INTERNAL)

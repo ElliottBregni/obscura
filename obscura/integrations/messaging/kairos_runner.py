@@ -295,7 +295,9 @@ class KairosAgentRunner:
             summary_parts: list[str] = []
 
             if final_status == "completed":
-                count_str = f"{tasks_done} task{'s' if tasks_done != 1 else ''} completed"
+                count_str = (
+                    f"{tasks_done} task{'s' if tasks_done != 1 else ''} completed"
+                )
                 if tasks_failed:
                     count_str += f", {tasks_failed} failed"
                 summary_parts.append(f"✓ Done ({count_str})")

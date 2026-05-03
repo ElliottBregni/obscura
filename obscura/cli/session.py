@@ -161,6 +161,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
             try:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
+                _log.debug("suppressed exception in _track_file_event", exc_info=True)
                 before = ""
             ctx.pending_file_reads[ev.tool_use_id] = (path, before)
 
@@ -172,6 +173,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
+            _log.debug("suppressed exception in _track_file_event", exc_info=True)
             after = ""
         if after != before:
             ctx.add_file_change(path, before, after)
@@ -186,12 +188,12 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                         lines_removed=abs(added),
                     )
             except Exception:
-                pass
+                _log.debug("suppressed exception in _track_file_event", exc_info=True)
             # Record in file history.
             try:
                 record_file_access(Path(path), "edit")
             except Exception:
-                pass
+                _log.debug("suppressed exception in _track_file_event", exc_info=True)
 
 
 def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
@@ -369,7 +371,7 @@ class ObscuraSession:
                     f"Loaded session summary ({len(resume_summary)} chars)",
                 )
             except Exception:
-                pass
+                _log.debug("suppressed exception in create", exc_info=True)
 
         return self
 
@@ -463,7 +465,7 @@ class ObscuraSession:
         try:
             set_active_renderer(renderer)
         except Exception:
-            pass
+            _log.debug("suppressed exception in send", exc_info=True)
         accumulated: list[str] = []
 
         # Build confirm callback with permission mode integration.
@@ -478,7 +480,7 @@ class ObscuraSession:
                 if decision.auto_approved:
                     return True
             except Exception:
-                pass
+                _log.debug("suppressed exception in confirm_cb", exc_info=True)
             if ctx.confirm_enabled:
                 return await _cli_confirm(ctx, tc.name, tc.input)
             return True
@@ -557,7 +559,9 @@ class ObscuraSession:
                         _lvl
                     ]
                 except (ValueError, KeyError):
-                    pass
+                    _log.debug(
+                        "suppressed exception in _stream_with_retry", exc_info=True
+                    )
             _s = ctx.client.run_loop(
                 augmented_text,
                 max_turns=ctx.max_turns,
@@ -589,7 +593,9 @@ class ObscuraSession:
                             tool_names=tool_names,
                         )
                     except Exception:
-                        pass
+                        _log.debug(
+                            "suppressed exception in _stream_with_retry", exc_info=True
+                        )
                     if event.kind == AgentEventKind.TEXT_DELTA:
                         _buf.append(event.text)
                         _stream_output_chars += len(event.text)
@@ -612,7 +618,9 @@ class ObscuraSession:
                                 ],
                             )
                     except Exception:
-                        pass
+                        _log.debug(
+                            "suppressed exception in _stream_with_retry", exc_info=True
+                        )
                     # Tool output collapsing
                     if event.kind == AgentEventKind.TOOL_CALL:
                         tool_name = getattr(event, "tool_name", "")
@@ -622,7 +630,10 @@ class ObscuraSession:
                                 ctx.collapser = ToolCollapser()
                             ctx.collapser.record(tool_name, tool_input)
                         except Exception:
-                            pass
+                            _log.debug(
+                                "suppressed exception in _stream_with_retry",
+                                exc_info=True,
+                            )
                         # Tips
                         if _tip_scheduler is not None:
                             _FILE_TOOLS = {
@@ -643,7 +654,10 @@ class ObscuraSession:
                                 if summary:
                                     console.print(f"[dim]  {summary}[/]")
                             except Exception:
-                                pass
+                                _log.debug(
+                                    "suppressed exception in _stream_with_retry",
+                                    exc_info=True,
+                                )
                     # Cost tracking
                     if event.kind in (
                         AgentEventKind.TURN_COMPLETE,
@@ -655,9 +669,7 @@ class ObscuraSession:
                             if isinstance(_usage, dict):
                                 _usage_dict = cast(dict[str, Any], _usage)
                                 inp: int = int(_usage_dict.get("input_tokens", 0) or 0)
-                                out: int = int(
-                                    _usage_dict.get("output_tokens", 0) or 0
-                                )
+                                out: int = int(_usage_dict.get("output_tokens", 0) or 0)
                             else:
                                 inp = int(getattr(_usage, "input_tokens", 0) or 0)
                                 out = int(getattr(_usage, "output_tokens", 0) or 0)
@@ -669,9 +681,12 @@ class ObscuraSession:
                                         ctx.model or ctx.backend,
                                     )
                                 except Exception:
-                                    pass
+                                    _log.debug(
+                                        "suppressed exception in _stream_with_retry",
+                                        exc_info=True,
+                                    )
             except KeyboardInterrupt:
-                pass
+                _log.debug("suppressed exception in _stream_with_retry", exc_info=True)
             except Exception as exc:
                 _err = str(exc).lower()
                 _is_ctx_err = any(
@@ -714,6 +729,9 @@ class ObscuraSession:
                     try:
                         await ctx.client.reset_session()
                     except Exception:
+                        _log.debug(
+                            "suppressed exception in _stream_with_retry", exc_info=True
+                        )
                         with contextlib.suppress(Exception):
                             await ctx.recreate_client(ctx.backend, ctx.model)
                     return await _stream_with_retry(
@@ -726,13 +744,13 @@ class ObscuraSession:
         try:
             accumulated = await _stream_with_retry()
         except KeyboardInterrupt:
-            pass
+            _log.debug("suppressed exception in send", exc_info=True)
         finally:
             renderer.finish()
             try:
                 set_active_renderer(None)
             except Exception:
-                pass
+                _log.debug("suppressed exception in send", exc_info=True)
 
         console.print()  # newline after streaming
 
@@ -783,7 +801,7 @@ class ObscuraSession:
                     console.print("[dim cyan]  Auto-compacting context...[/]")
                     await cmd_compact("4", ctx)
             except Exception:
-                pass
+                _log.debug("suppressed exception in send", exc_info=True)
 
         # Auto-title
         global _session_state
@@ -807,7 +825,7 @@ class ObscuraSession:
                         highlight=False,
                     )
             except Exception:
-                pass
+                _log.debug("suppressed exception in send", exc_info=True)
 
         # Parse plan if in PLAN mode
         _maybe_parse_plan(response_text, ctx)
@@ -828,7 +846,7 @@ class ObscuraSession:
                             loop_kwargs=effective_kwargs,
                         )
         except Exception:
-            pass
+            _log.debug("suppressed exception in send", exc_info=True)
 
         return response_text
 
@@ -877,7 +895,7 @@ class ObscuraSession:
             dlog.flush()
             dlog.close()
         except Exception:
-            pass
+            _log.debug("suppressed exception in close", exc_info=True)
 
         # KAIROS: stop engine if not already handled by supervisor hooks
         if self._kairos_engine is not None and not self._kairos_hooks_registered:
@@ -888,13 +906,13 @@ class ObscuraSession:
         try:
             await run_cleanup()
         except Exception:
-            pass
+            _log.debug("suppressed exception in close", exc_info=True)
 
         # Save commit attribution
         try:
             get_attribution_tracker().save()
         except Exception:
-            pass
+            _log.debug("suppressed exception in close", exc_info=True)
 
         # Update session status
         try:
@@ -902,13 +920,13 @@ class ObscuraSession:
             if sess is not None and sess.status == SessionStatus.RUNNING:
                 await self._store.update_status(self._sid, SessionStatus.COMPLETED)
         except Exception:
-            pass
+            _log.debug("suppressed exception in close", exc_info=True)
 
         # Close client
         try:
             await self._client_cm.__aexit__(None, None, None)
         except Exception:
-            pass
+            _log.debug("suppressed exception in close", exc_info=True)
 
         self._store.close()
 
@@ -1026,7 +1044,7 @@ class ObscuraSession:
 
             load_dotenv()
         except Exception:
-            pass
+            _log.debug("suppressed exception in _load_env", exc_info=True)
 
     def _discover_tools(
         self,
@@ -1068,7 +1086,7 @@ class ObscuraSession:
                     self.context_router = ContextRouter(_channels, self._vector_store)
                     self.turn_classifier = TurnClassifier(_channels)
             except Exception:
-                pass
+                _log.debug("suppressed exception in _init_vector_memory", exc_info=True)
 
     def _compose_system_prompt(self, config: SessionConfig) -> str:
         """Build the combined system prompt."""
@@ -1108,7 +1126,9 @@ class ObscuraSession:
                 if sys_channel_ctx:
                     custom_sections.append(sys_channel_ctx)
             except Exception:
-                pass
+                _log.debug(
+                    "suppressed exception in _compose_system_prompt", exc_info=True
+                )
 
         # Environment context
         try:
@@ -1131,7 +1151,7 @@ class ObscuraSession:
             if env_section:
                 custom_sections.append(env_section)
         except Exception:
-            pass
+            _log.debug("suppressed exception in _compose_system_prompt", exc_info=True)
 
         # KAIROS context
         try:
@@ -1141,7 +1161,7 @@ class ObscuraSession:
                 if _kairos_sys:
                     custom_sections.append(_kairos_sys)
         except Exception:
-            pass
+            _log.debug("suppressed exception in _compose_system_prompt", exc_info=True)
 
         # Coordinator context
         try:
@@ -1167,9 +1187,11 @@ class ObscuraSession:
                             f"## Available Specialist Agents\n\n{catalog}",
                         )
                 except Exception:
-                    pass
+                    _log.debug(
+                        "suppressed exception in _compose_system_prompt", exc_info=True
+                    )
         except Exception:
-            pass
+            _log.debug("suppressed exception in _compose_system_prompt", exc_info=True)
 
         return compose_system_prompt(
             base=config.system_prompt,
@@ -1189,56 +1211,56 @@ class ObscuraSession:
         try:
             system_tools = get_system_tool_specs()
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Memory tools
         if self._vector_store is not None:
             try:
                 system_tools.extend(make_memory_tool_specs(self._cli_user))
             except Exception:
-                pass
+                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Worktree tools
         try:
             system_tools.extend(get_worktree_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Task tools
         try:
             system_tools.extend(get_task_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Goal tools
         try:
             system_tools.extend(get_goal_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Arbiter tools
         try:
             system_tools.extend(get_arbiter_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Profile tools
         try:
             system_tools.extend(get_profile_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # LSP tool
         try:
             system_tools.extend(get_lsp_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Browser tool
         try:
             system_tools.extend(get_browser_tool_specs())
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Builtin plugin tools
         try:
@@ -1264,7 +1286,7 @@ class ObscuraSession:
                     system_tools.append(tool)
                     existing_names.add(tool.name)
         except Exception:
-            pass
+            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Backfill capability metadata
         if system_tools:
@@ -1277,7 +1299,7 @@ class ObscuraSession:
                     for t in system_tools
                 ]
             except Exception:
-                pass
+                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         # Filter by capability grants
         if system_tools:
@@ -1290,7 +1312,7 @@ class ObscuraSession:
                         if not getattr(t, "capability", "") or t.name in _allowed
                     ]
             except Exception:
-                pass
+                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
         return system_tools, len(system_tools)
 
@@ -1306,6 +1328,7 @@ class ObscuraSession:
         if config.tools_enabled:
             # ask_user callback
             try:
+
                 async def _ask_user_handler(
                     question: str,
                     choices: list[str],
@@ -1329,10 +1352,13 @@ class ObscuraSession:
 
                 UI.set_ask_user_callback(_ask_user_handler)
             except Exception:
-                pass
+                _log.debug(
+                    "suppressed exception in _wire_callbacks_and_hooks", exc_info=True
+                )
 
             # Permission mode + plan approval callbacks
             try:
+
                 def _set_permission_mode(mode: str) -> None:
                     self._ctx.permission_mode = mode
 
@@ -1350,10 +1376,13 @@ class ObscuraSession:
 
                 Session.set_plan_approval_callback(_plan_approval_handler)
             except Exception:
-                pass
+                _log.debug(
+                    "suppressed exception in _wire_callbacks_and_hooks", exc_info=True
+                )
 
             # user_interact callback
             try:
+
                 async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
                     mode = kwargs.get("mode", "question")
 
@@ -1412,7 +1441,9 @@ class ObscuraSession:
 
                 UI.set_user_interact_callback(_user_interact_handler)
             except Exception:
-                pass
+                _log.debug(
+                    "suppressed exception in _wire_callbacks_and_hooks", exc_info=True
+                )
 
         # Project hooks
         project_hooks = None
@@ -1421,7 +1452,9 @@ class ObscuraSession:
             if _hook_registry.count > 0:
                 project_hooks = _hook_registry
         except Exception:
-            pass
+            _log.debug(
+                "suppressed exception in _wire_callbacks_and_hooks", exc_info=True
+            )
 
         # Memory channel TOOL_CALL hook
         self._tool_router_ref = None
@@ -1468,7 +1501,9 @@ class ObscuraSession:
                 project_hooks.add_after(_kairos_tool_hook, AgentEventKind.TOOL_CALL)
                 project_hooks.add_after(_kairos_turn_hook, AgentEventKind.TURN_COMPLETE)
         except Exception:
-            pass
+            _log.debug(
+                "suppressed exception in _wire_callbacks_and_hooks", exc_info=True
+            )
 
         return project_hooks
 
@@ -1503,7 +1538,7 @@ class ObscuraSession:
                 backend.set_tool_router(_router)
             self._tool_router_ref = _router
         except Exception:
-            pass
+            _log.debug("suppressed exception in _wire_tool_router", exc_info=True)
 
     async def _try_resume(self, config: SessionConfig) -> str:
         """Attempt session resume; returns a summary string on failure."""
@@ -1517,6 +1552,7 @@ class ObscuraSession:
                 ),
             )
         except Exception as exc:
+            _log.debug("suppressed exception in _try_resume", exc_info=True)
             print_warning(
                 f"Resume failed for session {config.session_id[:12]}: {exc}. "
                 "Starting a fresh backend session.",
@@ -1535,7 +1571,7 @@ class ObscuraSession:
                 )
                 return str(summary) if summary else ""
             except Exception:
-                pass
+                _log.debug("suppressed exception in _try_resume", exc_info=True)
         return ""
 
 

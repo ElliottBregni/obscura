@@ -117,7 +117,7 @@ class ProactiveMode:
             try:
                 DailyLog().append(f"tick #{self._tick_count}", source="proactive")
             except Exception:
-                pass
+                logger.debug("suppressed exception in _tick_loop", exc_info=True)
 
             # Fire on_tick callback if set.
             if self._on_tick is not None:
@@ -132,7 +132,7 @@ class ProactiveMode:
             try:
                 dlog.event("proactive_tick", tick=self._tick_count)
             except Exception:
-                pass
+                logger.debug("suppressed exception in _tick_loop", exc_info=True)
 
             logger.debug("Proactive tick #%d", self._tick_count)
 

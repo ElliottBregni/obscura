@@ -113,6 +113,9 @@ class SlackClient:
                 epoch = float(ts)
                 timestamp = datetime.fromtimestamp(epoch, tz=UTC)
             except (ValueError, TypeError):
+                logger.debug(
+                    "suppressed exception in _poll_channel_sync", exc_info=True
+                )
                 timestamp = datetime.now(tz=UTC)
             out.append(
                 SlackMessage(

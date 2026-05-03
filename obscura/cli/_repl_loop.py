@@ -209,7 +209,7 @@ async def repl(
                 context_router = ContextRouter(_channels, vector_store)
                 turn_classifier = TurnClassifier(_channels)
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Compose system prompt
     include_default = not no_default_prompt
@@ -243,7 +243,7 @@ async def repl(
             if sys_channel_ctx:
                 custom_sections.append(sys_channel_ctx)
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Inject environment context (available plugins, capabilities, agent types)
     try:
@@ -266,7 +266,7 @@ async def repl(
         if env_section:
             custom_sections.append(env_section)
     except Exception:
-        pass
+        _log.debug("suppressed exception in repl", exc_info=True)
 
     # Inject KAIROS context
     try:
@@ -276,7 +276,7 @@ async def repl(
             if _kairos_sys:
                 custom_sections.append(_kairos_sys)
     except Exception:
-        pass
+        _log.debug("suppressed exception in repl", exc_info=True)
 
     # Inject coordinator system prompt
     try:
@@ -298,9 +298,9 @@ async def repl(
                         f"## Available Specialist Agents\n\n{catalog}"
                     )
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
     except Exception:
-        pass
+        _log.debug("suppressed exception in repl", exc_info=True)
 
     combined_system = compose_system_prompt(
         base=system,
@@ -314,13 +314,13 @@ async def repl(
         try:
             system_tools = get_system_tool_specs()
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
         if vector_store is not None:
             try:
                 system_tools.extend(make_memory_tool_specs(cli_user))
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
 
         for _getter, _mod in [
             ("get_worktree_tool_specs", "obscura.tools.worktree"),
@@ -336,7 +336,7 @@ async def repl(
                 _m = importlib.import_module(_mod)
                 system_tools.extend(getattr(_m, _getter)())
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
 
         # Load builtin plugin tools
         try:
@@ -358,7 +358,7 @@ async def repl(
                     system_tools.append(tool)
                     existing_names.add(tool.name)
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Backfill capability field
     if tools_enabled and system_tools:
@@ -371,7 +371,7 @@ async def repl(
                 for t in system_tools
             ]
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Filter tools by capability grants
     if tools_enabled and system_tools:
@@ -384,13 +384,14 @@ async def repl(
                     if not getattr(t, "capability", "") or t.name in _allowed
                 ]
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     tool_count = len(system_tools)
 
     # Wire the ask_user callback
     if tools_enabled:
         try:
+
             async def _ask_user_handler(
                 question: str,
                 choices: list[str],
@@ -414,11 +415,12 @@ async def repl(
 
             UI.set_ask_user_callback(_ask_user_handler)
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Wire plan-mode callbacks
     if tools_enabled:
         try:
+
             def _set_permission_mode(mode: str) -> None:
                 ctx.permission_mode = mode  # type: ignore[name-defined]  # set later
 
@@ -436,11 +438,12 @@ async def repl(
 
             Session.set_plan_approval_callback(_plan_approval_handler)
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Wire user_interact callback
     if tools_enabled:
         try:
+
             async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
                 mode = kwargs.get("mode", "question")
 
@@ -497,7 +500,7 @@ async def repl(
 
             UI.set_user_interact_callback(_user_interact_handler)
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
     # Load project hooks
     project_hooks = None
@@ -506,7 +509,7 @@ async def repl(
         if _hook_registry.count > 0:
             project_hooks = _hook_registry
     except Exception:
-        pass
+        _log.debug("suppressed exception in repl", exc_info=True)
 
     # Wire memory channel TOOL_CALL hook
     _tool_router_ref = None
@@ -543,7 +546,7 @@ async def repl(
             project_hooks.add_after(_kairos_tool_hook, AgentEventKind.TOOL_CALL)
             project_hooks.add_after(_kairos_turn_hook, AgentEventKind.TURN_COMPLETE)
     except Exception:
-        pass
+        _log.debug("suppressed exception in repl", exc_info=True)
 
     # Build client
     async with ObscuraClient(
@@ -582,7 +585,7 @@ async def repl(
                     _backend_ref.set_tool_router(_router)
                 _tool_router_ref = _router
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
 
         # Session resume
         if session_id:
@@ -591,6 +594,7 @@ async def repl(
                     SessionRef(session_id=session_id, backend=Backend(backend)),
                 )
             except Exception as exc:
+                _log.debug("suppressed exception in repl", exc_info=True)
                 print_warning(
                     f"Resume failed for session {session_id[:12]}: {exc}. "
                     "Starting a fresh backend session.",
@@ -630,7 +634,7 @@ async def repl(
                     if sess is not None and sess.status == SessionStatus.RUNNING:
                         await store.update_status(sid, SessionStatus.COMPLETED)
                 except Exception:
-                    pass
+                    _log.debug("suppressed exception in repl", exc_info=True)
                 store.close()
             return
 
@@ -650,6 +654,7 @@ async def repl(
                     client.register_tool,
                 )
             except Exception:
+                _log.debug("suppressed exception in repl", exc_info=True)
                 browser_bridge_client, browser_status = None, None
         if browser_status is not None:
             tool_count += int(browser_status.get("tool_count") or 0)
@@ -683,6 +688,7 @@ async def repl(
                 )
                 print_ok(f"Supervisor started -- {len(agent_infos)} agent(s) launching")
             except Exception as exc:
+                _log.debug("suppressed exception in repl", exc_info=True)
                 print_warning(f"Supervisor failed to start: {exc}")
 
         # Start iMessage daemon (only when supervisor is NOT running)
@@ -692,6 +698,7 @@ async def repl(
             try:
                 daemon_task = await start_imessage_daemon(ctx.client)
             except Exception as exc:
+                _log.debug("suppressed exception in repl", exc_info=True)
                 print_warning(f"iMessage daemon failed to start: {exc}")
         daemon_restart_count = 0
         daemon_last_restart_at = 0.0
@@ -712,7 +719,11 @@ async def repl(
             details: list[RunningAgentInfo] = []
             if ctx.runtime is not None:
                 try:
-                    _active = {AgentStatus.RUNNING, AgentStatus.WAITING, AgentStatus.PENDING}
+                    _active = {
+                        AgentStatus.RUNNING,
+                        AgentStatus.WAITING,
+                        AgentStatus.PENDING,
+                    }
                     for agent in ctx.runtime.list_agents():
                         if agent.status not in _active:
                             continue
@@ -732,7 +743,9 @@ async def repl(
                             )
                         )
                 except Exception:
-                    pass
+                    _log.debug(
+                        "suppressed exception in _refresh_prompt_status", exc_info=True
+                    )
             if daemon_task is not None and not daemon_task.done():
                 task_name = daemon_task.get_name()
                 label = (
@@ -748,12 +761,18 @@ async def repl(
             task_count = 0
             if ctx.runtime is not None:
                 try:
-                    _active2 = {AgentStatus.RUNNING, AgentStatus.WAITING, AgentStatus.PENDING}
+                    _active2 = {
+                        AgentStatus.RUNNING,
+                        AgentStatus.WAITING,
+                        AgentStatus.PENDING,
+                    }
                     task_count += sum(
                         1 for a in ctx.runtime.list_agents() if a.status in _active2
                     )
                 except Exception:
-                    pass
+                    _log.debug(
+                        "suppressed exception in _refresh_prompt_status", exc_info=True
+                    )
             if daemon_task is not None and not daemon_task.done():
                 task_count += 1
             prompt_status.task_count = task_count
@@ -785,6 +804,7 @@ async def repl(
                 else:
                     await _kairos_engine.start()
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("kairos_start", _e)
 
         if _kairos_engine is not None:
@@ -793,6 +813,7 @@ async def repl(
                 if _agent_loop is not None:
                     _kairos_engine.register_agent_loop(_agent_loop)
             except Exception as _e:
+                _log.debug("suppressed exception in repl", exc_info=True)
                 _swallow("kairos_loop_wire", _e)
 
         # Wire AgentLoop into Arbiter
@@ -801,6 +822,7 @@ async def repl(
             if _al is not None:
                 _reg_arbiter_loop(_al)
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("arbiter_loop_wire", _e)
 
         # --- Tips scheduler ---
@@ -808,6 +830,7 @@ async def repl(
         try:
             _tip_scheduler = TipScheduler()
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("tips_init", _e)
 
         # --- Frustration detector ---
@@ -816,6 +839,7 @@ async def repl(
             if is_kairos_enabled():
                 _frustration_detector = FrustrationDetector()
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("frustration_init", _e)
 
         # --- Away summary tracker ---
@@ -824,6 +848,7 @@ async def repl(
             if is_kairos_enabled():
                 _away_tracker = AwaySummaryTracker()
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("away_init", _e)
 
         # --- Prompt cache ---
@@ -831,7 +856,7 @@ async def repl(
         try:
             _prompt_cache = PromptCacheManager()
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
         # --- Register cleanup tasks ---
         try:
@@ -840,6 +865,7 @@ async def repl(
                 lambda: cleanup_stale_files(max_age_days=30),
             )
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("cleanup_init", _e)
 
         # --- Concurrent session detection ---
@@ -853,7 +879,7 @@ async def repl(
                     f"[yellow]Note: {len(concurrent)} other session(s) running in this workspace[/]",
                 )
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
         # --- Deep log session start ---
         try:
@@ -864,7 +890,7 @@ async def repl(
                 model=model_name or "",
             )
         except Exception:
-            pass
+            _log.debug("suppressed exception in repl", exc_info=True)
 
         # --- UDS inbox for cross-session messaging ---
         _uds_inbox = None
@@ -878,6 +904,7 @@ async def repl(
 
             await _uds_inbox.start(on_message=_on_peer_message)
         except Exception as _e:
+            _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("uds_init", _e)
             _uds_inbox = None
 
@@ -898,6 +925,9 @@ async def repl(
                                 try:
                                     exc = daemon_task.exception()
                                 except Exception:
+                                    _log.debug(
+                                        "suppressed exception in repl", exc_info=True
+                                    )
                                     exc = None
                             dc = getattr(daemon_task, "_daemon_client", None)
                             if dc is not None:
@@ -911,6 +941,9 @@ async def repl(
                             try:
                                 daemon_task = await start_imessage_daemon(ctx.client)
                             except Exception as restart_exc:
+                                _log.debug(
+                                    "suppressed exception in repl", exc_info=True
+                                )
                                 print_warning(
                                     f"iMessage daemon restart failed: {restart_exc}",
                                 )
@@ -918,6 +951,7 @@ async def repl(
                     _refresh_prompt_status()
                     user_input = await bordered_prompt(session, status=prompt_status)
                 except (EOFError, KeyboardInterrupt):
+                    _log.debug("suppressed exception in repl", exc_info=True)
                     console.print()
                     break
                 if not user_input:
@@ -927,7 +961,9 @@ async def repl(
                 if user_input == "__VOICE_RECORD__":
                     voice_enabled = getattr(ctx, "voice_enabled", False)
                     if not voice_enabled:
-                        console.print("[dim]Voice mode is off. Enable with /voice on[/]")
+                        console.print(
+                            "[dim]Voice mode is off. Enable with /voice on[/]"
+                        )
                         continue
                     try:
                         _vsession = VoiceSession()
@@ -950,6 +986,7 @@ async def repl(
                             console.print("[dim]No speech detected.[/]")
                             continue
                     except Exception as voice_exc:
+                        _log.debug("suppressed exception in repl", exc_info=True)
                         console.print(f"[red]Voice error: {voice_exc}[/]")
                         continue
 
@@ -959,13 +996,18 @@ async def repl(
                         _kairos_engine.log_user_message(user_input)
 
                 # Ultrathink keyword detection
-                if "ultrathink" in user_input.lower() and not user_input.startswith("/"):
+                if "ultrathink" in user_input.lower() and not user_input.startswith(
+                    "/"
+                ):
                     if getattr(ctx, "effort_level", "medium") != "max":
                         ctx.effort_level = "max"
                         try:
                             ultrathink_banner()
                         except Exception:
-                            console.print("[bold bright_magenta]⚡ ULTRATHINK activated[/]")
+                            _log.debug("suppressed exception in repl", exc_info=True)
+                            console.print(
+                                "[bold bright_magenta]⚡ ULTRATHINK activated[/]"
+                            )
 
                 # Frustration detection
                 if _frustration_detector is not None and not user_input.startswith("/"):
@@ -980,7 +1022,7 @@ async def repl(
                                 "let me be more careful with my approach.[/]",
                             )
                     except Exception:
-                        pass
+                        _log.debug("suppressed exception in repl", exc_info=True)
 
                 # Away summary
                 if _away_tracker is not None:
@@ -991,7 +1033,7 @@ async def repl(
                                 console.print(f"[dim]{_summary}[/]")
                         _away_tracker.mark_active()
                     except Exception:
-                        pass
+                        _log.debug("suppressed exception in repl", exc_info=True)
 
                 # Slash command
                 if user_input.startswith("/"):
@@ -1014,31 +1056,46 @@ async def repl(
                         try:
                             r = subprocess.run(
                                 ["git", "diff", "--name-only", "HEAD"],
-                                capture_output=True, text=True, timeout=5,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
                             )
                             u = subprocess.run(
                                 ["git", "ls-files", "--others", "--exclude-standard"],
-                                capture_output=True, text=True, timeout=5,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
                             )
                             files = (r.stdout.strip() + "\n" + u.stdout.strip()).strip()
                             return files or None
                         except Exception:
+                            _log.debug(
+                                "suppressed exception in _snapshot_git", exc_info=True
+                            )
                             return None
 
                     def _revert_changes(before_files: str | None) -> list[str]:
                         try:
                             r = subprocess.run(
                                 ["git", "diff", "--name-only", "HEAD"],
-                                capture_output=True, text=True, timeout=5,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
                             )
                             u = subprocess.run(
                                 ["git", "ls-files", "--others", "--exclude-standard"],
-                                capture_output=True, text=True, timeout=5,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
                             )
                             after = set(
-                                (r.stdout.strip() + "\n" + u.stdout.strip()).strip().splitlines()
+                                (r.stdout.strip() + "\n" + u.stdout.strip())
+                                .strip()
+                                .splitlines()
                             )
-                            before = set(before_files.splitlines() if before_files else [])
+                            before = set(
+                                before_files.splitlines() if before_files else []
+                            )
                             new_files = after - before
                             reverted: list[str] = []
                             for f in sorted(new_files):
@@ -1046,16 +1103,24 @@ async def repl(
                                     continue
                                 cr = subprocess.run(
                                     ["git", "checkout", "HEAD", "--", f],
-                                    capture_output=True, timeout=5,
+                                    capture_output=True,
+                                    timeout=5,
                                 )
                                 if cr.returncode != 0:
                                     try:
                                         os.remove(f)
                                     except OSError:
+                                        _log.debug(
+                                            "suppressed exception in _revert_changes",
+                                            exc_info=True,
+                                        )
                                         continue
                                 reverted.append(f)
                             return reverted
                         except Exception:
+                            _log.debug(
+                                "suppressed exception in _revert_changes", exc_info=True
+                            )
                             return []
 
                     inner = user_input[1:].strip()
@@ -1077,7 +1142,9 @@ async def repl(
                             )
                             continue
 
-                        _pi(f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)")
+                        _pi(
+                            f"Running eval suite for @{cmd_name}: {len(suite.cases)} test case(s)"
+                        )
                         total_pass = 0
                         total_criteria = 0
 
@@ -1098,7 +1165,8 @@ async def repl(
 
                             if case.preferred_tools:
                                 chain_blocks.append(
-                                    "Preferred tools for this task: " + ", ".join(case.preferred_tools)
+                                    "Preferred tools for this task: "
+                                    + ", ".join(case.preferred_tools)
                                 )
 
                             chain_input = "\n\n---\n\n".join(chain_blocks)
@@ -1109,11 +1177,17 @@ async def repl(
                             for run in range(suite.runs_per_case):
                                 if suite.runs_per_case > 1:
                                     _pi(f"  Run {run + 1}/{suite.runs_per_case}")
-                                response = await send_message(ctx, chain_input, eval_kwargs, streaming_status=ss)
+                                response = await send_message(
+                                    ctx, chain_input, eval_kwargs, streaming_status=ss
+                                )
                                 ss.reset()
-                                grading = ctx.build_grading_prompt(cmd_name, case.input_args, response, case.criteria)
+                                grading = ctx.build_grading_prompt(
+                                    cmd_name, case.input_args, response, case.criteria
+                                )
                                 _pi("  Grading...")
-                                grade_response = await send_message(ctx, grading, loop_kwargs, streaming_status=ss)
+                                grade_response = await send_message(
+                                    ctx, grading, loop_kwargs, streaming_status=ss
+                                )
                                 ss.reset()
                                 total_criteria += len(case.criteria)
                                 pass_count = grade_response.upper().count("| PASS")
@@ -1123,12 +1197,17 @@ async def repl(
                                     if reverted:
                                         _pe(
                                             f"  Eval failed ({pass_count}/{len(case.criteria)}) "
-                                            f"-- reverted {len(reverted)} file(s): " + ", ".join(reverted)
+                                            f"-- reverted {len(reverted)} file(s): "
+                                            + ", ".join(reverted)
                                         )
                                     else:
-                                        _pe(f"  Eval failed ({pass_count}/{len(case.criteria)}) -- no file changes to revert")
+                                        _pe(
+                                            f"  Eval failed ({pass_count}/{len(case.criteria)}) -- no file changes to revert"
+                                        )
 
-                        _pi(f"\n-- Eval complete: {total_pass}/{total_criteria} criteria passed")
+                        _pi(
+                            f"\n-- Eval complete: {total_pass}/{total_criteria} criteria passed"
+                        )
                         continue
 
                     blocks: list[str] = []
@@ -1155,7 +1234,9 @@ async def repl(
 
                     _pi(f"*@{cmd_name}: running + grading")
                     _pre_files = _snapshot_git()
-                    response = await send_message(ctx, chain_input, eval_kwargs, streaming_status=ss)
+                    response = await send_message(
+                        ctx, chain_input, eval_kwargs, streaming_status=ss
+                    )
                     ss.reset()
 
                     cmd_criteria = getattr(resolved.meta, "eval_criteria", None)
@@ -1166,10 +1247,16 @@ async def repl(
                         "Response is accurate (no hallucinated information)",
                         "Response is actionable (provides specific, useful details)",
                     ]
-                    pass_threshold = getattr(resolved.meta, "eval_pass_threshold", None) or len(criteria)
-                    grading = ctx.build_grading_prompt(cmd_name, remaining, response, criteria)
+                    pass_threshold = getattr(
+                        resolved.meta, "eval_pass_threshold", None
+                    ) or len(criteria)
+                    grading = ctx.build_grading_prompt(
+                        cmd_name, remaining, response, criteria
+                    )
                     _pi("Grading...")
-                    grade_response = await send_message(ctx, grading, loop_kwargs, streaming_status=ss)
+                    grade_response = await send_message(
+                        ctx, grading, loop_kwargs, streaming_status=ss
+                    )
                     ss.reset()
 
                     try:
@@ -1192,11 +1279,13 @@ async def repl(
                         eval_store = EvalResultStore()
                         asyncio.create_task(eval_store.save_run(summary))
                     except Exception:
-                        pass
+                        _log.debug("suppressed exception in repl", exc_info=True)
 
                     pass_count = grade_response.upper().count("| PASS")
                     total = len(criteria)
-                    _pi(f"Score: {pass_count}/{total} (threshold: {pass_threshold}/{total})")
+                    _pi(
+                        f"Score: {pass_count}/{total} (threshold: {pass_threshold}/{total})"
+                    )
                     if pass_count < pass_threshold:
                         reverted = _revert_changes(_pre_files)
                         if reverted:
@@ -1205,7 +1294,9 @@ async def repl(
                                 + ", ".join(reverted)
                             )
                         else:
-                            _pe(f"Eval failed ({pass_count}/{total}) -- no file changes to revert")
+                            _pe(
+                                f"Eval failed ({pass_count}/{total}) -- no file changes to revert"
+                            )
                     else:
                         _pi(f"Eval passed ({pass_count}/{total}) -- changes kept")
                     continue
@@ -1215,7 +1306,9 @@ async def repl(
                     _pe = print_error
                     _pi = print_info
 
-                    skill_names, cmd_name, remaining = ctx.parse_chained_input(user_input)
+                    skill_names, cmd_name, remaining = ctx.parse_chained_input(
+                        user_input
+                    )
                     blocks = []
                     _abort = False
 
@@ -1311,22 +1404,22 @@ async def repl(
                 dlog.flush()
                 dlog.close()
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
             if _kairos_engine is not None and not _kairos_hooks_registered:
                 with contextlib.suppress(Exception):
                     await _kairos_engine.stop()
             try:
                 await run_cleanup()
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
             try:
                 get_attribution_tracker().save()
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
             try:
                 sess = await store.get_session(sid)
                 if sess is not None and sess.status == SessionStatus.RUNNING:
                     await store.update_status(sid, SessionStatus.COMPLETED)
             except Exception:
-                pass
+                _log.debug("suppressed exception in repl", exc_info=True)
             store.close()

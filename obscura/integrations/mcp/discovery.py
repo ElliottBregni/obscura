@@ -178,6 +178,7 @@ def _resolve_server_timeout(server: dict[str, Any]) -> float:
     try:
         value = float(raw)
     except (TypeError, ValueError):
+        logger.debug("suppressed exception in _resolve_server_timeout", exc_info=True)
         return _DEFAULT_PROBE_TIMEOUT
     # Clamp to a sane window — negative timeouts make no sense; very long
     # ones would stall session startup.
@@ -308,9 +309,7 @@ async def register_external_mcp_tools(
             try:
                 register(spec)
             except Exception as exc:
-                logger.warning(
-                    "Failed to register shadow spec %s: %s", spec.name, exc
-                )
+                logger.warning("Failed to register shadow spec %s: %s", spec.name, exc)
 
     _set_last_report(backend, report)
     return report
@@ -323,7 +322,7 @@ def _set_last_report(backend: Any, report: DiscoveryReport) -> None:
     except Exception:
         # Backend doesn't support the attribute — that's fine, the report is
         # still returned to the caller.
-        pass
+        logger.debug("suppressed exception in _set_last_report", exc_info=True)
 
 
 def _warn_about_leaked_processes(mcp_servers: list[dict[str, Any]]) -> None:
@@ -335,6 +334,9 @@ def _warn_about_leaked_processes(mcp_servers: list[dict[str, Any]]) -> None:
     try:
         from obscura.integrations.mcp.process_cleanup import detect_orphans
     except ImportError:
+        logger.debug(
+            "suppressed exception in _warn_about_leaked_processes", exc_info=True
+        )
         return
 
     try:
@@ -431,6 +433,7 @@ def discover_mcp_tools_sync(
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        logger.debug("suppressed exception in discover_mcp_tools_sync", exc_info=True)
         loop = None
 
     if loop is None:

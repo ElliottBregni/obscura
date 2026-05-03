@@ -98,6 +98,7 @@ def _content_hash(files: Sequence[str]) -> str:
         try:
             h.update(Path(f).read_bytes())
         except Exception:
+            logger.debug("suppressed exception in _content_hash", exc_info=True)
             h.update(f.encode())
     return h.hexdigest()[:16]
 
@@ -176,6 +177,7 @@ async def _run_pytest(
         stdout = stdout_bytes.decode(errors="replace")
         return _parse_pytest_output(stdout, proc.returncode or 0, duration_ms)
     except TimeoutError:
+        logger.debug("suppressed exception in _run_pytest", exc_info=True)
         duration_ms = int((time.monotonic() - start) * 1000)
         return TestOutcome(timeout_exceeded=True, duration_ms=duration_ms)
     except FileNotFoundError:

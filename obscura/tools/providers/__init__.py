@@ -63,7 +63,7 @@ class SystemToolProvider:
                 allowlist: list[str] | None = getattr(config, "tool_allowlist", None)
                 return allowlist
         except Exception:
-            pass
+            logger.debug("suppressed exception in _get_tool_allowlist", exc_info=True)
         return None
 
     @staticmethod
@@ -90,6 +90,9 @@ class SystemToolProvider:
             )
             return make_task_tool(ctx)
         except Exception:
+            logger.debug(
+                "suppressed exception in _build_delegation_tool", exc_info=True
+            )
             return None
 
 

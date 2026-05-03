@@ -9,6 +9,9 @@ from typing import Any, ClassVar, cast
 from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Session:
@@ -164,6 +167,7 @@ class Session:
             try:
                 todos = json.loads(todos)
             except (json.JSONDecodeError, ValueError):
+                logger.debug("suppressed exception in todo_write", exc_info=True)
                 return json.dumps({"ok": False, "error": "todos must be a JSON array"})
         if not isinstance(todos, list):
             return json.dumps({"ok": False, "error": "todos must be a JSON array"})
@@ -222,6 +226,7 @@ class Session:
             try:
                 cb("plan")
             except Exception as exc:
+                logger.debug("suppressed exception in enter_plan_mode", exc_info=True)
                 return json.dumps({"ok": False, "error": str(exc)})
         return json.dumps({"ok": True, "mode": "plan"})
 
@@ -265,12 +270,14 @@ class Session:
                         }
                     )
             except Exception as exc:
+                logger.debug("suppressed exception in exit_plan_mode", exc_info=True)
                 return json.dumps({"ok": False, "error": str(exc)})
 
         if mode_cb is not None:
             try:
                 mode_cb("default")
             except Exception as exc:
+                logger.debug("suppressed exception in exit_plan_mode", exc_info=True)
                 return json.dumps({"ok": False, "error": str(exc)})
         return json.dumps({"ok": True, "mode": "default"})
 
@@ -321,10 +328,12 @@ class Session:
         try:
             start_turn = int(start_turn)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in history_snip", exc_info=True)
             start_turn = 0
         try:
             end_turn = int(end_turn)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in history_snip", exc_info=True)
             end_turn = 0
 
         total = len(history)
@@ -372,6 +381,7 @@ class Session:
         try:
             s = float(seconds)
         except (TypeError, ValueError):
+            logger.debug("suppressed exception in sleep", exc_info=True)
             return Policy.json_error("invalid_seconds", value=str(seconds))
         if s < 0:
             return Policy.json_error("invalid_seconds", detail="must be >= 0")

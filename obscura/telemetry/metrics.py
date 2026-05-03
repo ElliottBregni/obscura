@@ -24,6 +24,10 @@ obscura_stream_chunks_total              Counter       backend, chunk_kind
 from __future__ import annotations
 
 from typing import Any, Protocol, overload, runtime_checkable
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Protocols
@@ -90,6 +94,7 @@ def _get_meter() -> Meter | None:
 
         return metrics.get_meter("obscura-sdk")
     except ImportError:
+        logger.debug("suppressed exception in _get_meter", exc_info=True)
         return None
 
 

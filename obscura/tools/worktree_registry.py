@@ -179,10 +179,13 @@ def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
+        logger.debug("suppressed exception in _pid_alive", exc_info=True)
         return False
     except PermissionError:
+        logger.debug("suppressed exception in _pid_alive", exc_info=True)
         return True
     except OSError:
+        logger.debug("suppressed exception in _pid_alive", exc_info=True)
         return False
     return True
 

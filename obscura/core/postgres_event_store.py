@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from obscura.core.types import AgentEvent
@@ -22,6 +25,7 @@ try:
     _psycopg2 = psycopg2
     _RealDictCursor = RealDictCursor
 except ImportError:
+    logger.debug("suppressed exception in <module>", exc_info=True)
     _has_psycopg2 = False
     _psycopg2 = None
     _RealDictCursor = None
@@ -345,9 +349,7 @@ class PostgreSQLEventStore:
                             model=str(r["model"]),
                             active_agent=str(r["active_agent"]),
                             source=str(r["source"]),
-                            parent_session_id=str(
-                                r.get("parent_session_id", "") or ""
-                            ),
+                            parent_session_id=str(r.get("parent_session_id", "") or ""),
                             project=str(r["project"]),
                             summary=str(r["summary"]),
                             message_count=int(r["message_count"]),

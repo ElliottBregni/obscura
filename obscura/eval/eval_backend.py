@@ -349,6 +349,7 @@ class ClaudeCliEvalBackend:
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
+                    logger.debug("suppressed exception in stream", exc_info=True)
                     continue
 
                 event_type = event.get("type", "")

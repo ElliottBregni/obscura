@@ -70,6 +70,7 @@ def _settings_flag(key: str, default: bool = True) -> bool:
                 return True
         return default
     except Exception:
+        logger.debug("suppressed exception in _settings_flag", exc_info=True)
         return default
 
 
@@ -311,9 +312,7 @@ class KairosEngine:
                         f'task_update(task_id="{task["task_id"]}", '
                         f'status="completed").'
                     )
-                    logger.info(
-                        "[kairos] \u2192 Working: %s", task["subject"]
-                    )
+                    logger.info("[kairos] \u2192 Working: %s", task["subject"])
                     self.log(
                         f"tick #{tick_count}: claimed task {task['task_id']} "
                         f"— {task['subject']}",
@@ -333,7 +332,9 @@ class KairosEngine:
                 if top:
                     goal_hint = f" focus={top[0].id}({top[0].progress}%)"
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _on_proactive_tick", exc_info=True
+                )
             inject(f"<tick>#{tick_count}{goal_hint}</tick>")
         except Exception:
             logger.debug("Proactive tick injection failed", exc_info=True)
@@ -397,7 +398,9 @@ class KairosEngine:
                 parts.append(profile_summary)
                 profile_injected = True
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in get_system_prompt_addition", exc_info=True
+            )
 
         if not profile_injected:
             try:
@@ -407,7 +410,9 @@ class KairosEngine:
                     parts.append("## User Profile")
                     parts.append(profile_summary)
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in get_system_prompt_addition", exc_info=True
+                )
 
         # Inject active goal summary.
         try:
@@ -422,7 +427,9 @@ class KairosEngine:
                     "unblocked goal. Take one small, concrete action per tick."
                 )
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in get_system_prompt_addition", exc_info=True
+            )
         # Inject vault sync status.
         if self._vault_sync is not None:
             try:
@@ -442,7 +449,9 @@ class KairosEngine:
                         "Use write_agent_shared() for shared files to enable fork-merge."
                     )
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in get_system_prompt_addition", exc_info=True
+                )
 
         if self._proactive is not None and self._proactive.is_running:
             parts.append("")
@@ -455,7 +464,9 @@ class KairosEngine:
                 parts.append("")
                 parts.append(uc_prompt)
         except Exception:
-            pass
+            logger.debug(
+                "suppressed exception in get_system_prompt_addition", exc_info=True
+            )
 
         return "\\n".join(parts)
 

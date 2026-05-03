@@ -22,6 +22,10 @@ from obscura.heartbeat import get_default_monitor
 from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["heartbeat"])
 
@@ -181,12 +185,13 @@ async def health_websocket(websocket: WebSocket) -> None:
                     {"type": "ping", "timestamp": datetime.now(UTC).isoformat()},
                 )
             except Exception:
+                logger.debug("suppressed exception in health_websocket", exc_info=True)
                 break
 
     except WebSocketDisconnect:
-        pass
+        logger.debug("suppressed exception in health_websocket", exc_info=True)
     except Exception:
-        pass
+        logger.debug("suppressed exception in health_websocket", exc_info=True)
     finally:
         if websocket in ws_clients:
             ws_clients.remove(websocket)
@@ -211,6 +216,9 @@ async def _broadcast_health_update(
         try:
             await client.send_json(message)
         except Exception:
+            logger.debug(
+                "suppressed exception in _broadcast_health_update", exc_info=True
+            )
             disconnected.append(client)
 
     for client in disconnected:

@@ -36,6 +36,10 @@ from obscura.integrations.mcp.discovery import register_external_mcp_tools
 from obscura.plugins.capabilities import build_capability_map_section
 from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -130,7 +134,10 @@ def _relax_strict_response_models(mod: Any) -> None:
             try:
                 cls.model_rebuild(force=True)
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _relax_strict_response_models",
+                    exc_info=True,
+                )
 
     if any_changed:
         for parent_name in _RELAX_PARENT_REBUILDS:
@@ -140,7 +147,10 @@ def _relax_strict_response_models(mod: Any) -> None:
             try:
                 parent.model_rebuild(force=True)
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _relax_strict_response_models",
+                    exc_info=True,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -349,13 +359,13 @@ class CodexBackend(BackendToolHostMixin):
                 await self._maybe_await(aexit(None, None, None))
                 return
             except Exception:
-                pass
+                logger.debug("suppressed exception in stop", exc_info=True)
         close = getattr(client, "close", None)
         if callable(close):
             try:
                 await self._maybe_await(close())
             except Exception:
-                pass
+                logger.debug("suppressed exception in stop", exc_info=True)
 
     # -- Send / Stream -------------------------------------------------------
 
@@ -458,6 +468,7 @@ class CodexBackend(BackendToolHostMixin):
                     finish_reason = "error"
 
         except Exception as exc:
+            logger.debug("suppressed exception in stream", exc_info=True)
             yield StreamChunk(kind=ChunkKind.ERROR, text=str(exc))
             finish_reason = "error"
 
@@ -568,7 +579,7 @@ class CodexBackend(BackendToolHostMixin):
                 lines.append("")
                 lines.append(cap_section)
         except Exception:
-            pass
+            logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
         return "\n".join(lines)
 
     def _build_system_prompt(self) -> str:
@@ -591,6 +602,7 @@ class CodexBackend(BackendToolHostMixin):
         try:
             return text_cls(prompt)
         except Exception:
+            logger.debug("suppressed exception in _wrap_text_input", exc_info=True)
             return prompt
 
     # -- Thread lifecycle ----------------------------------------------------
@@ -644,17 +656,25 @@ class CodexBackend(BackendToolHostMixin):
             try:
                 kwargs["approval_policy"] = ask_cls("never")
             except Exception:
+                logger.debug(
+                    "suppressed exception in _build_thread_start_kwargs", exc_info=True
+                )
                 try:
                     kwargs["approval_policy"] = ask_cls(root="never")
                 except Exception:
-                    pass
+                    logger.debug(
+                        "suppressed exception in _build_thread_start_kwargs",
+                        exc_info=True,
+                    )
 
         sandbox_cls = self._sdk_syms.get("SandboxMode")
         if sandbox_cls is not None:
             try:
                 kwargs["sandbox"] = sandbox_cls("workspace-write")
             except Exception:
-                pass
+                logger.debug(
+                    "suppressed exception in _build_thread_start_kwargs", exc_info=True
+                )
 
         system = self._build_system_prompt()
         if system:
@@ -670,7 +690,7 @@ class CodexBackend(BackendToolHostMixin):
             try:
                 kwargs["effort"] = effort_cls(self._reasoning_effort)
             except Exception:
-                pass
+                logger.debug("suppressed exception in _build_run_kwargs", exc_info=True)
         if self._model:
             kwargs["model"] = self._model
         return kwargs
@@ -797,6 +817,9 @@ class CodexBackend(BackendToolHostMixin):
                 try:
                     args_str = args if isinstance(args, str) else json.dumps(args)
                 except (TypeError, ValueError):
+                    logger.debug(
+                        "suppressed exception in _mcp_tool_call_chunks", exc_info=True
+                    )
                     args_str = str(args)
                 chunks.append(
                     StreamChunk(
@@ -816,6 +839,9 @@ class CodexBackend(BackendToolHostMixin):
             try:
                 text = json.dumps(content) if content is not None else ""
             except (TypeError, ValueError):
+                logger.debug(
+                    "suppressed exception in _mcp_tool_call_chunks", exc_info=True
+                )
                 text = str(content)
         else:
             text = ""
@@ -1032,6 +1058,7 @@ class CodexBackend(BackendToolHostMixin):
                 config = config_cls(**cfg_kwargs)
                 client = sdk_cls(config=config)
             except Exception:
+                logger.debug("suppressed exception in _build_sdk_client", exc_info=True)
                 client = sdk_cls()
         else:
             client = sdk_cls()
@@ -1059,4 +1086,4 @@ class CodexBackend(BackendToolHostMixin):
                 else:
                     callback(context)
             except Exception:
-                pass
+                logger.debug("suppressed exception in _run_hooks", exc_info=True)

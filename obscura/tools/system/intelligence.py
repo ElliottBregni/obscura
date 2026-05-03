@@ -21,6 +21,10 @@ from obscura.tools.policy import ToolPolicy, evaluate_policy
 from obscura.tools.policy.engine import (
     _FS_TOOLS,  # pyright: ignore[reportPrivateUsage]
 )
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,6 +58,7 @@ def _rows(
         cur = conn.execute(sql, params)
         return [_row_to_dict(r) for r in cur.fetchall()]
     except sqlite3.OperationalError:
+        logger.debug("suppressed exception in _rows", exc_info=True)
         return []
 
 
@@ -200,6 +205,9 @@ async def context_snapshot(
                 try:
                     policy_data = json.loads(row.get("policy_json", "{}"))
                 except (json.JSONDecodeError, TypeError):
+                    logger.debug(
+                        "suppressed exception in context_snapshot", exc_info=True
+                    )
                     policy_data = {}
                 snapshot["policy"] = {
                     "version_id": row.get("version_id"),
@@ -308,6 +316,7 @@ async def causal_trace(
     try:
         depth = int(depth)
     except (TypeError, ValueError):
+        logger.debug("suppressed exception in causal_trace", exc_info=True)
         depth = 20
     depth = min(max(1, depth), 100)
 
@@ -392,7 +401,7 @@ async def causal_trace(
                         terminal_idx = i
                         break
                 except (json.JSONDecodeError, TypeError):
-                    pass
+                    logger.debug("suppressed exception in causal_trace", exc_info=True)
 
         # ── Walk backwards from terminal event ────────────────────────────────
         start_idx = max(0, terminal_idx - depth + 1)
@@ -412,7 +421,7 @@ async def causal_trace(
                         fork_idx = i
                         break
                 except (json.JSONDecodeError, TypeError):
-                    pass
+                    logger.debug("suppressed exception in causal_trace", exc_info=True)
             if kind == "memory_gated" and outcome and "memory" in outcome.lower():
                 fork_idx = i
                 break
@@ -431,6 +440,7 @@ async def causal_trace(
                 try:
                     entry["payload"] = json.loads(ev.get("payload_json") or "{}")
                 except (json.JSONDecodeError, TypeError):
+                    logger.debug("suppressed exception in causal_trace", exc_info=True)
                     entry["payload"] = {}
             trace.append(entry)
 
@@ -543,6 +553,7 @@ async def policy_probe(
             )
             policy_source = "inline_override"
         except Exception as exc:
+            logger.debug("suppressed exception in policy_probe", exc_info=True)
             return json.dumps(
                 {"status": "error", "message": f"Invalid policy_override: {exc}"},
             )
@@ -574,10 +585,12 @@ async def policy_probe(
                                 json.loads(pv[0].get("policy_json", "{}")),
                             )
                             raw_allow = cast(
-                                "list[str]", data.get("allow_list") or [],
+                                "list[str]",
+                                data.get("allow_list") or [],
                             )
                             raw_deny = cast(
-                                "list[str]", data.get("deny_list") or [],
+                                "list[str]",
+                                data.get("deny_list") or [],
                             )
                             raw_base = data.get("base_dir")
                             policy = ToolPolicy(
@@ -593,7 +606,9 @@ async def policy_probe(
                             )
                             policy_source = f"db:session={session_id}"
                         except Exception:
-                            pass
+                            logger.debug(
+                                "suppressed exception in policy_probe", exc_info=True
+                            )
             finally:
                 conn.close()
 

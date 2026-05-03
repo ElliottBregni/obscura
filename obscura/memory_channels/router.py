@@ -298,6 +298,7 @@ class ContextRouter:
         try:
             return channel.query_template.format_map(vars_map)
         except Exception:
+            logger.debug("suppressed exception in _render_template", exc_info=True)
             return self._signals.current_query[:500]
 
     # ------------------------------------------------------------------

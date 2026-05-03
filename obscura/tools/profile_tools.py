@@ -35,6 +35,10 @@ from obscura.profile.builder import ProfileBuilder
 from obscura.profile.migrate import migrate_flat_profile
 from obscura.profile.models import ProfileCategory, ProfileFact
 from obscura.profile.store import ProfileStore
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -48,7 +52,7 @@ def _notify_vault_profile() -> None:
 
         notify_profile_changed()
     except Exception:
-        pass
+        logger.debug("suppressed exception in _notify_vault_profile", exc_info=True)
 
 
 def _profile() -> Any:
@@ -63,6 +67,7 @@ def _profile_store() -> Any:
     try:
         return ProfileStore.for_user(current_cli_user())
     except Exception:
+        logger.debug("suppressed exception in _profile_store", exc_info=True)
         return None
 
 
@@ -192,7 +197,7 @@ def profile_update(fact: str, memory_type: str = "fact") -> str:
             )
             store.set_fact(structured_fact)
         except Exception:
-            pass  # vector store is best-effort
+            logger.debug("suppressed exception in profile_update", exc_info=True)
 
     if appended:
         _notify_vault_profile()
@@ -251,6 +256,7 @@ def profile_sync() -> str:
         count = migrate_flat_profile(profile_path, store)
         return _json_ok(synced=count, method="vector_migration")
     except Exception as e:
+        logger.debug("suppressed exception in profile_sync", exc_info=True)
         return _json_error(f"Migration failed: {e}")
 
 
@@ -293,6 +299,7 @@ def profile_set(key: str, value: str, category: str) -> str:
     try:
         cat = ProfileCategory(category)
     except ValueError:
+        logger.debug("suppressed exception in profile_set", exc_info=True)
         return _json_error(f"Unknown category: {category}")
 
     fact = ProfileFact(

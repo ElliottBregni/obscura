@@ -69,7 +69,7 @@ class EvalEngine:
                 for spec in self._tool_registry.all():
                     self._backend.register_tool(spec)
             except (AttributeError, TypeError):
-                pass  # backend doesn't support register_tool
+                logger.debug("suppressed exception in run_case", exc_info=True)
 
         # Start the backend (with timeout to protect against blocking backends)
         try:
@@ -78,7 +78,7 @@ class EvalEngine:
                 timeout=10.0,
             )
         except (TimeoutError, Exception):
-            pass  # already started, not required, or timed out
+            logger.debug("suppressed exception in run_case", exc_info=True)
 
         loop = AgentLoop(
             backend=self._backend,

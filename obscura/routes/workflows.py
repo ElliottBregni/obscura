@@ -16,6 +16,10 @@ from obscura.memory import MemoryStore
 from obscura.routes.agents import agent_templates
 
 from obscura.auth.models import AuthenticatedUser
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
 
@@ -219,6 +223,7 @@ async def workflow_execute(
             result: Any = await agent.run(prompt)
             step_results[step_name] = result
         except Exception as e:
+            logger.debug("suppressed exception in workflow_execute", exc_info=True)
             execution = WorkflowExecution(
                 execution_id=execution.execution_id,
                 workflow_id=execution.workflow_id,

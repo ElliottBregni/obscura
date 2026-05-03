@@ -200,8 +200,10 @@ def _get_tokenizer() -> Any | None:
         try:
             _tokenizer = tk.get_encoding("cl100k_base")
         except Exception:
+            logger.debug("suppressed exception in _get_tokenizer", exc_info=True)
             _tokenizer = tk.get_encoding("gpt2")
     except ImportError:
+        logger.debug("suppressed exception in _get_tokenizer", exc_info=True)
         _tokenizer = None
     return _tokenizer
 
@@ -235,6 +237,10 @@ def estimate_message_tokens(msg: Any) -> int:
                     try:
                         text = json.dumps(block_dict)
                     except Exception:
+                        logger.debug(
+                            "suppressed exception in estimate_message_tokens",
+                            exc_info=True,
+                        )
                         text = str(block_dict)
                 total += estimate_tokens(str(text))
             elif hasattr(block, "text"):

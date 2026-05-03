@@ -123,7 +123,7 @@ class SQLiteBackend:
             conn.commit()
         except sqlite3.OperationalError:
             # Column already exists — expected on subsequent runs
-            pass
+            _logger.debug("suppressed exception in _init_db", exc_info=True)
 
     def store_vector(
         self,

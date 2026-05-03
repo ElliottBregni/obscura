@@ -241,7 +241,9 @@ class MCPClient:
                 try:
                     future.set_result(response)
                 except asyncio.InvalidStateError:
-                    pass  # Future was resolved/cancelled between check and set
+                    logger.debug(
+                        "suppressed exception in _handle_response", exc_info=True
+                    )
 
     # -----------------------------------------------------------------------
     # MCP Protocol Methods
@@ -463,6 +465,7 @@ class StdioTransport(MCPTransport):
             try:
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
             except TimeoutError:
+                logger.debug("suppressed exception in disconnect", exc_info=True)
                 self._process.kill()
                 await self._process.wait()
             self._process = None
@@ -489,6 +492,7 @@ class StdioTransport(MCPTransport):
                 timeout=1.0,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in receive", exc_info=True)
             return None
 
     async def _read_loop(self) -> None:
@@ -508,7 +512,7 @@ class StdioTransport(MCPTransport):
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid JSON from MCP server: {line}")
         except asyncio.CancelledError:
-            pass
+            logger.debug("suppressed exception in _read_loop", exc_info=True)
         except Exception as e:
             logger.exception(f"Error reading from MCP server: {e}")
 
@@ -637,6 +641,7 @@ class SSETransport(MCPTransport):
                 timeout=1.0,
             )
         except TimeoutError:
+            logger.debug("suppressed exception in receive", exc_info=True)
             return None
 
 

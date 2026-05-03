@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 BUILTINS_DIR = Path(__file__).parent
 
@@ -27,6 +31,9 @@ def list_builtin_plugin_ids() -> list[str]:
             if "id" in data:
                 ids.append(str(data["id"]))
         except Exception:  # noqa: BLE001
+            logger.debug(
+                "suppressed exception in list_builtin_plugin_ids", exc_info=True
+            )
             continue
     return sorted(ids)
 
