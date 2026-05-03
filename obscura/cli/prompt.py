@@ -31,6 +31,13 @@ from prompt_toolkit.layout.processors import (
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 
+from obscura.cli.render import (
+    THINKING_COLOR,
+    _active_renderer,  # pyright: ignore[reportPrivateUsage]
+    console,
+    get_active_text,
+    get_model_space_delta,
+)
 from obscura.core.paths import resolve_obscura_home
 
 if TYPE_CHECKING:
@@ -274,8 +281,6 @@ def print_status_banner(status: PromptStatus) -> None:
     """
     from rich.markup import escape as markup_escape
 
-    from obscura.cli.render import console
-
     # Line 1: Session title (if available)
     if status.session_id:
         short_id = status.session_id[:8]
@@ -484,8 +489,6 @@ def _expand_preview_action() -> None:
     try:
         from rich.markdown import Markdown
 
-        from obscura.cli.render import console, get_active_text
-
         text = get_active_text()
         if not text:
             console.print("[dim]No preview available to expand.[/]")
@@ -545,12 +548,6 @@ def _expand_thinking_action() -> None:
     try:
         from rich.panel import Panel
         from rich.text import Text
-
-        from obscura.cli.render import (
-            THINKING_COLOR,
-            _active_renderer,  # pyright: ignore[reportPrivateUsage]
-            console,
-        )
 
         if _active_renderer is None:
             console.print("[dim]No active session.[/]")

@@ -18,6 +18,8 @@ from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit, authenticate_websocket
+from obscura.heartbeat import get_default_monitor
+from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
 
 from obscura.auth.models import AuthenticatedUser
 
@@ -31,8 +33,6 @@ async def _get_heartbeat_monitor(request: Request) -> Any:
     """Get or create the heartbeat monitor."""
     monitor = getattr(request.app.state, "_heartbeat_monitor", None)
     if monitor is None:
-        from obscura.heartbeat import get_default_monitor
-
         monitor = get_default_monitor()
         await monitor.start()
         request.app.state._heartbeat_monitor = monitor
@@ -46,8 +46,6 @@ async def heartbeat_receive(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Receive a heartbeat from an agent."""
-    from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
-
     monitor: Any = await _get_heartbeat_monitor(request)
 
     try:

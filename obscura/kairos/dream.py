@@ -27,6 +27,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from obscura.core.client import ObscuraClient
+from obscura.core.config import ObscuraConfig
+from obscura.core.paths import resolve_obscura_home
+from obscura.kairos.daily_log import DailyLog
+from obscura.kairos.vault_sync import VaultSync
+from obscura.tools.goal_tools import get_goal_tool_specs
+from obscura.tools.profile_tools import get_profile_tool_specs
+from obscura.tools.system import get_system_tool_specs
+
 logger = logging.getLogger(__name__)
 
 # Tools the dream consolidation agent is allowed to use.
@@ -251,8 +260,6 @@ class DreamConsolidator:
                 )
 
             # Log the consolidation event.
-            from obscura.kairos.daily_log import DailyLog
-
             DailyLog().append("Dream consolidation executed", source="dream")
 
             # Run vault sync before agent consolidation so the agent
@@ -284,16 +291,12 @@ class DreamConsolidator:
     async def _run_vault_sync(self) -> None:
         """Run vault sync as part of dream consolidation."""
         try:
-            from obscura.kairos.vault_sync import VaultSync
-
             vault = VaultSync()
             if not vault.vault_dir.is_dir():
                 logger.debug("Vault directory does not exist, skipping vault sync")
                 return
 
             report = await vault.sync()
-            from obscura.kairos.daily_log import DailyLog
-
             DailyLog().append(report.summary(), source="vault")
             logger.debug("Dream vault sync: %s", report.summary())
         except Exception:
@@ -309,26 +312,17 @@ class DreamConsolidator:
         Returns True if the agent completed without exception.
         """
         try:
-            from obscura.core.client import ObscuraClient
-            from obscura.core.config import ObscuraConfig
-
             # Gather the tools the dream agent needs.
             dream_tools: list[Any] = []
             try:
-                from obscura.tools.system import get_system_tool_specs
-
                 dream_tools.extend(get_system_tool_specs())
             except Exception:
                 pass
             try:
-                from obscura.tools.goal_tools import get_goal_tool_specs
-
                 dream_tools.extend(get_goal_tool_specs())
             except Exception:
                 pass
             try:
-                from obscura.tools.profile_tools import get_profile_tool_specs
-
                 dream_tools.extend(get_profile_tool_specs())
             except Exception:
                 pass
@@ -337,8 +331,6 @@ class DreamConsolidator:
 
             # Restrict filesystem access to the memory directory for the
             # duration of the agent run.
-            from obscura.core.paths import resolve_obscura_home
-
             memory_dir = str(resolve_obscura_home() / "memory")
             _prev_base_dir = os.environ.get("OBSCURA_SYSTEM_TOOLS_BASE_DIR")
             os.environ["OBSCURA_SYSTEM_TOOLS_BASE_DIR"] = memory_dir
@@ -394,8 +386,6 @@ class DreamConsolidator:
     def _sessions_since(self, since_ts: float) -> int:
         """Count event store sessions modified since timestamp."""
         try:
-            from obscura.core.config import ObscuraConfig
-
             cfg: Any = ObscuraConfig.load()
             data_dir = getattr(cfg, "data_dir", None)
             events_db = (

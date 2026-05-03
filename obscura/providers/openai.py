@@ -509,8 +509,6 @@ class OpenAIBackend(BackendToolHostMixin):
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
-            from obscura.plugins.capabilities import build_capability_map_section
-
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -541,8 +539,6 @@ class OpenAIBackend(BackendToolHostMixin):
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with tool execution."""
-        from obscura.core.agent_loop import AgentLoop
-
         loop = AgentLoop(
             self,
             self._tool_registry,
@@ -1078,13 +1074,11 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
 # Lazy telemetry helpers
 # ---------------------------------------------------------------------------
 
-from obscura.telemetry.traces import NoOpTracer
+from obscura.telemetry.traces import NoOpTracer, get_tracer
 
 
 def _get_backend_tracer() -> Any:
     try:
-        from obscura.telemetry.traces import get_tracer
-
         return get_tracer("obscura.openai_backend")
     except Exception:
         return NoOpTracer()
