@@ -233,6 +233,23 @@ class TestToolRegistry:
         # Claude SDK CamelCase variants must resolve to canonical snake_case.
         assert reg.get("ToolSearch") is reg.get("tool_search")
         assert reg.get("WebSearch") is reg.get("web_search")
+
+    def test_alias_lookup_resolves_codex_prefixed_names(self) -> None:
+        reg = ToolRegistry()
+
+        @tool("run_shell", "Run shell")
+        def run_shell_tool(script: str = "") -> str:
+            return script
+
+        @tool("file_change", "File change")
+        def file_change_tool(changes: str = "") -> str:
+            return changes
+
+        reg.register(run_shell_tool.spec)
+        reg.register(file_change_tool.spec)
+
+        assert reg.get("functions.exec_command") is reg.get("run_shell")
+        assert reg.get("functions.file_change") is reg.get("file_change")
         # Common variants
         assert reg.get("search_tools") is reg.get("tool_search")
         assert reg.get("list_tools") is reg.get("tool_search")

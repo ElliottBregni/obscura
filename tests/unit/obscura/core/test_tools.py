@@ -69,6 +69,32 @@ class TestToolRegistry:
         assert reg.get("functions.web_search") is spec
         assert reg.get("multi_tool_use.web_search") is spec
 
+    def test_get_provider_prefixed_alias(self) -> None:
+        reg = ToolRegistry()
+        spec = ToolSpec(
+            name="run_shell",
+            description="desc",
+            parameters={},
+            handler=lambda: None,
+        )
+        reg.register(spec)
+
+        assert reg.get("functions.exec_command") is spec
+
+    def test_get_file_change_alias(self) -> None:
+        reg = ToolRegistry()
+        spec = ToolSpec(
+            name="file_change",
+            description="desc",
+            parameters={},
+            handler=lambda: None,
+        )
+        reg.register(spec)
+
+        assert reg.get("file_change") is spec
+        assert reg.get("functions.file_change") is spec
+        assert reg.get("FileChange") is spec
+
 
 class TestInferSchema:
     def test_simple_types(self) -> None:
