@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.cli.render import console, print_warning
+# Import render functions lazily inside functions to avoid circular imports
 from obscura.core.client import ObscuraClient
 
 if TYPE_CHECKING:

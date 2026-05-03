@@ -57,6 +57,8 @@ _SDK_MODULE = "codex_app_server"
 #     it landed in CLI responses.
 #   * ``Thread.ephemeral`` — present in the SDK's model but absent from
 #     responses produced by ``codex-cli`` 0.106.x and earlier.
+#   * ``Thread.status`` — same situation: SDK requires it, current CLI
+#     responses omit it.
 #
 # We don't read these fields ourselves (we only need ``thread.id``), so
 # we relax them to optional at SDK-import time. This is forward- and
@@ -66,7 +68,7 @@ _SDK_MODULE = "codex_app_server"
 _OPTIONAL_RELAXATIONS: dict[str, tuple[str, ...]] = {
     "ThreadStartResponse": ("approvals_reviewer",),
     "ThreadResumeResponse": ("approvals_reviewer",),
-    "Thread": ("ephemeral",),
+    "Thread": ("ephemeral", "status"),
 }
 
 # Models that embed ``Thread`` (or another relaxed model) as a nested field.
