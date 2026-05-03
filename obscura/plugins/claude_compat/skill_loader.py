@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -171,7 +171,7 @@ def _parse_skill(
     if isinstance(allowed_tools_raw, str):
         allowed_tools = [t.strip() for t in allowed_tools_raw.split(",") if t.strip()]
     elif isinstance(allowed_tools_raw, list):
-        allowed_tools = [str(t) for t in allowed_tools_raw]
+        allowed_tools = [str(t) for t in cast(list[Any], allowed_tools_raw)]
 
     user_invocable = meta.get("user-invocable", True)
     disable_model = meta.get("disable-model-invocation", False)
