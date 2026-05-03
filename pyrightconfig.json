@@ -54,7 +54,8 @@
       "reportUntypedFunctionDecorator": "none",
       "reportUntypedBaseClass": "none",
       "reportGeneralTypeIssues": "none",
-      "reportMissingImports": "none"
+      "reportMissingImports": "none",
+      "reportUnnecessaryTypeIgnoreComment": "none"
     }
   ]
 }
