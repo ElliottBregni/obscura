@@ -18,8 +18,10 @@ Gating order (cheapest first):
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
+import sqlite3
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -377,8 +379,6 @@ class DreamConsolidator:
             return 0.0
         try:
             raw = self._lock_file().read_text(encoding="utf-8")
-            import json
-
             data = json.loads(raw)
             ts = float(data.get("ts", 0))
             if ts > 0:
@@ -408,8 +408,6 @@ class DreamConsolidator:
         if not events_db.exists():
             return 0
         try:
-            import sqlite3
-
             conn = sqlite3.connect(str(events_db))
             # Convert since_ts (seconds since epoch) to ISO8601 UTC string to
             # compare against created_at TEXT columns stored in ISO format.
@@ -438,8 +436,6 @@ class DreamConsolidator:
             return False
         try:
             raw = self._lock_file().read_text(encoding="utf-8")
-            import json
-
             data = json.loads(raw)
             pid = int(data.get("pid", 0))
         except Exception:
@@ -468,8 +464,6 @@ class DreamConsolidator:
             return False
         # Write JSON metadata atomically.
         try:
-            import json
-
             meta = {"pid": os.getpid(), "ts": time.time()}
             tmp = self._lock_file().with_suffix(".tmp")
             tmp.write_text(json.dumps(meta), encoding="utf-8")
@@ -490,8 +484,6 @@ class DreamConsolidator:
         if not self._lock_file().exists():
             return
         try:
-            import json
-
             raw = self._lock_file().read_text(encoding="utf-8")
             data = json.loads(raw)
             data["ts"] = time.time()

@@ -11,6 +11,9 @@ survive across sessions within the same process.
 from __future__ import annotations
 
 import logging
+import math
+import os
+import sqlite3
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -86,8 +89,6 @@ class ToolScore:
         recency_bonus = 1.0 - _clamp(age_seconds / 86_400.0, 0.0, 1.0)
 
         # Logarithmic frequency bonus — more invocations = more confidence.
-        import math
-
         freq_bonus = _clamp(math.log2(self.invocation_count + 1) / 10.0, 0.0, 1.0)
 
         return _clamp(
@@ -166,8 +167,6 @@ class ToolScoreIndex:
 
     def save(self, db_path: str) -> None:
         """Persist all scores to a SQLite database."""
-        import sqlite3
-
         conn = sqlite3.connect(db_path)
         try:
             conn.execute(
@@ -203,9 +202,6 @@ class ToolScoreIndex:
 
     def load(self, db_path: str) -> None:
         """Load scores from a SQLite database, merging with any in-memory data."""
-        import os
-        import sqlite3
-
         if not os.path.exists(db_path):
             return
 

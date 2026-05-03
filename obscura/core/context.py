@@ -17,6 +17,9 @@ Usage::
 from __future__ import annotations
 
 import fnmatch
+import json
+import logging
+import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -261,9 +264,6 @@ def load_obscura_memory(session_id: str, db_path: Path, max_events: int = 50) ->
         Formatted memory context string for system prompt
 
     """
-    import json
-    import sqlite3
-
     if not db_path.exists():
         return ""
 
@@ -357,9 +357,6 @@ def load_session_messages(
         List of Message objects (user/assistant pairs) from session history
 
     """
-    import json
-    import sqlite3
-
     from obscura.core.types import ContentBlock, Message, Role
 
     if not db_path.exists():
@@ -434,6 +431,6 @@ def load_session_messages(
         return messages
 
     except Exception as e:
-        logger = __import__("logging").getLogger(__name__)
+        logger = logging.getLogger(__name__)
         logger.warning(f"Could not load session messages: {e}")
         return []

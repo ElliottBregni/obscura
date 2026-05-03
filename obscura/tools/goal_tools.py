@@ -16,7 +16,7 @@ from dataclasses import asdict
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -115,7 +115,7 @@ def _emit_goal_event(
 
 def _get_current_user() -> Any:
     """Best-effort retrieval of the current authenticated user."""
-    return local_cli_user()
+    return current_cli_user()
 
 
 def _json_ok(**data: object) -> str:

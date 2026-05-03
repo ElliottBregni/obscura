@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,7 @@ class UserProfile:
         try:
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore(user=cast(Any, local_cli_user()))
+            store = VectorMemoryStore(user=cast(Any, current_cli_user()))
 
             sections = self._parse_sections(text)
             for section_name, section_text in sections.items():
@@ -226,7 +226,7 @@ class UserProfile:
         try:
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore(user=cast(Any, local_cli_user()))
+            store = VectorMemoryStore(user=cast(Any, current_cli_user()))
             results = store.search_reranked(
                 query=query,
                 namespace=_VECTOR_NAMESPACE,
@@ -246,7 +246,7 @@ class UserProfile:
         try:
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore(user=cast(Any, local_cli_user()))
+            store = VectorMemoryStore(user=cast(Any, current_cli_user()))
             key = f"profile:learned:{_slugify(fact[:40])}:{int(time.time()) % 100000}"
             store.set(key, fact, namespace=_VECTOR_NAMESPACE, memory_type=memory_type)
         except Exception:

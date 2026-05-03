@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+import time as _time
+import uuid as _uuid
 from typing import TYPE_CHECKING, Any, Self, cast
 
 _logger = logging.getLogger(__name__)
@@ -129,8 +131,6 @@ class ObscuraClient:
         self._capability_token = None
         if user is not None:
             try:
-                import uuid as _uuid
-
                 from obscura.auth.capability import generate_capability_token
                 from obscura.auth.models import AuthenticatedUser as _AuthUser
                 from obscura.auth.system_prompts import get_tier_system_prompt
@@ -316,8 +316,6 @@ class ObscuraClient:
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send prompt, wait for full response."""
-        import time as _time
-
         from obscura.core.retry import with_retry
 
         # Apply prompt injection filter and memory enrichment
@@ -386,8 +384,6 @@ class ObscuraClient:
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send prompt, yield streaming chunks."""
-        import time as _time
-
         from obscura.core.circuit_breaker import CircuitOpenError
 
         # Apply prompt injection filter and memory enrichment

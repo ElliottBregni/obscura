@@ -340,16 +340,9 @@ class REPLContext:
         """Get or create the AgentRuntime, wiring InteractionBus to CLI."""
         if self.runtime is None:
             from obscura.agent.agents import AgentRuntime
-            from obscura.auth.models import AuthenticatedUser
+            from obscura.auth.cli_user import current_cli_user
 
-            user = AuthenticatedUser(
-                user_id=os.environ.get("USER", "local"),
-                email="cli@obscura.local",
-                roles=("operator",),
-                org_id="local",
-                token_type="user",
-                raw_token="",
-            )
+            user = current_cli_user()
             self.runtime = AgentRuntime(user)
             await self.runtime.start()
 
@@ -9332,12 +9325,12 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
 
     # Vector-backed profile.
     try:
-        from obscura.auth.cli_user import local_cli_user
+        from obscura.auth.cli_user import current_cli_user
         from obscura.profile.builder import ProfileBuilder
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        store = ProfileStore.for_user(local_cli_user())
+        store = ProfileStore.for_user(current_cli_user())
         builder = ProfileBuilder()
         summary = builder.build_summary(store, max_tokens=600)
         if summary:

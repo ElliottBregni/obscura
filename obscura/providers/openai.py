@@ -10,8 +10,10 @@ StreamChunk types.
 
 from __future__ import annotations
 
+import copy
 import inspect
 import json
+import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast, override
 
@@ -251,15 +253,13 @@ class OpenAIBackend(BackendToolHostMixin):
                 )
                 # Store tool_calls if present
                 if tool_blocks:
-                    import json as _json
-
                     tc_list: list[dict[str, Any]] = [
                         {
                             "id": b.tool_use_id,
                             "type": "function",
                             "function": {
                                 "name": b.tool_name,
-                                "arguments": _json.dumps(b.tool_input),
+                                "arguments": json.dumps(b.tool_input),
                             },
                         }
                         for b in tool_blocks
@@ -445,8 +445,6 @@ class OpenAIBackend(BackendToolHostMixin):
 
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new conversation session."""
-        import uuid
-
         session_id = str(uuid.uuid4())
         self._conversations[session_id] = []
         ref = SessionRef(
@@ -475,9 +473,6 @@ class OpenAIBackend(BackendToolHostMixin):
 
     async def fork_session(self, ref: SessionRef) -> SessionRef:
         """Fork a session by cloning conversation history into a new session."""
-        import copy
-        import uuid
-
         source = self._conversations.get(ref.session_id)
         if source is None:
             msg = f"Session {ref.session_id} not found"
@@ -1012,8 +1007,6 @@ class OpenAIBackend(BackendToolHostMixin):
             # Include tool_calls if present
             tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
             if tool_blocks:
-                import json
-
                 d["tool_calls"] = [
                     {
                         "id": b.tool_use_id,

@@ -21,8 +21,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import subprocess
 import time
 import uuid
+from dataclasses import replace as _dc_replace
+from datetime import UTC, datetime
 from typing import Any
 
 from obscura.core.client import ObscuraClient
@@ -90,8 +94,6 @@ async def repl(
     sid = session_id or uuid.uuid4().hex
 
     # Resolve backend/model names from arguments or environment defaults
-    import os
-
     backend_name = backend or os.environ.get("OBSCURA_BACKEND", "")
     model_name = model or os.environ.get("OBSCURA_MODEL", "")
 
@@ -106,9 +108,9 @@ async def repl(
         mcp_configs, mcp_names = _discover_mcp()
 
     # Create authenticated user for vector memory + memory tools
-    from obscura.auth.cli_user import local_cli_user
+    from obscura.auth.cli_user import current_cli_user
 
-    cli_user = local_cli_user()
+    cli_user = current_cli_user()
 
     # Initialize vector memory store
     vector_store = init_vector_store(cli_user)
@@ -304,8 +306,6 @@ async def repl(
     # Backfill capability field
     if tools_enabled and system_tools:
         try:
-            from dataclasses import replace as _dc_replace
-
             from obscura.plugins.loader import get_capability_map
 
             _cap_map = get_capability_map()
@@ -680,9 +680,9 @@ async def repl(
         if supervise and agent_infos:
             try:
                 from obscura.agent.supervisor import AgentSupervisor
-                from obscura.auth.cli_user import local_cli_user
+                from obscura.auth.cli_user import current_cli_user
 
-                sup_user = local_cli_user()
+                sup_user = current_cli_user()
                 agents_yaml = resolve_obscura_home() / "agents.yaml"
                 supervisor = AgentSupervisor(
                     config_path=agents_yaml,
@@ -727,8 +727,6 @@ async def repl(
             details: list[RunningAgentInfo] = []
             if ctx.runtime is not None:
                 try:
-                    from datetime import UTC, datetime
-
                     from obscura.agent.agents import AgentStatus as _AS
 
                     _active = {_AS.RUNNING, _AS.WAITING, _AS.PENDING}

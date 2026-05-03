@@ -85,26 +85,23 @@ def _make_default_embedding_fn(dim: int = 384):
     2. simple_embedding (hash-based fallback, deterministic but not semantic)
     """
     try:
-        import logging as _logging
-        import os as _os
-
         from sentence_transformers import SentenceTransformer  # type: ignore[import]
 
-        _log = _logging.getLogger(__name__)
+        _log = logging.getLogger(__name__)
         # Suppress noisy model loading output (position_ids warning, progress bars, HF auth)
         _env_overrides = {
             "TRANSFORMERS_VERBOSITY": "error",
             "HF_HUB_DISABLE_PROGRESS_BARS": "1",
             "HF_HUB_VERBOSITY": "error",
         }
-        _prev_env = {k: _os.environ.get(k) for k in _env_overrides}
-        _os.environ.update(_env_overrides)
+        _prev_env = {k: os.environ.get(k) for k in _env_overrides}
+        os.environ.update(_env_overrides)
         for _logger_name in (
             "transformers",
             "sentence_transformers",
             "huggingface_hub",
         ):
-            _logging.getLogger(_logger_name).setLevel(_logging.ERROR)
+            logging.getLogger(_logger_name).setLevel(logging.ERROR)
         _SentenceTransformer = cast(Any, SentenceTransformer)
         _model: Any = _SentenceTransformer("all-MiniLM-L6-v2")
         for _logger_name in (
@@ -112,12 +109,12 @@ def _make_default_embedding_fn(dim: int = 384):
             "sentence_transformers",
             "huggingface_hub",
         ):
-            _logging.getLogger(_logger_name).setLevel(_logging.WARNING)
+            logging.getLogger(_logger_name).setLevel(logging.WARNING)
         for k, v in _prev_env.items():
             if v is None:
-                _os.environ.pop(k, None)
+                os.environ.pop(k, None)
             else:
-                _os.environ[k] = v
+                os.environ[k] = v
         _log.info(
             "vector_memory: using sentence-transformers/all-MiniLM-L6-v2 for embeddings",
         )
@@ -130,9 +127,7 @@ def _make_default_embedding_fn(dim: int = 384):
 
         return _st_embed
     except ImportError:
-        import logging as _logging
-
-        _logging.getLogger(__name__).warning(
+        logging.getLogger(__name__).warning(
             "vector_memory: sentence-transformers not installed, "
             "falling back to hash-based embedding (not semantic). "
             "Install with: pip install sentence-transformers",
@@ -222,9 +217,6 @@ class VectorMemoryStore:
 
     def _create_default_backend(self) -> VectorBackend:
         """Create the default backend based on environment configuration."""
-        import hashlib
-        import logging
-
         logger = logging.getLogger(__name__)
         backend_type = os.environ.get("OBSCURA_VECTOR_BACKEND", "").lower()
         if not backend_type:

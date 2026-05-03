@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ def _profile_store() -> Any:
     from obscura.profile.store import ProfileStore
 
     try:
-        return ProfileStore.for_user(local_cli_user())
+        return ProfileStore.for_user(current_cli_user())
     except Exception:
         return None
 

@@ -40,7 +40,7 @@ from obscura.agent.interaction import (
     InteractionBus,
     UserResponse,
 )
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 from obscura.core.types import AgentEventKind
 from obscura.integrations.messaging.identity import (
     build_conversation_key,
@@ -91,7 +91,7 @@ def _get_phantom_message_preamble() -> str:
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        store = ProfileStore.for_user(local_cli_user())
+        store = ProfileStore.for_user(current_cli_user())
 
         identity = store.get_facts_by_category(ProfileCategory.IDENTITY)
         for f in identity:

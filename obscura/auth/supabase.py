@@ -135,7 +135,7 @@ class SupabaseVerifier:
         else:
             app_metadata = cast(dict[str, Any], app_metadata_any)
 
-        roles = _extract_roles(app_metadata, claims)
+        roles = extract_roles(app_metadata, claims)
         org_id_raw = app_metadata.get("org_id")
         org_id = str(org_id_raw) if org_id_raw is not None else None
 
@@ -153,7 +153,7 @@ class SupabaseVerifier:
         )
 
 
-def _extract_roles(
+def extract_roles(
     app_metadata: dict[str, Any],
     claims: dict[str, Any],
 ) -> tuple[str, ...]:
@@ -229,6 +229,7 @@ __all__ = [
     "SupabaseAuthError",
     "SupabaseSettings",
     "SupabaseVerifier",
+    "extract_roles",
     "get_verifier",
     "reset_verifier_for_tests",
 ]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import re
 from typing import TYPE_CHECKING, Any, cast, override
 
 from obscura.core.sessions import SessionStore
@@ -607,8 +608,6 @@ class CopilotBackend(BackendToolHostMixin):
     @staticmethod
     def _sanitize_tool_name(name: str) -> str:
         """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
-        import re
-
         return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:128]
 
     def _convert_tools_to_copilot(self, tools: list[ToolSpec]) -> list[Any]:
@@ -790,9 +789,7 @@ class CopilotBackend(BackendToolHostMixin):
 
     def set_thinking_budget(self, tokens: int | None) -> None:
         """No-op: Copilot backend does not support extended thinking budgets."""
-        import logging as _logging
-
-        _logging.getLogger(__name__).debug(
+        logging.getLogger(__name__).debug(
             "set_thinking_budget(%s) ignored — Copilot backend does not support extended thinking.",
             tokens,
         )

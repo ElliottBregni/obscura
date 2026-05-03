@@ -12,10 +12,11 @@ import logging
 import os
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
 from obscura.kairos.state import KairosState
@@ -285,8 +286,6 @@ class KairosEngine:
                         goal_ctx = f' goal="{task["goal_id"]}"'
                         # Stamp last_worked on the parent goal.
                         try:
-                            from datetime import UTC, datetime
-
                             from obscura.kairos.goals import GoalBoard
 
                             GoalBoard().update(
@@ -394,7 +393,7 @@ class KairosEngine:
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            profile_store = ProfileStore.for_user(local_cli_user())
+            profile_store = ProfileStore.for_user(current_cli_user())
             builder = ProfileBuilder()
             profile_summary = builder.build_summary(profile_store, max_tokens=400)
             if profile_summary:

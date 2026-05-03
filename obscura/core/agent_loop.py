@@ -2569,8 +2569,6 @@ class AgentLoop:
 
         Returns the number of files deleted.
         """
-        import os
-
         if not TOOL_RESULT_CACHE_DIR.exists():
             return 0
 

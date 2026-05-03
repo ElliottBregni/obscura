@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import functools
 import inspect
+import re
+import time
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from obscura.core.types import ToolSpec
@@ -301,8 +303,6 @@ class ToolRegistry:
     @staticmethod
     def _sanitize_tool_name(name: str) -> str:
         """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
-        import re
-
         return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:128]
 
     def register(self, spec: ToolSpec) -> None:
@@ -606,8 +606,6 @@ def _traced_tool_call(
     except Exception:
         return fn(*args, **kwargs)
 
-    import time
-
     with tracer.start_as_current_span(f"tool.{_trace_name}") as span:
         span.set_attribute("tool.name", _trace_name)
         start = time.monotonic()
@@ -640,8 +638,6 @@ async def _traced_tool_call_async(
         tracer = get_tracer("obscura.tools")
     except Exception:
         return await fn(*args, **kwargs)
-
-    import time
 
     with tracer.start_as_current_span(f"tool.{_trace_name}") as span:
         span.set_attribute("tool.name", _trace_name)

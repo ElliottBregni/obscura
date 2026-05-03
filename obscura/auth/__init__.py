@@ -19,7 +19,7 @@ from obscura.auth.capability import (
     resolve_tier,
     validate_capability_token,
 )
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 from obscura.auth.models import VALID_ROLES, AuthenticatedUser
 from obscura.auth.prompt_filter import FilterResult, filter_prompt
 from obscura.auth.system_prompts import get_tier_system_prompt
@@ -43,7 +43,7 @@ __all__ = [
     # RBAC
     "get_current_user",
     "get_tier_system_prompt",
-    "local_cli_user",
+    "current_cli_user",
     "require_any_role",
     "require_role",
     "resolve_tier",

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -250,9 +252,7 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
             _console.print(f"[dim]\\[{source}][/] {text}")
 
         bus.on_output(_on_output)
-        import logging as _logging
-
-        _logging.getLogger("obscura.agent.daemon_agent").setLevel(_logging.WARNING)
+        logging.getLogger("obscura.agent.daemon_agent").setLevel(logging.WARNING)
         daemon_client = ObscuraClient(
             agent_def.model,
             system_prompt=agent_def.system_prompt,
@@ -264,9 +264,7 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
 
             _schedules_path = Path.home() / ".obscura" / "schedules.json"
             if _schedules_path.is_file():
-                import json as _json
-
-                for sched in _json.loads(_schedules_path.read_text(encoding="utf-8")):
+                for sched in json.loads(_schedules_path.read_text(encoding="utf-8")):
                     triggers.append(
                         _ST(
                             cron=sched["cron"],
@@ -276,9 +274,7 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
                         ),
                     )
         except Exception as _sched_exc:
-            import logging as _sched_log
-
-            _sched_log.getLogger(__name__).debug(
+            logging.getLogger(__name__).debug(
                 "Failed to load persisted schedules: %s",
                 _sched_exc,
             )

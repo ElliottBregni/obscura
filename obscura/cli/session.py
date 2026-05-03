@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import os
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as _dc_replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -938,9 +940,7 @@ class ObscuraSession:
 
             bus.on_output(_on_output)
 
-            import logging as _logging
-
-            _logging.getLogger("obscura.agent.daemon_agent").setLevel(_logging.WARNING)
+            logging.getLogger("obscura.agent.daemon_agent").setLevel(logging.WARNING)
 
             daemon_client = ObscuraClient(
                 agent_def.model,
@@ -954,9 +954,7 @@ class ObscuraSession:
 
                 _schedules_path = Path.home() / ".obscura" / "schedules.json"
                 if _schedules_path.is_file():
-                    import json as _sched_json
-
-                    for sched in _sched_json.loads(
+                    for sched in json.loads(
                         _schedules_path.read_text(encoding="utf-8"),
                     ):
                         triggers.append(
@@ -997,8 +995,6 @@ class ObscuraSession:
 
     async def _load_env(self, config: SessionConfig) -> None:
         """Load .env files (global → project-local → CWD)."""
-        import os
-
         self._backend_name = config.backend or os.environ.get("OBSCURA_BACKEND", "")
         self._model_name = config.model or os.environ.get("OBSCURA_MODEL", "")
 
@@ -1042,9 +1038,9 @@ class ObscuraSession:
 
     def _init_vector_memory(self) -> None:
         """Initialize vector store and memory channels."""
-        from obscura.auth.cli_user import local_cli_user
+        from obscura.auth.cli_user import current_cli_user
 
-        cli_user = local_cli_user()
+        cli_user = current_cli_user()
         self._cli_user = cli_user
 
         self._vector_store = init_vector_store(cli_user)
@@ -1071,8 +1067,6 @@ class ObscuraSession:
 
     def _compose_system_prompt(self, config: SessionConfig) -> str:
         """Build the combined system prompt."""
-        import os
-
         from obscura.core.context import load_obscura_memory
         from obscura.core.system_prompts import (
             compose_environment_context,
@@ -1301,8 +1295,6 @@ class ObscuraSession:
         # Backfill capability metadata
         if system_tools:
             try:
-                from dataclasses import replace as _dc_replace
-
                 from obscura.plugins.loader import get_capability_map
 
                 _cap_map = get_capability_map()

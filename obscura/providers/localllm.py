@@ -9,8 +9,10 @@ Full proxy mode: ObscuraClient → openai SDK → local HTTP server → local mo
 
 from __future__ import annotations
 
+import copy
 import inspect
 import json
+import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
@@ -225,15 +227,13 @@ class LocalLLMBackend(BackendToolHostMixin):
                     ChatMessage(role="user", content=prompt),
                 )
                 if tool_blocks:
-                    import json as _json
-
                     tc_list: list[dict[str, Any]] = [
                         {
                             "id": b.tool_use_id,
                             "type": "function",
                             "function": {
                                 "name": b.tool_name,
-                                "arguments": _json.dumps(b.tool_input),
+                                "arguments": json.dumps(b.tool_input),
                             },
                         }
                         for b in tool_blocks
@@ -387,8 +387,6 @@ class LocalLLMBackend(BackendToolHostMixin):
 
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new conversation session."""
-        import uuid
-
         session_id = str(uuid.uuid4())
         self._conversations[session_id] = []
         ref = SessionRef(
@@ -417,9 +415,6 @@ class LocalLLMBackend(BackendToolHostMixin):
 
     async def fork_session(self, ref: SessionRef) -> SessionRef:
         """Fork a session by cloning conversation history into a new session."""
-        import copy
-        import uuid
-
         source = self._conversations.get(ref.session_id)
         if source is None:
             msg = f"Session {ref.session_id} not found"
@@ -602,8 +597,6 @@ class LocalLLMBackend(BackendToolHostMixin):
             blocks.append(ContentBlock(kind="text", text=msg.content))
 
         if msg.tool_calls:
-            import json
-
             for tc in msg.tool_calls:
                 try:
                     tool_input = json.loads(tc.function.arguments)
@@ -664,8 +657,6 @@ def _convert_tool_choice_to_openai(choice: ToolChoice) -> Any:
 
 def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]:
     """Convert unified Message objects to OpenAI dict format."""
-    import json as _json
-
     result: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.role.value
@@ -696,7 +687,7 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
                     "type": "function",
                     "function": {
                         "name": b.tool_name,
-                        "arguments": _json.dumps(b.tool_input),
+                        "arguments": json.dumps(b.tool_input),
                     },
                 }
                 for b in tool_blocks

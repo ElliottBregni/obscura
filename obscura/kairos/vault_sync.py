@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -42,7 +43,7 @@ from typing import Any, cast
 
 import yaml
 
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 
 logger = logging.getLogger(__name__)
 
@@ -466,7 +467,7 @@ class VaultSync:
         try:
             from obscura.profile.store import ProfileStore
 
-            store: Any = ProfileStore.for_user(local_cli_user())
+            store: Any = ProfileStore.for_user(current_cli_user())
             # Parse simple key: value pairs from the body.
             for line in meta.body.splitlines():
                 line = line.strip()
@@ -488,7 +489,7 @@ class VaultSync:
         try:
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore.for_user(local_cli_user())
+            store = VectorMemoryStore.for_user(current_cli_user())
             key = f"vault:{meta.owner}:{meta.path.stem}"
             store.set(
                 key=key,
@@ -745,7 +746,7 @@ class VaultSync:
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            store = ProfileStore.for_user(local_cli_user())
+            store = ProfileStore.for_user(current_cli_user())
             builder = ProfileBuilder()
             summary = builder.build_summary(store, max_tokens=600)
 
@@ -861,8 +862,6 @@ def _auto_project_vault_dir(cwd: str | None = None) -> Path | None:
     Allows per-project vaults to be discovered automatically when a project
     drops a ``.obscura/vault/`` directory alongside its code.
     """
-    import os
-
     root = Path(cwd or os.getcwd())
     candidate = root / ".obscura" / "vault"
     return candidate if candidate.is_dir() else None

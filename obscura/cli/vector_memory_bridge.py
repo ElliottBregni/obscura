@@ -15,7 +15,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from obscura.auth.cli_user import local_cli_user
+from obscura.auth.cli_user import current_cli_user
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -215,7 +215,7 @@ def auto_save_turn(
             from obscura.profile.learner import ProfileLearner
             from obscura.profile.store import ProfileStore
 
-            profile_store = ProfileStore.for_user(local_cli_user(), vector_store=store)
+            profile_store = ProfileStore.for_user(current_cli_user(), vector_store=store)
             learner = ProfileLearner(profile_store)
             new_facts = learner.process_turn(user_text)
             if new_facts:

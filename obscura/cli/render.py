@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+import time
 from pathlib import Path
 from typing import IO, Any, cast
 
@@ -176,9 +178,6 @@ class OutputManager:
         try:
             if self._session_log_path is None:
                 return
-            import json
-            import time
-
             row = {"kind": kind, "status": status, "text": text, "ts": time.time()}
             with open(self._session_log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -334,8 +333,6 @@ class StreamRenderer:
         self._ss: Any = external_status or streaming_status
         # jitter control for reasoning preview
         self._last_preview_update: float = float("-inf")
-        import os as _os
-
         self._jitter_ms = int(_os.environ.get("OBSCURA_REASONING_JITTER_MS", "50"))
 
     def handle(self, event: AgentEvent) -> None:
@@ -426,8 +423,6 @@ class StreamRenderer:
         if self._ss is None:
             return
         try:
-            import time
-
             now = time.monotonic()
             ms_elapsed = (now - self._last_preview_update) * 1000.0
             if ms_elapsed < self._jitter_ms:
@@ -898,8 +893,6 @@ def _banner_overhaul_block(solid_color: str | None = None) -> None:
     Oscillates Irish green <-> dark blue by default.
     Pass solid_color (raw ANSI escape str) to use a single colour instead.
     """
-    import sys
-
     RESET = "\033[0m"
     BOLD = "\033[1m"
     GREEN = "\033[38;5;28m"  # Irish green
@@ -955,8 +948,6 @@ def _banner_overhaul_block(solid_color: str | None = None) -> None:
 
 def _banner_obscura_by_overhaul() -> None:
     """Print OBSCURA (cyan/teal oscillating) then 'by OVERHAUL' (green/blue)."""
-    import sys
-
     RESET = "\033[0m"
     BOLD = "\033[1m"
     CYAN = "\033[38;5;51m"
@@ -1036,8 +1027,6 @@ def _obscura_ascii_banner() -> None:
     ]
     RESET = "\033[0m"
     BOLD = "\033[1m"
-
-    import sys
 
     sys.stdout.write("\n")
     for row_idx, line in enumerate(rows):
