@@ -2,22 +2,30 @@
 
 Public API::
 
-    from obscura import ObscuraClient, Backend, Message, StreamChunk, tool, AuthConfig
+    from obscura import ObscuraClient, Backend, Message, StreamChunk, tool
 
     async with ObscuraClient("copilot", model_alias="copilot_automation_safe") as client:
         response = await client.send("explain this code")
         print(response.text)
+
+The eager surface here is small — protocols, types, the tool registry, and
+the auth user model. None of it pulls SDK chains, so ``import obscura`` is
+cheap. Heavier names (``ObscuraClient``, ``BaseAgent``, the OpenClaw bridge,
+…) load on first attribute access via PEP 562 ``__getattr__``. The full lazy
+registry lives in :mod:`obscura.lazy`.
 """
 
 from __future__ import annotations
 
-from obscura.agent.agent import BaseAgent
+from typing import Any
+
+# --- Eager: contracts, types, registries. Must NOT pull SDK chains. ---------
 from obscura.auth.models import AuthenticatedUser
-from obscura.core.auth import AuthConfig
-from obscura.core.client import ObscuraClient
-from obscura.core.config import ObscuraConfig
-from obscura.core.context import ContextLoader
-from obscura.core.handlers import RequestHandler, SimpleHandler
+from obscura.core.tool_context import (
+    ToolContext,
+    bind_tool_context,
+    current_tool_context,
+)
 from obscura.core.tools import ToolRegistry, tool
 from obscura.core.types import (
     AgentContext,
@@ -34,46 +42,41 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.openclaw_bridge import (
-    BackendRoutingPolicy,
-    MemoryWriteRequest,
-    OpenClawBridge,
-    OpenClawBridgeConfig,
-    RequestMetadata,
-    RunAgentRequest,
-    SemanticSearchRequest,
-    SpawnAgentRequest,
-    WorkflowRunRequest,
-)
+
+# --- Lazy: heavier names accessed via PEP 562 __getattr__ -------------------
+from obscura.lazy import MissingExtraError
+from obscura.lazy import resolve as _resolve
+
+
+def __getattr__(name: str) -> Any:
+    return _resolve(name)
+
 
 __all__ = [
+    # Types and protocols
     "AgentContext",
     "AgentPhase",
-    # Auth
     "AuthConfig",
     "AuthenticatedUser",
-    # Types
     "Backend",
     "BackendProtocol",
-    "BackendRoutingPolicy",
-    # Agent
+    # Lazy: agent
     "BaseAgent",
+    # Lazy: openclaw bridge
+    "BackendRoutingPolicy",
     "ChunkKind",
     "ContentBlock",
-    # Context
     "ContextLoader",
     "HookContext",
     "HookPoint",
     "MemoryWriteRequest",
     "Message",
-    # Client
+    "MissingExtraError",
+    # Lazy: client / config
     "ObscuraClient",
-    # Config
     "ObscuraConfig",
-    # OpenClaw bridge
     "OpenClawBridge",
     "OpenClawBridgeConfig",
-    # Handlers
     "RequestHandler",
     "RequestMetadata",
     "Role",
@@ -83,9 +86,11 @@ __all__ = [
     "SimpleHandler",
     "SpawnAgentRequest",
     "StreamChunk",
+    "ToolContext",
     "ToolRegistry",
     "ToolSpec",
     "WorkflowRunRequest",
-    # Tools
+    "bind_tool_context",
+    "current_tool_context",
     "tool",
 ]
