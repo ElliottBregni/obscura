@@ -95,7 +95,7 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
         return None
     agent_name, prompt = parsed
     runtime = await ctx.get_runtime()
-    from obscura.cli.render import LabeledStreamRenderer
+    from obscura.cli.render import LabeledStreamRenderer, console, print_warning
     from obscura.manifest.models import AgentManifest
 
     manifest: AgentManifest | None = None
