@@ -1858,20 +1858,26 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
                 if not isinstance(skills_cfg, dict):
                     skills_cfg = {}
 
-                manifest = AgentManifest(
-                    name=cfg["name"],
-                    provider=model_override
-                    or cfg.get("provider")
-                    or cfg.get("model", ctx.backend),
-                    system_prompt=system_prompt_override
-                    or cfg.get("system_prompt", ""),
-                    max_turns=cfg.get("max_turns", 10),
-                    tools=cfg.get("tools", []),
-                    tags=cfg.get("tags", []),
-                    mcp_servers=cfg.get("mcp_servers", [])
-                    if isinstance(cfg.get("mcp_servers"), list)
-                    else [],
-                    skills_config=skills_cfg,
+                # AgentManifest has pydantic field aliases (``provider`` -> ``model``,
+                # ``mcp_servers`` -> ``mcp_server_refs``). Pyright follows the alias only,
+                # so we route through ``model_validate`` even though
+                # ``populate_by_name=True`` accepts both at runtime.
+                manifest = AgentManifest.model_validate(
+                    {
+                        "name": cfg["name"],
+                        "provider": model_override
+                        or cfg.get("provider")
+                        or cfg.get("model", ctx.backend),
+                        "system_prompt": system_prompt_override
+                        or cfg.get("system_prompt", ""),
+                        "max_turns": cfg.get("max_turns", 10),
+                        "tools": cfg.get("tools", []),
+                        "tags": cfg.get("tags", []),
+                        "mcp_servers": cfg.get("mcp_servers", [])
+                        if isinstance(cfg.get("mcp_servers"), list)
+                        else [],
+                        "skills_config": skills_cfg,
+                    }
                 )
 
                 # Spawn from manifest (SECURE) — pass explicit model override if given
@@ -2264,19 +2270,23 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
                 s_cfg = cfg.get("skills", {})
                 if not isinstance(s_cfg, dict):
                     s_cfg = {}
-                manifest = AgentManifest(
-                    name=cfg.get("name", name),
-                    provider=model
-                    or cfg.get("provider")
-                    or cfg.get("model", ctx.backend),
-                    system_prompt=cfg.get("system_prompt", ""),
-                    max_turns=cfg.get("max_turns", 10),
-                    tools=cfg.get("tools", []),
-                    tags=cfg.get("tags", []),
-                    mcp_servers=cfg.get("mcp_servers", [])
-                    if isinstance(cfg.get("mcp_servers"), list)
-                    else [],
-                    skills_config=s_cfg,
+                # AgentManifest has pydantic field aliases — see model_validate
+                # comment at the first AgentManifest construction site.
+                manifest = AgentManifest.model_validate(
+                    {
+                        "name": cfg.get("name", name),
+                        "provider": model
+                        or cfg.get("provider")
+                        or cfg.get("model", ctx.backend),
+                        "system_prompt": cfg.get("system_prompt", ""),
+                        "max_turns": cfg.get("max_turns", 10),
+                        "tools": cfg.get("tools", []),
+                        "tags": cfg.get("tags", []),
+                        "mcp_servers": cfg.get("mcp_servers", [])
+                        if isinstance(cfg.get("mcp_servers"), list)
+                        else [],
+                        "skills_config": s_cfg,
+                    }
                 )
                 agent = runtime.spawn_from_manifest(
                     manifest,
@@ -2737,21 +2747,25 @@ async def _swarm_run_agent(
             s_cfg = cfg.get("skills", {})
             if not isinstance(s_cfg, dict):
                 s_cfg = {}
-            manifest = AgentManifest(
-                name=cfg["name"],
-                provider=model_override
-                or cfg.get("provider")
-                or cfg.get("model", ctx.backend),
-                system_prompt=cfg.get("system_prompt", ""),
-                max_turns=cfg.get("max_turns", 25),
-                tools=cfg.get("tools", []),
-                tags=cfg.get("tags", []),
-                mcp_servers=(
-                    cfg.get("mcp_servers", [])
-                    if isinstance(cfg.get("mcp_servers"), list)
-                    else []
-                ),
-                skills_config=s_cfg,
+            # AgentManifest has pydantic field aliases — see model_validate
+            # comment at the first AgentManifest construction site.
+            manifest = AgentManifest.model_validate(
+                {
+                    "name": cfg["name"],
+                    "provider": model_override
+                    or cfg.get("provider")
+                    or cfg.get("model", ctx.backend),
+                    "system_prompt": cfg.get("system_prompt", ""),
+                    "max_turns": cfg.get("max_turns", 25),
+                    "tools": cfg.get("tools", []),
+                    "tags": cfg.get("tags", []),
+                    "mcp_servers": (
+                        cfg.get("mcp_servers", [])
+                        if isinstance(cfg.get("mcp_servers"), list)
+                        else []
+                    ),
+                    "skills_config": s_cfg,
+                }
             )
             agent = runtime.spawn_from_manifest(manifest)
         else:
