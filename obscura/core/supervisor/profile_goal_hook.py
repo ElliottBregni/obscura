@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.supervisor.types import SupervisorHookPoint
+
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
     from obscura.core.supervisor.session_hooks import SessionHookManager
@@ -46,7 +48,6 @@ def register_profile_goal_hooks(
         Authenticated user for profile lookup. If None, profile injection
         is skipped.
     """
-    from obscura.core.supervisor.types import SupervisorHookPoint
 
     async def _inject_goal_and_profile(context: dict[str, Any]) -> None:
         """Inject goal summary and profile summary into build context."""

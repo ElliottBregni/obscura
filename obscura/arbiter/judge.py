@@ -11,6 +11,10 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.auth import resolve_auth
+from obscura.core.types import Backend
+from obscura.eval.eval_backend import AnthropicEvalBackend
+
 if TYPE_CHECKING:
     from obscura.arbiter.types import ArbiterCheckKind, ArbiterConfig
 
@@ -124,10 +128,6 @@ def _get_judge_backend() -> Any:
     import os
 
     try:
-        from obscura.core.auth import resolve_auth
-        from obscura.core.types import Backend
-        from obscura.eval.eval_backend import AnthropicEvalBackend
-
         auth = resolve_auth(Backend.CLAUDE)
         api_key = auth.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:

@@ -38,8 +38,6 @@ async def vector_memory_search(
     """Semantic search over vector memories with optional reranking."""
     from datetime import datetime as dt
 
-    from obscura.vector_memory import VectorMemoryStore
-
     store = VectorMemoryStore.for_user(user)
 
     memory_type_list: list[str] | None = (
@@ -98,9 +96,6 @@ async def vector_memory_search_routed(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Multi-query search with memory type routing and weighted merging."""
-    from obscura.vector_memory import MetadataFilter, VectorMemoryStore
-    from obscura.vector_memory.vector_memory_router import MemoryRouter, MemoryTypeQuery
-
     store = VectorMemoryStore.for_user(user)
     router_inst = MemoryRouter(store)
 
@@ -159,8 +154,6 @@ async def vector_memory_set(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Store text with semantic embedding for vector search."""
-    from obscura.vector_memory import VectorMemoryStore
-
     store = VectorMemoryStore.for_user(user)
     text: str = body.get("text", "")
     metadata: dict[str, Any] = body.get("metadata", {})

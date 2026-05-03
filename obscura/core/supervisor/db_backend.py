@@ -26,6 +26,10 @@ import threading
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from obscura.core.pg_config import HAS_PSYCOPG2, PGPoolManager
+from obscura.core.supervisor.postgres_schema import init_supervisor_schema_pg
+from obscura.core.supervisor.schema import init_supervisor_schema
+
 logger = logging.getLogger(__name__)
 
 
@@ -173,8 +177,6 @@ class SQLiteSupervisorBackend:
 
     def init_schema(self) -> None:
         """Run the supervisor DDL (idempotent)."""
-        from obscura.core.supervisor.schema import init_supervisor_schema
-
         init_supervisor_schema(self.get_conn())
 
     def close(self) -> None:
@@ -202,8 +204,6 @@ class PostgreSQLSupervisorBackend:
     """
 
     def __init__(self) -> None:
-        from obscura.core.pg_config import HAS_PSYCOPG2
-
         if not HAS_PSYCOPG2:
             msg = (
                 "psycopg2 is required for PostgreSQL support. "
@@ -216,8 +216,6 @@ class PostgreSQLSupervisorBackend:
 
     @staticmethod
     def _get_pool() -> Any:
-        from obscura.core.pg_config import PGPoolManager
-
         return PGPoolManager.get_pool()
 
     @property
@@ -236,10 +234,6 @@ class PostgreSQLSupervisorBackend:
 
     def init_schema(self) -> None:
         """Run the PostgreSQL supervisor DDL (idempotent)."""
-        from obscura.core.supervisor.postgres_schema import (
-            init_supervisor_schema_pg,
-        )
-
         conn = self.get_conn()
         try:
             init_supervisor_schema_pg(conn)

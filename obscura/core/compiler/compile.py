@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 from obscura.core.compiler.compiled import CompiledAgent, CompiledWorkspace
 from obscura.core.compiler.errors import ResolutionError, SpecValidationError
-from obscura.core.compiler.loader import SpecRegistry, load_specs_dir
+from obscura.core.compiler.loader import SpecRegistry, load_specs_dir, load_specs_dirs
 from obscura.core.compiler.merger import (
     apply_agent_overrides,
     compile_agent,
@@ -43,7 +43,7 @@ from obscura.core.compiler.specs import (
     WorkspaceSpecBody,
 )
 from obscura.core.compiler.validator import validate_pack_references, validate_workspace
-from obscura.core.paths import resolve_obscura_specs_dir
+from obscura.core.paths import resolve_all_specs_dirs, resolve_obscura_specs_dir
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -253,8 +253,6 @@ def compile_workspace(
     and policies are available everywhere, and local specs can override.
     Falls back to the single active specs dir if no merge dirs found.
     """
-    from obscura.core.paths import resolve_all_specs_dirs
-
     dirs = resolve_all_specs_dirs()
     if not dirs:
         # Fallback: single-dir behavior
@@ -264,8 +262,6 @@ def compile_workspace(
             available_plugins=available_plugins,
             strict=strict,
         )
-
-    from obscura.core.compiler.loader import load_specs_dirs
 
     registry = load_specs_dirs(dirs)
     workspace_spec = registry.get_workspace(name)

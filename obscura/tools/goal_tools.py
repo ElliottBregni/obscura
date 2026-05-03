@@ -16,8 +16,11 @@ from dataclasses import asdict
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.arbiter.notify import fire_goal_transition
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
+from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
+from obscura.vector_memory.vector_memory import VectorMemoryStore
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -26,6 +29,7 @@ _logger = logging.getLogger(__name__)
 
 
 def _board() -> Any:
+    # lazy: avoid circular dep with obscura.kairos (kairos.dream imports get_goal_tool_specs from here)
     from obscura.kairos.goals import GoalBoard
 
     return GoalBoard()
@@ -34,6 +38,7 @@ def _board() -> Any:
 def _notify_vault(goal_id: str) -> None:
     """Best-effort vault sync on goal mutation."""
     try:
+        # lazy: avoid circular dep with obscura.kairos (kairos.dream imports get_goal_tool_specs from here)
         from obscura.kairos.vault_sync import notify_goal_changed
 
         notify_goal_changed(goal_id)
@@ -44,8 +49,6 @@ def _notify_vault(goal_id: str) -> None:
 def _notify_arbiter(goal: Any) -> None:
     """Best-effort Arbiter notification on goal transition."""
     try:
-        from obscura.arbiter.notify import fire_goal_transition
-
         import asyncio
 
         goal_dict = _goal_dict(goal)
@@ -53,8 +56,6 @@ def _notify_arbiter(goal: Any) -> None:
         task_statuses: list[str] = []
         if goal.tasks:
             try:
-                from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
-
                 db = _get_db()
                 for tid in goal.tasks:
                     row = db.execute(
@@ -88,8 +89,6 @@ def _emit_goal_event(
 ) -> None:
     """Emit a goal lifecycle event to vector memory for semantic search."""
     try:
-        from obscura.vector_memory.vector_memory import VectorMemoryStore
-
         store = VectorMemoryStore.for_user(_get_current_user())
         from datetime import UTC, datetime
 

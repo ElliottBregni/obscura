@@ -16,6 +16,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from obscura.agent.daemon_agent import DaemonAgent, IMessageTrigger, ScheduleTrigger
+from obscura.agent.interaction import AttentionPriority, InteractionBus
+from obscura.agent.supervisor import SupervisorConfig
+from obscura.cli.render import console as _console
+from obscura.core.client import ObscuraClient
+
 _log = logging.getLogger("obscura.cli")
 
 
@@ -23,12 +29,6 @@ async def start_imessage_daemon(
     client: Any,
 ) -> asyncio.Task[None] | None:
     """Start iMessage daemon if configured in agents.yaml. Returns the task."""
-    from obscura.agent.daemon_agent import DaemonAgent
-    from obscura.agent.interaction import InteractionBus
-    from obscura.agent.supervisor import SupervisorConfig
-    from obscura.cli.render import console as _console
-    from obscura.core.client import ObscuraClient
-
     config_path = Path.home() / ".obscura" / "agents.yaml"
     if not config_path.exists():
         return None
@@ -42,9 +42,6 @@ async def start_imessage_daemon(
         if not im_triggers:
             continue
 
-        from obscura.agent.daemon_agent import IMessageTrigger as _IMT
-        from obscura.agent.interaction import AttentionPriority as _AttentionPriority
-
         triggers: list[Any] = []
         for tdef in im_triggers:
             im_cfg = tdef.imessage or {}
@@ -56,11 +53,11 @@ async def start_imessage_daemon(
             _priority_val = tdef.priority
             _priority = (
                 _priority_val
-                if isinstance(_priority_val, _AttentionPriority)
-                else _AttentionPriority.NORMAL
+                if isinstance(_priority_val, AttentionPriority)
+                else AttentionPriority.NORMAL
             )
             triggers.append(
-                _IMT(
+                IMessageTrigger(
                     contacts=tuple(im_cfg.get("contacts", [])),
                     poll_interval=im_cfg.get("poll_interval", 30),
                     notify_user=tdef.notify_user,
@@ -94,8 +91,6 @@ async def start_imessage_daemon(
 
         # Load persisted schedules from ~/.obscura/schedules.json
         try:
-            from obscura.agent.daemon_agent import ScheduleTrigger as _ST
-
             _schedules_path = Path.home() / ".obscura" / "schedules.json"
             if _schedules_path.is_file():
                 import json as _sched_json
@@ -104,7 +99,7 @@ async def start_imessage_daemon(
                     _schedules_path.read_text(encoding="utf-8"),
                 ):
                     triggers.append(
-                        _ST(
+                        ScheduleTrigger(
                             cron=sched["cron"],
                             prompt=sched["prompt"],
                             description=f"{sched.get('id', '?')}: {sched['prompt'][:40]}",

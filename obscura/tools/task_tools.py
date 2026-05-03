@@ -22,6 +22,9 @@ import sqlite3
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.arbiter.notify import fire_task_complete
+from obscura.core.background_tasks import get_background_task_manager
+from obscura.core.task_queue import TaskQueue, _open  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -35,8 +38,6 @@ if TYPE_CHECKING:
 
 def _get_db() -> sqlite3.Connection:
     """Open (or create) the tasks database, applying queue schema."""
-    from obscura.core.task_queue import _open  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
-
     return _open()
 
 
@@ -115,8 +116,6 @@ async def task_create(
     metadata: dict[str, Any] | None = None,
 ) -> str:
     import os
-
-    from obscura.core.task_queue import TaskQueue
 
     q = TaskQueue()
     task_id = q.enqueue(
@@ -402,8 +401,6 @@ async def task_update(
     },
 )
 async def task_output(task_id: str) -> str:
-    from obscura.core.background_tasks import get_background_task_manager
-
     mgr = get_background_task_manager()
     bg_task = mgr.get(task_id)
     if bg_task is None:
@@ -448,8 +445,6 @@ async def task_output(task_id: str) -> str:
     },
 )
 async def task_stop(task_id: str) -> str:
-    from obscura.core.background_tasks import get_background_task_manager
-
     mgr = get_background_task_manager()
     stopped = await mgr.stop(task_id)
     if not stopped:
@@ -476,8 +471,6 @@ async def task_stop(task_id: str) -> str:
     },
 )
 async def queue_next(worker_id: str = "agent") -> str:
-    from obscura.core.task_queue import TaskQueue
-
     q = TaskQueue()
     q.reclaim_stale()
     task = q.next_ready(worker_id=worker_id)
@@ -510,8 +503,6 @@ async def queue_next(worker_id: str = "agent") -> str:
     },
 )
 async def queue_complete(task_id: str, output: str = "") -> str:
-    from obscura.core.task_queue import TaskQueue
-
     q = TaskQueue()
     ok = q.complete(task_id, output=output)
     if not ok:
@@ -525,8 +516,6 @@ async def queue_complete(task_id: str, output: str = "") -> str:
     task = q.get(task_id)
     if task:
         try:
-            from obscura.arbiter.notify import fire_task_complete
-
             result = await fire_task_complete(task)
             if result and result.get("arbiter_feedback"):
                 arbiter_feedback = str(result["arbiter_feedback"])
@@ -561,8 +550,6 @@ async def queue_complete(task_id: str, output: str = "") -> str:
     },
 )
 async def queue_fail(task_id: str, error: str, retry: bool = True) -> str:
-    from obscura.core.task_queue import TaskQueue
-
     ok = TaskQueue().fail(task_id, error, retry=retry)
     if not ok:
         return _json_error("task_not_found", task_id=task_id)
@@ -589,8 +576,6 @@ async def queue_fail(task_id: str, error: str, retry: bool = True) -> str:
     },
 )
 async def queue_heartbeat(task_id: str, worker_id: str = "agent") -> str:
-    from obscura.core.task_queue import TaskQueue
-
     ok = TaskQueue().heartbeat(task_id, worker_id)
     if not ok:
         return _json_error("heartbeat_failed", task_id=task_id)
@@ -616,8 +601,6 @@ async def queue_heartbeat(task_id: str, worker_id: str = "agent") -> str:
     },
 )
 async def queue_depth(status: str = "pending") -> str:
-    from obscura.core.task_queue import TaskQueue
-
     depth = TaskQueue().queue_depth(status=status)
     total = sum(depth.values())
     return json.dumps({"ok": True, "depth": depth, "total": total})
@@ -631,13 +614,12 @@ async def queue_depth(status: str = "pending") -> str:
 def _sync_goal_progress(task_id: str) -> None:
     """If the completed task is linked to a goal, update goal progress and last_worked."""
     try:
-        from obscura.core.task_queue import TaskQueue
-
         task = TaskQueue().get(task_id)
         goal_id = task.get("goal_id") if task else None
         if goal_id:
             from datetime import UTC, datetime
 
+            # lazy: avoid circular dep with obscura.kairos.goals (imports _get_db from here)
             from obscura.kairos.goals import GoalBoard
 
             board = GoalBoard()

@@ -16,10 +16,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from obscura.auth.cli_user import current_cli_user
+from obscura.profile.learner import ProfileLearner
+from obscura.profile.store import ProfileStore
+from obscura.vector_memory import VectorMemoryStore
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
-    from obscura.vector_memory.vector_memory import VectorMemoryStore
 
 _logger = logging.getLogger(__name__)
 
@@ -54,8 +56,6 @@ def init_vector_store(user: AuthenticatedUser) -> VectorMemoryStore | None:
     if not is_vector_memory_enabled():
         return None
     try:
-        from obscura.vector_memory import VectorMemoryStore
-
         return VectorMemoryStore.for_user(user)
     except Exception as e:
         _logger.warning(f"Could not initialize vector memory: {e}")
@@ -212,9 +212,6 @@ def auto_save_turn(
 
         # Auto-learn profile facts from user messages (best-effort, silent).
         try:
-            from obscura.profile.learner import ProfileLearner
-            from obscura.profile.store import ProfileStore
-
             profile_store = ProfileStore.for_user(current_cli_user(), vector_store=store)
             learner = ProfileLearner(profile_store)
             new_facts = learner.process_turn(user_text)

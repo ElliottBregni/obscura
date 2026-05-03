@@ -43,7 +43,15 @@ from typing import Any, cast
 
 import yaml
 
+from obscura.arbiter.store import ArbiterStore
 from obscura.auth.cli_user import current_cli_user
+from obscura.core.kairos.goal_store import GoalStore
+from obscura.core.paths import resolve_obscura_home
+from obscura.core.task_queue import TaskQueue
+from obscura.kairos.goals import GoalBoard
+from obscura.profile.builder import ProfileBuilder
+from obscura.profile.store import ProfileStore
+from obscura.vector_memory.vector_memory import VectorMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -343,8 +351,6 @@ class VaultSync:
         overwrite GoalBoard — but we first archive the agent's version to
         ``vault/agent/goals/.conflicts/<goal_id>.<ISO8601>.md`` so no data is lost.
         """
-        from obscura.kairos.goals import GoalBoard
-
         board = GoalBoard()
         title = str(
             meta.frontmatter.get("title", meta.path.stem.replace("-", " ").title())
@@ -444,8 +450,6 @@ class VaultSync:
 
     def _ingest_task(self, meta: FileMeta) -> None:
         """Create a task from a user-zone markdown file."""
-        from obscura.core.task_queue import TaskQueue
-
         q = TaskQueue()
         subject = str(
             meta.frontmatter.get("title", meta.path.stem.replace("-", " ").title())
@@ -465,8 +469,6 @@ class VaultSync:
     def _ingest_profile(self, meta: FileMeta) -> None:
         """Update user profile from a vault file."""
         try:
-            from obscura.profile.store import ProfileStore
-
             store: Any = ProfileStore.for_user(current_cli_user())
             # Parse simple key: value pairs from the body.
             for line in meta.body.splitlines():
@@ -487,8 +489,6 @@ class VaultSync:
     def _ingest_to_vector(self, meta: FileMeta, memory_type: str) -> None:
         """Ingest a note/reference file into vector memory."""
         try:
-            from obscura.vector_memory.vector_memory import VectorMemoryStore
-
             store = VectorMemoryStore.for_user(current_cli_user())
             key = f"vault:{meta.owner}:{meta.path.stem}"
             store.set(
@@ -543,9 +543,6 @@ class VaultSync:
 
         # --- Primary source: GoalStore (SQLite) ---
         try:
-            from obscura.core.kairos.goal_store import GoalStore
-            from obscura.core.paths import resolve_obscura_home
-
             _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
             db_path = resolve_obscura_home() / "kairos.db"
@@ -594,8 +591,6 @@ class VaultSync:
         # --- Fallback / supplement: GoalBoard (markdown files) ---
         # Export any goal whose ID isn't already covered by GoalStore above.
         try:
-            from obscura.kairos.goals import GoalBoard
-
             board = GoalBoard()
             for goal in board.load_all():
                 if goal.id in exported_ids:
@@ -625,8 +620,6 @@ class VaultSync:
     def _export_queue_snapshot(self) -> int:
         """Export pending tasks to vault/agent/tasks/queue-snapshot.md."""
         try:
-            from obscura.core.task_queue import TaskQueue
-
             q = TaskQueue()
             snapshot_path = self.vault_dir / "agent" / "tasks" / "queue-snapshot.md"
             snapshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -669,8 +662,6 @@ class VaultSync:
     def _export_arbiter_verdicts(self) -> int:
         """Export recent Arbiter verdicts to vault/agent/arbiter/."""
         try:
-            from obscura.arbiter.store import ArbiterStore
-
             store = ArbiterStore()
             recent = store.recent(limit=20)
             if not recent:
@@ -743,9 +734,6 @@ class VaultSync:
     def _export_profile_summary(self) -> int:
         """Export a profile summary to vault/agent/profile-summary.md."""
         try:
-            from obscura.profile.builder import ProfileBuilder
-            from obscura.profile.store import ProfileStore
-
             store = ProfileStore.for_user(current_cli_user())
             builder = ProfileBuilder()
             summary = builder.build_summary(store, max_tokens=600)

@@ -440,12 +440,6 @@ async def _run_one_agent(
     model: str = "",
 ) -> dict[str, Any]:
     """Spawn a single agent, run to completion, return result dict."""
-    from obscura.manifest.models import (
-        AgentManifest,
-        CapabilityConfig,
-        PluginDepsConfig,
-    )
-
     started_at = time.monotonic()
 
     runtime = ctx.runtime
@@ -462,11 +456,6 @@ async def _run_one_agent(
 
     cfg = None
     try:
-        from obscura.agent.definitions import (
-            definition_to_config_dict,
-            resolve_all_definitions,
-        )
-
         defs = resolve_all_definitions()
         if agent_type in defs:
             defn = defs[agent_type]
@@ -676,8 +665,6 @@ def make_send_message_tool(ctx: SwarmToolContext) -> ToolSpec:
         message: str,
         mode: str = "request",
     ) -> str:
-        from obscura.agent.agents import AgentMessage, AgentStatus
-
         runtime = ctx.runtime
         if runtime is None:
             return json.dumps({"ok": False, "error": "no_runtime"})

@@ -403,6 +403,7 @@ class StreamRenderer:
     def _start_thinking(self) -> None:
         if self._ss is None:
             return
+        # lazy: avoid circular dep with obscura.cli.prompt
         from obscura.cli.prompt import random_thinking_message
 
         msg = random_thinking_message()
@@ -975,8 +976,6 @@ def _banner_obscura_by_overhaul() -> None:
 def _obscura_ascii_banner() -> None:
     """Print the startup ASCII art banner — theme driven by FLAGS.banner_theme."""
     try:
-        from obscura.core.feature_flags import FLAGS, BannerTheme
-
         if not FLAGS.banner_enabled or FLAGS.banner_theme == BannerTheme.NONE:
             return
 

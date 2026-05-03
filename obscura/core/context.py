@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.context_lazy import LazySkillLoader, SkillMetadata
 from obscura.core.frontmatter import parse_frontmatter
+from obscura.core.paths import resolve_all_skills_dirs
 from obscura.core.types import ContentBlock, Message, Role
 
 if TYPE_CHECKING:
@@ -39,7 +40,14 @@ _DEFAULT_TARGET_MAP: dict[str, str] = {
 
 
 class ContextLoader:
-    """Load instructions, skills, and role context from vault directories."""
+    """Load instructions, skills, and role context from vault directories.
+
+    Skills are aggregated from the backend-specific dir (e.g. ``.codex/skills/``)
+    and the universal pool returned by :func:`resolve_all_skills_dirs`
+    (``~/.obscura/skills/``, ``.obscura/skills/``, ``~/.claude/skills/``), so
+    every backend sees the same baseline skill set with optional per-backend
+    additions. Backend-specific entries win on name conflicts.
+    """
 
     def __init__(
         self,
@@ -56,7 +64,7 @@ class ContextLoader:
         self._target_map = agent_target_map or _DEFAULT_TARGET_MAP
         self._lazy_load_skills = lazy_load_skills
         self._skill_filter = skill_filter
-        self._lazy_loader: LazySkillLoader | None = None
+        self._lazy_loaders: list[LazySkillLoader] | None = None
         self._capability_resolver = capability_resolver
         self._agent_id = agent_id
 
@@ -65,6 +73,35 @@ class ContextLoader:
         """Root directory for this agent (e.g. ``~/.github/``)."""
         target = self._target_map.get(self._backend.value, f".{self._backend.value}")
         return self._vault_path / target
+
+    def _skill_dirs(self) -> list[Path]:
+        """All skill directories to search, in priority order (first wins).
+
+        Backend-specific (``agent_dir/skills/``) is searched first so that
+        a same-named entry there overrides one in the universal pool.
+        """
+        dirs: list[Path] = []
+        seen: set[Path] = set()
+
+        backend_dir = self.agent_dir / "skills"
+        if backend_dir.is_dir():
+            resolved = backend_dir.resolve()
+            dirs.append(backend_dir)
+            seen.add(resolved)
+
+        for d in resolve_all_skills_dirs():
+            resolved = d.resolve()
+            if resolved not in seen:
+                dirs.append(d)
+                seen.add(resolved)
+
+        return dirs
+
+    def _ensure_lazy_loaders(self) -> list[LazySkillLoader]:
+        """Lazily create one LazySkillLoader per discovered skill dir."""
+        if self._lazy_loaders is None:
+            self._lazy_loaders = [LazySkillLoader(d) for d in self._skill_dirs()]
+        return self._lazy_loaders
 
     def load_instructions(self) -> str:
         """Load all instruction files, concatenated with separators."""
@@ -82,32 +119,44 @@ class ContextLoader:
     def load_skills(self) -> list[str]:
         """Load skill documents as a list of strings.
 
-        If lazy_load_skills is enabled, returns empty list (use load_skills_lazy instead).
+        Aggregates across :meth:`_skill_dirs`, deduplicating by file stem so
+        the highest-priority dir wins. Returns empty list if
+        ``lazy_load_skills`` is enabled (use :meth:`load_skills_lazy` instead).
         """
         if self._lazy_load_skills:
             return []  # Don't eagerly load skills
 
-        skills_dir = self.agent_dir / "skills"
-        if not skills_dir.is_dir():
-            return []
-        return [
-            f.read_text(encoding="utf-8").strip()
-            for f in sorted(skills_dir.rglob("*.md"))
-            if f.is_file() and f.read_text(encoding="utf-8").strip()
-        ]
+        out: list[str] = []
+        seen: set[str] = set()
+        for skills_dir in self._skill_dirs():
+            for f in sorted(skills_dir.rglob("*.md")):
+                if not f.is_file() or f.stem in seen:
+                    continue
+                text = f.read_text(encoding="utf-8").strip()
+                if not text:
+                    continue
+                out.append(text)
+                seen.add(f.stem)
+        return out
 
     def load_skills_lazy(self) -> list[SkillMetadata]:
-        """Load skill metadata only (for lazy loading).
+        """Discover skill metadata across all skill dirs.
 
         Returns:
-            List of skill metadata objects with minimal info
+            List of skill metadata objects, deduplicated by name with
+            higher-priority dirs winning.
 
         """
-        if not self._lazy_loader:
-            skills_dir = self.agent_dir / "skills"
-            self._lazy_loader = LazySkillLoader(skills_dir)
+        loaders = self._ensure_lazy_loaders()
 
-        skills = self._lazy_loader.discover_skills(filter_names=self._skill_filter)
+        seen: set[str] = set()
+        skills: list[SkillMetadata] = []
+        for loader in loaders:
+            for s in loader.discover_skills(filter_names=self._skill_filter):
+                if s.name in seen:
+                    continue
+                skills.append(s)
+                seen.add(s.name)
 
         if self._capability_resolver is not None and self._agent_id:
             skills = [
@@ -124,6 +173,8 @@ class ContextLoader:
     def load_skill_body(self, skill_name: str) -> str | None:
         """Load full skill body on-demand.
 
+        Searches each skill dir in priority order; the first hit wins.
+
         Args:
             skill_name: Name of the skill to load
 
@@ -131,13 +182,13 @@ class ContextLoader:
             Full skill content, or None if not found
 
         """
-        if not self._lazy_loader:
-            skills_dir = self.agent_dir / "skills"
-            self._lazy_loader = LazySkillLoader(skills_dir)
-            # Discover skills first if not already done
-            self._lazy_loader.discover_skills(filter_names=self._skill_filter)
-
-        return self._lazy_loader.load_skill_body(skill_name)
+        for loader in self._ensure_lazy_loaders():
+            # Ensure metadata is populated before asking for the body.
+            loader.discover_skills(filter_names=self._skill_filter)
+            body = loader.load_skill_body(skill_name)
+            if body is not None:
+                return body
+        return None
 
     def load_role(self, name: str) -> str:
         """Load role-specific context from ``skills/roles/{name}/``."""
@@ -205,21 +256,26 @@ class ContextLoader:
     def load_skills_with_metadata(self) -> list[tuple[dict[str, Any], str]]:
         """Load skill documents as ``(metadata, body)`` tuples.
 
-        If a skill file has YAML frontmatter, ``metadata`` will contain
-        the parsed fields (e.g. ``name``, ``description``, ``allowed-tools``).
+        Aggregates across :meth:`_skill_dirs`, deduplicating by frontmatter
+        ``name`` (or file stem if absent). If a skill file has YAML
+        frontmatter, ``metadata`` will contain the parsed fields
+        (e.g. ``name``, ``description``, ``allowed-tools``).
         """
-        skills_dir = self.agent_dir / "skills"
-        if not skills_dir.is_dir():
-            return []
         results: list[tuple[dict[str, Any], str]] = []
-        for f in sorted(skills_dir.rglob("*.md")):
-            if not f.is_file():
-                continue
-            raw = f.read_text(encoding="utf-8").strip()
-            if not raw:
-                continue
-            result = parse_frontmatter(raw, source_path=f)
-            results.append((result.metadata, result.body))
+        seen: set[str] = set()
+        for skills_dir in self._skill_dirs():
+            for f in sorted(skills_dir.rglob("*.md")):
+                if not f.is_file():
+                    continue
+                raw = f.read_text(encoding="utf-8").strip()
+                if not raw:
+                    continue
+                result = parse_frontmatter(raw, source_path=f)
+                key = str(result.metadata.get("name") or f.stem)
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append((result.metadata, result.body))
         return results
 
     def load_system_prompt(self, additional: str = "") -> str:
@@ -238,9 +294,8 @@ class ContextLoader:
         # Handle skills (lazy or eager)
         if self._lazy_load_skills:
             skill_metas = self.load_skills_lazy()
-            if skill_metas and self._lazy_loader:
-                skill_names = [s.name for s in skill_metas]
-                stubs = self._lazy_loader.get_skill_stubs(skill_names)
+            if skill_metas:
+                stubs = "\n\n".join(s.to_stub() for s in skill_metas)
                 if stubs:
                     parts.append("## Skills (Available)\n\n" + stubs)
         else:
@@ -358,8 +413,6 @@ def load_session_messages(
         List of Message objects (user/assistant pairs) from session history
 
     """
-    from obscura.core.types import ContentBlock, Message, Role
-
     if not db_path.exists():
         return []
 

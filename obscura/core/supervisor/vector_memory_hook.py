@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.supervisor.types import SupervisorHookPoint
+
 if TYPE_CHECKING:
     from obscura.core.supervisor.session_hooks import SessionHookManager
     from obscura.vector_memory.vector_memory import VectorMemoryStore
@@ -55,8 +57,6 @@ def register_vector_memory_hooks(
     if vector_store is None:
         logger.debug("No vector store provided — skipping vector memory hooks")
         return
-
-    from obscura.core.supervisor.types import SupervisorHookPoint
 
     # -- PRE_BUILD_CONTEXT: inject relevant memories into prompt assembly -----
 

@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
+from obscura.core.session_utils import list_active_sessions
 from obscura.core.types import AgentEvent, AgentEventKind
 
 # ---------------------------------------------------------------------------
@@ -597,8 +598,6 @@ class SQLiteEventStore:
     # ------------------------------------------------------------------
 
     def _reap_orphaned_sessions_sync(self) -> int:
-        from obscura.core.session_utils import list_active_sessions
-
         conn = self._conn()
         rows = conn.execute(
             "SELECT id FROM sessions WHERE status IN ('running', 'waiting_for_tool', 'waiting_for_user')"

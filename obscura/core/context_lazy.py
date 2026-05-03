@@ -12,6 +12,7 @@ import re
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.frontmatter import parse_frontmatter
+from obscura.core.paths import resolve_all_evals_dirs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -564,8 +565,6 @@ def load_eval_for_command(cmd: CommandMetadata) -> EvalSuite | None:
                 return suite
 
     # 2. Evals directories (.obscura/evals/)
-    from obscura.core.paths import resolve_all_evals_dirs
-
     for evals_dir in resolve_all_evals_dirs():
         eval_path = evals_dir / f"{cmd.name}.eval.md"
         if eval_path.is_file():

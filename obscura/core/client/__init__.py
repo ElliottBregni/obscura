@@ -95,7 +95,10 @@ class ObscuraClient:
         user: object | None = None,
         # Prompt injection control
         inject_tier_prompt: bool = False,  # opt-in: prepend tier system prompt
-        inject_claude_context: bool = False,  # opt-in: load ~/.claude/ context
+        # Skills, instructions, and OBSCURA.md project context. On by default
+        # so every backend (Claude, Codex, Copilot, OpenAI, LocalLLM,
+        # Moonshot, MCP) sees the same skill pool — set False to suppress.
+        inject_claude_context: bool = True,
         # Host-supplied callbacks surfaced to tools via ToolContext.
         # Recognised keys: ask_user_callback, user_interact_callback,
         # permission_mode_callback, plan_approval_callback.

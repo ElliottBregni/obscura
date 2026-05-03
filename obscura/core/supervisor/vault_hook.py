@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.supervisor.types import SupervisorHookPoint
+
 if TYPE_CHECKING:
     from obscura.core.supervisor.session_hooks import SessionHookManager
 
@@ -25,8 +27,6 @@ logger = logging.getLogger(__name__)
 
 def register_vault_hooks(hooks: SessionHookManager) -> None:
     """Register vault sync hooks on a supervisor SessionHookManager."""
-    from obscura.core.supervisor.types import SupervisorHookPoint
-
     hooks.register(
         SupervisorHookPoint.PRE_BUILD_CONTEXT,
         "before",

@@ -14,21 +14,23 @@ Commands::
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import click
 
+from obscura.core.agent_loop import AgentLoop
+from obscura.core.auth import resolve_auth
 from obscura.core.kairos import (
     Kairos,
     GoalBudget,
     GoalStatus,
     KairosEventKind,
 )
+from obscura.core.kairos.types import KairosConfig
 from obscura.core.paths import resolve_obscura_home
-
-if TYPE_CHECKING:
-    from obscura.core.agent_loop import AgentLoop
-
+from obscura.core.tools import ToolRegistry
+from obscura.core.types import Backend
+from obscura.providers import CopilotBackend
 
 def _get_db_path() -> str:
     return str(resolve_obscura_home() / "kairos.db")
@@ -36,20 +38,13 @@ def _get_db_path() -> str:
 
 def _get_kairos(agent_loop: AgentLoop | None = None) -> Kairos:
     """Instantiate Kairos with the default DB path."""
-    from obscura.core.agent_loop import AgentLoop as _AgentLoop  # noqa: PLC0415
-    from obscura.core.auth import resolve_auth
-    from obscura.core.kairos.types import KairosConfig
-    from obscura.core.tools import ToolRegistry
-    from obscura.core.types import Backend
-    from obscura.providers import CopilotBackend
-
     auth = resolve_auth(Backend.COPILOT)
     backend = CopilotBackend(auth)
     registry = ToolRegistry()
     loop = (
         agent_loop
         if agent_loop is not None
-        else _AgentLoop(backend=backend, tool_registry=registry)
+        else AgentLoop(backend=backend, tool_registry=registry)
     )
 
     # Read notification recipient from settings so interventions ping iMessage

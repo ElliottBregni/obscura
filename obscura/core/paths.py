@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from obscura.agent.definitions import _BUILTIN_DIR  # pyright: ignore[reportPrivateUsage]
+
 
 def resolve_obscura_home(cwd: Path | None = None) -> Path:
     """Resolve Obscura home directory with sensible precedence."""
@@ -193,8 +195,6 @@ def resolve_all_agents_dirs(cwd: Path | None = None) -> list[Path]:
     seen: set[Path] = set()
 
     # Built-in agents (always present).
-    from obscura.agent.definitions import _BUILTIN_DIR  # pyright: ignore[reportPrivateUsage]
-
     if _BUILTIN_DIR.is_dir():
         dirs.append(_BUILTIN_DIR)
         seen.add(_BUILTIN_DIR.resolve())

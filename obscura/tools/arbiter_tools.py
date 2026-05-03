@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.arbiter.hooks import get_engine
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.tools import tool
 
@@ -35,8 +36,6 @@ if TYPE_CHECKING:
 )
 async def arbiter_status(last_n: int = 10) -> str:
     try:
-        from obscura.arbiter.hooks import get_engine
-
         engine = get_engine()
         if engine is None:
             return json.dumps(
@@ -82,8 +81,6 @@ async def arbiter_status(last_n: int = 10) -> str:
 )
 async def arbiter_appeal(target_id: str, reasoning: str) -> str:
     try:
-        from obscura.arbiter.hooks import get_engine
-
         engine = get_engine()
         if engine is None:
             return json.dumps({"ok": False, "error": "Arbiter not active."})

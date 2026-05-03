@@ -45,7 +45,9 @@ from typing_extensions import override
 import click
 import httpx
 
+from obscura.auth import profile as _profile
 from obscura.auth import secrets as _secrets
+from obscura.auth import supabase_secrets as _vault
 
 _SSO_AUTH_HOST = os.environ.get(
     "OBSCURA_SSO_AUTH_HOST", "https://auth.modernized-ai.com",
@@ -948,8 +950,6 @@ def secrets_strict_env(tail: int, clear: bool) -> None:
 
 def _vault_client() -> Any:
     """Return the Supabase vault client or raise a clean Click error."""
-    from obscura.auth import supabase_secrets as _vault
-
     client = _vault.get_client()
     if client is None:
         raise click.ClickException(
@@ -1039,8 +1039,6 @@ def secrets_cloud_passphrase_set() -> None:
 @secrets_cloud_passphrase_group.command("clear")
 def secrets_cloud_passphrase_clear() -> None:
     """Forget the cached passphrase key on this machine."""
-    from obscura.auth import supabase_secrets as _vault
-
     client = _vault.get_client()
     if client is not None:
         client.clear_passphrase()
@@ -1145,8 +1143,6 @@ def secrets_cloud_push(
     ``secrets set`` locally, then ``cloud push`` to sync. ``--value``
     overrides. Always confirms interactively unless ``--yes`` is passed.
     """
-    from obscura.auth import supabase_secrets as _vault
-
     client = _vault_client()
     normalized = name.strip().upper()
 
@@ -1289,8 +1285,6 @@ def secrets_cloud_pull_all() -> None:
 
 
 def _profile_client() -> Any:
-    from obscura.auth import profile as _profile
-
     client = _profile.get_client()
     if client is None:
         raise click.ClickException(
@@ -1455,8 +1449,6 @@ def profile_device_group() -> None:
 @profile_device_group.command("list")
 def profile_device_list() -> None:
     """List every machine registered on the profile."""
-    from obscura.auth import profile as _profile
-
     client = _profile_client()
     try:
         profile = client.load()
@@ -1480,8 +1472,6 @@ def profile_device_list() -> None:
 @profile_device_group.command("current")
 def profile_device_current() -> None:
     """Print the current machine's ID + its entry on the profile (if any)."""
-    from obscura.auth import profile as _profile
-
     machine_id = _profile.get_or_create_machine_id()
     click.echo(f"machine_id: {machine_id}")
 

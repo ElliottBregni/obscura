@@ -10,13 +10,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping, cast
 
+from obscura.arbiter.checks import check_test_results
 from obscura.arbiter.engine import ArbiterEngine
+from obscura.arbiter.test_runner import run_related_tests
 from obscura.arbiter.types import (
     ArbiterCheckKind,
     ArbiterConfig,
     ArbiterVerdict,
 )
 from obscura.core.supervisor.types import SupervisorHookPoint
+from obscura.tools.system.file_state import get_recently_modified_files
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +82,6 @@ async def _post_turn_handler(context: dict[str, Any]) -> dict[str, Any]:
     # Enrich context with recently modified files for quality + relevance checks.
     files_touched: list[str] = []
     try:
-        from obscura.tools.system.file_state import get_recently_modified_files
-
         files_touched = get_recently_modified_files(limit=20)
     except Exception:
         pass
@@ -149,10 +150,6 @@ async def _task_complete_handler(context: dict[str, Any]) -> dict[str, Any] | bo
 async def _run_tests_on_complete() -> str:
     """Run related tests on task completion. Returns feedback string if failures."""
     try:
-        from obscura.arbiter.checks import check_test_results
-        from obscura.arbiter.test_runner import run_related_tests
-        from obscura.tools.system.file_state import get_recently_modified_files
-
         files = get_recently_modified_files(limit=20)
         if not files:
             return ""

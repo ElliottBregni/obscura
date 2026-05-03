@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from obscura.auth.cli_user import current_cli_user
+from obscura.vector_memory.vector_memory import VectorMemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +243,6 @@ class UserProfile:
     def _sync_fact_to_vector(self, fact: str, *, memory_type: str = "fact") -> None:
         """Sync a single fact string to the vector store."""
         try:
-            from obscura.vector_memory.vector_memory import VectorMemoryStore
-
             store = VectorMemoryStore(user=cast(Any, current_cli_user()))
             key = f"profile:learned:{_slugify(fact[:40])}:{int(time.time()) % 100000}"
             store.set(key, fact, namespace=_VECTOR_NAMESPACE, memory_type=memory_type)

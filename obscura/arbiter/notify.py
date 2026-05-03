@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from obscura.core.supervisor.types import SupervisorHookPoint
+
 logger = logging.getLogger(__name__)
 
 # Populated by the supervisor at session start.
@@ -27,8 +29,6 @@ async def fire_task_complete(task: dict[str, Any]) -> dict[str, Any] | None:
     if _hooks is None:
         return {"task": task}
     try:
-        from obscura.core.supervisor.types import SupervisorHookPoint
-
         ctx: dict[str, Any] | None = {"task": task}
         if hasattr(_hooks, "fire_before"):
             ctx = await _hooks.fire_before(SupervisorHookPoint.POST_TASK_COMPLETE, ctx)
@@ -49,8 +49,6 @@ async def fire_goal_transition(
     if _hooks is None:
         return {"goal": goal}
     try:
-        from obscura.core.supervisor.types import SupervisorHookPoint
-
         ctx: dict[str, Any] | None = {
             "goal": goal,
             "linked_task_statuses": linked_task_statuses or [],
