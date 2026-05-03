@@ -21,6 +21,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal
 
+from obscura.auth.secrets import safe_subprocess_env
+
 _TaskStatus = Literal["running", "completed", "failed", "stopped"]
 
 
@@ -61,8 +63,6 @@ class BackgroundTaskManager:
         task_id = hashlib.sha256(
             f"{command}:{cwd}:{time.time()}".encode(),
         ).hexdigest()[:12]
-
-        from obscura.auth.secrets import safe_subprocess_env
 
         proc = await asyncio.create_subprocess_shell(
             command,

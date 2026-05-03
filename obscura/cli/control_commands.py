@@ -15,7 +15,18 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
-# Lazy import render symbols inside functions to avoid circular imports
+from obscura.cli.render import (
+    ACCENT,
+    ACCENT_DIM,
+    CODE_THEME,
+    ERROR_COLOR,
+    OK_COLOR,
+    TOOL_COLOR,
+    WARN_COLOR,
+    console,
+    print_error,
+    print_info,
+)
 from obscura.core.paths import resolve_obscura_home
 
 if TYPE_CHECKING:
@@ -240,16 +251,6 @@ def _probe_supervisor_sync(report: HeartbeatReport, session_id: str) -> None:
 
 def _render_heartbeat_rich(report: HeartbeatReport) -> None:
     """Render a HeartbeatReport as a Rich panel with a table."""
-    from obscura.cli.render import (
-        ACCENT,
-        ACCENT_DIM,
-        ERROR_COLOR,
-        OK_COLOR,
-        TOOL_COLOR,
-        WARN_COLOR,
-        console,
-    )
-
     table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
     table.add_column("key", style="bold", width=18)
     table.add_column("value")
@@ -339,8 +340,6 @@ async def cmd_heartbeat(args: str, ctx: REPLContext) -> str | None:
     report = await _collect_heartbeat(ctx)
 
     if args.strip() == "--json":
-        from obscura.cli.render import CODE_THEME, console
-
         console.print(
             Syntax(report.to_json(), "json", theme=CODE_THEME, word_wrap=True),
         )
@@ -357,8 +356,6 @@ async def cmd_status(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
     """List policy versions from supervisor.db."""
-    from obscura.cli.render import ACCENT, console, print_error, print_info
-
     db_path = resolve_obscura_home() / "supervisor.db"
     if not db_path.exists():
         print_info("No supervisor.db found.")
@@ -404,18 +401,6 @@ async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_replay(args: str, ctx: REPLContext) -> str | None:
     """Replay supervisor run events for a given run_id prefix."""
-    from obscura.cli.render import (
-        ACCENT,
-        ACCENT_DIM,
-        ERROR_COLOR,
-        OK_COLOR,
-        TOOL_COLOR,
-        WARN_COLOR,
-        console,
-        print_error,
-        print_info,
-    )
-
     run_prefix = args.strip()
     if not run_prefix:
         print_error("Usage: /replay <run_id_prefix>")

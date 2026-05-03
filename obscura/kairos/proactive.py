@@ -16,6 +16,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from obscura.core.deep_log import dlog
+from obscura.kairos.daily_log import DailyLog
+
 logger = logging.getLogger(__name__)
 
 # Maximum time a proactive action can block user input.
@@ -112,8 +115,6 @@ class ProactiveMode:
 
             # Log tick to daily log.
             try:
-                from obscura.kairos.daily_log import DailyLog
-
                 DailyLog().append(f"tick #{self._tick_count}", source="proactive")
             except Exception:
                 pass
@@ -129,8 +130,6 @@ class ProactiveMode:
 
             # Log to deep log.
             try:
-                from obscura.core.deep_log import dlog
-
                 dlog.event("proactive_tick", tick=self._tick_count)
             except Exception:
                 pass

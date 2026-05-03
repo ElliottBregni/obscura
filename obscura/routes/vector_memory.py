@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit
+from obscura.vector_memory import MetadataFilter, VectorMemoryStore
+from obscura.vector_memory.vector_memory_router import MemoryRouter, MemoryTypeQuery
 
 from obscura.auth.models import AuthenticatedUser
 

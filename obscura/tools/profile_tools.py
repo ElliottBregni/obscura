@@ -31,6 +31,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
+from obscura.kairos.user_profile import UserProfile
+from obscura.kairos.vault_sync import notify_profile_changed
+from obscura.profile.builder import ProfileBuilder
+from obscura.profile.migrate import migrate_flat_profile
+from obscura.profile.models import ProfileCategory, ProfileFact
+from obscura.profile.store import ProfileStore
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -39,23 +45,17 @@ if TYPE_CHECKING:
 def _notify_vault_profile() -> None:
     """Best-effort vault sync on profile mutation."""
     try:
-        from obscura.kairos.vault_sync import notify_profile_changed
-
         notify_profile_changed()
     except Exception:
         pass
 
 
 def _profile() -> Any:
-    from obscura.kairos.user_profile import UserProfile
-
     return UserProfile()
 
 
 def _profile_store() -> Any:
     """Get the vector-backed ProfileStore."""
-    from obscura.profile.store import ProfileStore
-
     try:
         return ProfileStore.for_user(current_cli_user())
     except Exception:
@@ -63,8 +63,6 @@ def _profile_store() -> Any:
 
 
 def _profile_builder() -> Any:
-    from obscura.profile.builder import ProfileBuilder
-
     return ProfileBuilder()
 
 
@@ -172,8 +170,6 @@ def profile_update(fact: str, memory_type: str = "fact") -> str:
     store = _profile_store()
     if store is not None:
         try:
-            from obscura.profile.models import ProfileCategory, ProfileFact
-
             # Map legacy memory_type to new category.
             _type_to_category = {
                 "fact": ProfileCategory.CAREER,
@@ -243,8 +239,6 @@ def profile_sync() -> str:
 
     # Use new migration path.
     try:
-        from obscura.profile.migrate import migrate_flat_profile
-
         # Try project-level first, then home.
         profile_path = Path("user_profile.md")
         if not profile_path.exists():
@@ -291,8 +285,6 @@ def profile_set(key: str, value: str, category: str) -> str:
     store = _profile_store()
     if store is None:
         return _json_error("Vector-backed profile not available (no user context)")
-
-    from obscura.profile.models import ProfileCategory, ProfileFact
 
     try:
         cat = ProfileCategory(category)

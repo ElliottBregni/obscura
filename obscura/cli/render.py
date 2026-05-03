@@ -20,6 +20,9 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
+from obscura.cli.app.diff_engine import DiffEngine
+from obscura.cli.tool_summaries import summarize_tool_call
+from obscura.core.feature_flags import FLAGS, BannerTheme
 from obscura.core.types import AgentEvent, AgentEventKind
 
 # ---------------------------------------------------------------------------
@@ -577,8 +580,6 @@ class StreamRenderer:
     # -- tool display --------------------------------------------------------
 
     def _show_tool_call(self, event: AgentEvent) -> None:
-        from obscura.cli.tool_summaries import summarize_tool_call
-
         name = event.tool_name
         summary = summarize_tool_call(name, event.tool_input)
 
@@ -689,8 +690,6 @@ class LabeledStreamRenderer(StreamRenderer):
 
 def render_event(event: AgentEvent) -> None:
     """Simple single-event renderer (no Markdown accumulation)."""
-    from obscura.cli.tool_summaries import summarize_tool_call
-
     match event.kind:
         case AgentEventKind.TEXT_DELTA:
             console.print(_sanitize_text(event.text), end="")
@@ -767,7 +766,6 @@ def render_diff_summary(changes: list[Any]) -> None:
     if not changes:
         print_info("No file changes in this session.")
         return
-    from obscura.cli.app.diff_engine import DiffEngine
 
     engine = DiffEngine()
 

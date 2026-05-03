@@ -8,11 +8,18 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import get_current_user
+from obscura.core.auth import AuthConfig
 from obscura.core.types import Backend
+from obscura.providers.claude import ClaudeBackend
+from obscura.providers.codex import CodexBackend
+from obscura.providers.copilot import CopilotBackend
+from obscura.providers.localllm import LocalLLMBackend
 from obscura.providers.model_cache import (
     invalidate_cache,
     list_provider_models,
 )
+from obscura.providers.moonshot import MoonshotBackend
+from obscura.providers.openai import OpenAIBackend
 
 from obscura.auth.models import AuthenticatedUser
 
@@ -24,33 +31,19 @@ router = APIRouter(prefix="/api/v1", tags=["models"])
 
 def _get_backend_instance(backend: Backend) -> object:
     """Create a lightweight backend instance for model listing."""
-    from obscura.core.auth import AuthConfig
-
     auth = AuthConfig()
 
     if backend == Backend.CLAUDE:
-        from obscura.providers.claude import ClaudeBackend
-
         return ClaudeBackend(auth=auth)
     if backend == Backend.OPENAI:
-        from obscura.providers.openai import OpenAIBackend
-
         return OpenAIBackend(auth=auth)
     if backend == Backend.COPILOT:
-        from obscura.providers.copilot import CopilotBackend
-
         return CopilotBackend(auth=auth)
     if backend == Backend.LOCALLLM:
-        from obscura.providers.localllm import LocalLLMBackend
-
         return LocalLLMBackend(auth=auth)
     if backend == Backend.CODEX:
-        from obscura.providers.codex import CodexBackend
-
         return CodexBackend(auth=auth)
     if backend == Backend.MOONSHOT:
-        from obscura.providers.moonshot import MoonshotBackend
-
         return MoonshotBackend(auth=auth)
     msg = f"Unknown backend: {backend}"
     raise ValueError(msg)

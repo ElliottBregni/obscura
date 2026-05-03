@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import require_role
 from obscura.core.event_store import SQLiteEventStore
+from obscura.core.paths import resolve_obscura_home
 from obscura.core.types import Backend, SessionRef
 from obscura.deps import ClientFactory, audit, get_oauth_github_token
 from obscura.routes.session_ingest import (
@@ -32,8 +33,6 @@ def _get_event_store(request: Request) -> SQLiteEventStore:
     """Get the shared event store from app state."""
     store: SQLiteEventStore | None = getattr(request.app.state, "event_store", None)
     if store is None:
-        from obscura.core.paths import resolve_obscura_home
-
         store = SQLiteEventStore(resolve_obscura_home() / "events.db")
         request.app.state.event_store = store
     return store

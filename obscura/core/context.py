@@ -25,9 +25,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.context_lazy import LazySkillLoader, SkillMetadata
 from obscura.core.frontmatter import parse_frontmatter
+from obscura.core.types import ContentBlock, Message, Role
 
 if TYPE_CHECKING:
-    from obscura.core.types import Backend, Message
+    from obscura.core.types import Backend
 
 # Agent target mapping — must match sync.py AGENT_TARGET_MAP
 _DEFAULT_TARGET_MAP: dict[str, str] = {

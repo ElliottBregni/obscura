@@ -24,6 +24,7 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from obscura.auth import secrets as _secrets
+from obscura.core.paths import resolve_obscura_settings
 
 _log = logging.getLogger(__name__)
 
@@ -71,8 +72,6 @@ def _read_settings_runtime(cwd: Path | None = None) -> dict[str, Any]:
     ``runtime`` key. Unknown keys are dropped with a debug log so a typo
     doesn't silently change behavior.
     """
-    from obscura.core.paths import resolve_obscura_settings
-
     path = resolve_obscura_settings(cwd)
     if not path.is_file():
         return {}

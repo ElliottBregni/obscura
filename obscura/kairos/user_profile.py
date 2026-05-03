@@ -224,8 +224,6 @@ class UserProfile:
     def semantic_recall(self, query: str, top_k: int = 5) -> list[str]:
         """Semantically search the profile vector store."""
         try:
-            from obscura.vector_memory.vector_memory import VectorMemoryStore
-
             store = VectorMemoryStore(user=cast(Any, current_cli_user()))
             results = store.search_reranked(
                 query=query,

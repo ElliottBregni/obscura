@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
+from obscura.core.paths import resolve_obscura_home
 
 from obscura.auth.models import AuthenticatedUser
 
@@ -265,8 +266,6 @@ def sync_and_ingest_system_sessions(
 
     # Use provided store or create one at the default location
     if store is None:
-        from obscura.core.paths import resolve_obscura_home
-
         store = SQLiteEventStore(resolve_obscura_home() / "events.db")
 
     entries = _load_index_entries(agent=agent)

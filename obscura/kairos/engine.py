@@ -16,11 +16,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.arbiter.watchdog import ArbiterWatchdog
 from obscura.auth.cli_user import current_cli_user
+from obscura.core.task_queue import TaskQueue
 from obscura.kairos.daily_log import DailyLog
+from obscura.kairos.dream import DreamConsolidator
+from obscura.kairos.goals import GoalBoard
 from obscura.kairos.proactive import ProactiveMode
 from obscura.kairos.state import KairosState
+from obscura.kairos.undercover import UndercoverMode
+from obscura.kairos.user_profile import UserProfile
 from obscura.kairos.vault_sync import VaultSync
+from obscura.profile.builder import ProfileBuilder
+from obscura.profile.store import ProfileStore
 
 logger = logging.getLogger(__name__)
 
@@ -261,8 +269,6 @@ class KairosEngine:
             # --- Watchdog sweep (every 5th tick) ---
             if tick_count % 5 == 0:
                 try:
-                    from obscura.arbiter.watchdog import ArbiterWatchdog
-
                     wd = ArbiterWatchdog()
                     actions = wd.sweep()
                     if actions:
@@ -274,8 +280,6 @@ class KairosEngine:
 
             # --- Try structured task claim first ---
             try:
-                from obscura.core.task_queue import TaskQueue
-
                 q = TaskQueue()
                 # Reclaim any stale claims from crashed workers.
                 q.reclaim_stale()
@@ -286,8 +290,6 @@ class KairosEngine:
                         goal_ctx = f' goal="{task["goal_id"]}"'
                         # Stamp last_worked on the parent goal.
                         try:
-                            from obscura.kairos.goals import GoalBoard
-
                             GoalBoard().update(
                                 task["goal_id"],
                                 last_worked=datetime.now(UTC).isoformat(),
@@ -326,8 +328,6 @@ class KairosEngine:
             # --- Fallback: goal-level hint (no specific task) ---
             goal_hint = ""
             try:
-                from obscura.kairos.goals import GoalBoard
-
                 top = GoalBoard().active_goals()
                 top = [g for g in top if not g.is_blocked()][:1]
                 if top:
@@ -354,8 +354,6 @@ class KairosEngine:
         """Check if dream consolidation should run."""
         if not self._dream_enabled:
             return
-        from obscura.kairos.dream import DreamConsolidator
-
         consolidator = DreamConsolidator(
             min_hours=self._dream_min_hours,
             min_sessions=self._dream_min_sessions,
@@ -390,9 +388,6 @@ class KairosEngine:
         # Inject user profile summary (prefer vector-backed, fall back to markdown).
         profile_injected = False
         try:
-            from obscura.profile.builder import ProfileBuilder
-            from obscura.profile.store import ProfileStore
-
             profile_store = ProfileStore.for_user(current_cli_user())
             builder = ProfileBuilder()
             profile_summary = builder.build_summary(profile_store, max_tokens=400)
@@ -406,8 +401,6 @@ class KairosEngine:
 
         if not profile_injected:
             try:
-                from obscura.kairos.user_profile import UserProfile
-
                 profile_summary = UserProfile().active_summary(max_lines=15)
                 if profile_summary:
                     parts.append("")
@@ -418,8 +411,6 @@ class KairosEngine:
 
         # Inject active goal summary.
         try:
-            from obscura.kairos.goals import GoalBoard
-
             summary = GoalBoard().active_summary(max_lines=8)
             if summary:
                 parts.append("")
@@ -459,8 +450,6 @@ class KairosEngine:
 
         # Inject undercover instructions if active.
         try:
-            from obscura.kairos.undercover import UndercoverMode
-
             uc_prompt = UndercoverMode().get_system_prompt_addition()
             if uc_prompt:
                 parts.append("")

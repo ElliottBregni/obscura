@@ -727,8 +727,6 @@ def create_prompt_session(
             model_text = ""
             if data.get("model_enabled"):
                 try:
-                    from obscura.cli.render import get_model_space_delta
-
                     model_text = get_model_space_delta()
                 except Exception:
                     model_text = ""

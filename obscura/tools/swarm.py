@@ -28,7 +28,20 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from obscura.agent.agents import AgentMessage, AgentStatus
+from obscura.agent.definitions import (
+    definition_to_config_dict,
+    resolve_all_definitions,
+)
+from obscura.core.config_io import load_merged_agents
+from obscura.core.event_store import SessionStatus
+from obscura.core.paths import resolve_all_obscura_homes
 from obscura.core.types import ToolSpec
+from obscura.manifest.models import (
+    AgentManifest,
+    CapabilityConfig,
+    PluginDepsConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +66,6 @@ def load_agent_configs(include_disabled: bool = False) -> dict[str, dict[str, An
     Returns a mapping of agent name -> raw config dict.
     Agents with ``enabled: false`` are excluded unless *include_disabled* is True.
     """
-    from obscura.core.config_io import load_merged_agents  # noqa: PLC0415
-    from obscura.core.paths import resolve_all_obscura_homes  # noqa: PLC0415
-
     local_home, global_home = resolve_all_obscura_homes()
 
     # Global agents first (authoritative)
@@ -210,12 +220,6 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
                 }
             )
 
-        from obscura.manifest.models import (
-            AgentManifest,
-            CapabilityConfig,
-            PluginDepsConfig,
-        )
-
         runtime = ctx.runtime
         if runtime is None:
             return json.dumps({"ok": False, "error": "no_runtime"})
@@ -238,11 +242,6 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
         cfg = None
         _definition_match = False
         try:
-            from obscura.agent.definitions import (
-                definition_to_config_dict,
-                resolve_all_definitions,
-            )
-
             defs = resolve_all_definitions()
             if agent_type in defs:
                 defn = defs[agent_type]
@@ -343,8 +342,6 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
 
             if ctx.event_store is not None:
                 try:
-                    from obscura.core.event_store import SessionStatus
-
                     await ctx.event_store.update_status(
                         agent.id, SessionStatus.COMPLETED
                     )
@@ -364,8 +361,6 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
         except Exception as exc:
             if ctx.event_store is not None and agent is not None:
                 try:
-                    from obscura.core.event_store import SessionStatus
-
                     await ctx.event_store.update_status(agent.id, SessionStatus.FAILED)
                 except Exception:
                     pass

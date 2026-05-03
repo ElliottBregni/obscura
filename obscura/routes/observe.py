@@ -14,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from obscura.approvals import list_tool_approval_requests
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
+from obscura.memory import MemoryStore
 
 from obscura.auth.models import AuthenticatedUser
 
@@ -100,8 +101,6 @@ def _collect_states(
     user: AuthenticatedUser,
     namespace: str,
 ) -> list[_ObservedAgentState]:
-    from obscura.memory import MemoryStore
-
     store = MemoryStore.for_user(user)
     states: list[_ObservedAgentState] = []
     for key in store.list_keys(namespace=namespace):

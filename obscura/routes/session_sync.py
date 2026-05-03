@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from obscura.auth.models import AuthenticatedUser
+from obscura.vector_memory import VectorMemoryStore
 
 
 def _safe_json(value: dict[str, Any]) -> str:
@@ -26,8 +27,6 @@ def sync_session_lifecycle(
     details: dict[str, Any] | None = None,
 ) -> None:
     """Mirror a session lifecycle event into vector memory."""
-    from obscura.vector_memory import VectorMemoryStore
-
     ts = datetime.now(UTC).isoformat()
     metadata: dict[str, Any] = {
         "session_id": session_id,
@@ -62,8 +61,6 @@ def sync_session_turn(
     mode: str,
 ) -> None:
     """Mirror a single session turn (prompt + response) into vector memory."""
-    from obscura.vector_memory import VectorMemoryStore
-
     ts = datetime.now(UTC)
     ts_iso = ts.isoformat()
     key = f"{session_id}:turn:{int(ts.timestamp() * 1000)}"
