@@ -20,7 +20,7 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class LifecycleEvent:
     tool: str = ""
     status: str = ""
     duration_ms: int = 0
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: cast(dict[str, Any], {}))
 
 
 __all__ = ["LifecycleEvent"]

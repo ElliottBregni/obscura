@@ -14,7 +14,7 @@ For dicts (config): deep merge, child wins on conflicts.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.compiler.compiled import (
     CompiledAgent,
@@ -93,7 +93,7 @@ def merge_template_chain(chain: list[TemplateSpec]) -> TemplateSpec:
     )
 
     return TemplateSpec(
-        api_version=child.api_version,
+        apiVersion=child.api_version,
         kind="Template",
         metadata=SpecMetadata(
             name=child.metadata.name,
@@ -118,12 +118,12 @@ def apply_agent_overrides(
     ov_config: Any = overrides.get("config")
 
     new_plugins: list[str] = (
-        _merge_str_lists(spec.plugins, list(ov_plugins))
+        _merge_str_lists(spec.plugins, list(cast(list[Any], ov_plugins)))
         if isinstance(ov_plugins, list)
         else list(spec.plugins)
     )
     new_config: dict[str, Any] = (
-        _deep_merge(dict(spec.config), dict(ov_config))
+        _deep_merge(dict(spec.config), dict(cast(dict[str, Any], ov_config)))
         if isinstance(ov_config, dict)
         else dict(spec.config)
     )
@@ -145,7 +145,7 @@ def apply_agent_overrides(
     )
 
     return TemplateSpec(
-        api_version=template.api_version,
+        apiVersion=template.api_version,
         kind="Template",
         metadata=SpecMetadata(
             name=agent_ref.name,
@@ -328,10 +328,13 @@ def _merge_instructions(base: str, child: str) -> str:
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Deep-merge two dicts. Override wins on scalar conflicts."""
-    result = dict(base)
+    result: dict[str, Any] = dict(base)
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
+        existing = result.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(
+                cast(dict[str, Any], existing), cast(dict[str, Any], value)
+            )
         else:
             result[key] = value
     return result

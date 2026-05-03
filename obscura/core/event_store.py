@@ -24,7 +24,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from obscura.core.types import AgentEvent, AgentEventKind
 
@@ -227,9 +227,9 @@ def _row_to_session(row: sqlite3.Row) -> SessionRecord:
     meta: dict[str, Any] = {}
     if raw_meta:
         try:
-            parsed = json.loads(raw_meta)
+            parsed: Any = json.loads(raw_meta)
             if isinstance(parsed, dict):
-                meta = parsed
+                meta = cast(dict[str, Any], parsed)
         except (json.JSONDecodeError, TypeError):
             pass
     return SessionRecord(

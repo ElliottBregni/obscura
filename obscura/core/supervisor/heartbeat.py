@@ -19,7 +19,7 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
@@ -293,9 +293,9 @@ def get_heartbeats_for_run(
         meta: dict[str, Any] = {}
         if meta_raw:
             try:
-                parsed = json.loads(meta_raw)
+                parsed: Any = json.loads(meta_raw)
                 if isinstance(parsed, dict):
-                    meta = parsed
+                    meta = cast(dict[str, Any], parsed)
             except (json.JSONDecodeError, TypeError):
                 pass
         result.append(

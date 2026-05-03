@@ -156,10 +156,6 @@ def _empty_dict() -> dict[str, Any]:
     return {}
 
 
-def _empty_list() -> list[str]:
-    return []
-
-
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -242,10 +238,6 @@ class KairosConfig:
 # ---------------------------------------------------------------------------
 # Core domain types
 # ---------------------------------------------------------------------------
-
-
-def _empty_str_list() -> list[str]:
-    return []
 
 
 @dataclass(frozen=True)

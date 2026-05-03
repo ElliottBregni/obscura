@@ -193,7 +193,7 @@ def resolve_all_agents_dirs(cwd: Path | None = None) -> list[Path]:
     seen: set[Path] = set()
 
     # Built-in agents (always present).
-    from obscura.agent.definitions import _BUILTIN_DIR
+    from obscura.agent.definitions import _BUILTIN_DIR  # pyright: ignore[reportPrivateUsage]
 
     if _BUILTIN_DIR.is_dir():
         dirs.append(_BUILTIN_DIR)

@@ -23,7 +23,7 @@ import shutil
 import stat
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +325,7 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
         "warnings": [],
     }
 
-    from obscura.plugins.loader import _apply_plugin_filters
+    from obscura.plugins.loader import _apply_plugin_filters  # pyright: ignore[reportPrivateUsage]
 
     all_specs = _apply_plugin_filters(list(loader.discover_builtins()))
     for spec in all_specs:
@@ -377,8 +377,9 @@ def ensure_workspace(cwd: Path | None = None) -> Path:
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
     """Recursively merge *override* into *base* (mutates *base*)."""
     for key, value in override.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            _deep_merge(base[key], value)
+        existing = base.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _deep_merge(cast(dict[str, Any], existing), cast(dict[str, Any], value))
         else:
             base[key] = value
 

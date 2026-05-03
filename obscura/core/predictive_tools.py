@@ -27,6 +27,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -140,7 +141,10 @@ class ToolPrediction:
 
 # Patterns: model text → likely tool call.
 # Each entry: (compiled_regex, tool_name, arg_extractor_fn)
-_PREDICTION_PATTERNS: list[tuple[re.Pattern[str], str, Any]] = []
+_PatternEntry = tuple[
+    re.Pattern[str], str, Callable[[re.Match[str]], dict[str, Any]]
+]
+_PREDICTION_PATTERNS: list[_PatternEntry] = []
 
 
 def _init_patterns() -> None:

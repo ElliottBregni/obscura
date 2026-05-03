@@ -22,7 +22,7 @@ import json
 import logging
 import os
 import subprocess
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -109,14 +109,17 @@ def check_python_pyright(
         )
         if proc.returncode != 0 and proc.stdout.strip():
             try:
-                data = json.loads(proc.stdout)
-                diagnostics = data.get("generalDiagnostics", [])
+                data = cast(dict[str, Any], json.loads(proc.stdout))
+                diagnostics = cast(
+                    list[dict[str, Any]], data.get("generalDiagnostics", [])
+                )
                 errors = [d for d in diagnostics if d.get("severity") == "error"]
                 if errors:
-                    msgs = []
+                    msgs: list[str] = []
                     for e in errors[:5]:  # cap at 5
-                        r = e.get("range", {}).get("start", {})
-                        line = r.get("line", "?")
+                        rng = cast(dict[str, Any], e.get("range", {}))
+                        start = cast(dict[str, Any], rng.get("start", {}))
+                        line = start.get("line", "?")
                         msgs.append(f"  line {line}: {e.get('message', '?')}")
                     return "\n⚠ pyright type errors:\n" + "\n".join(msgs)
             except json.JSONDecodeError:

@@ -229,7 +229,7 @@ def synthesize_implicit_workspace(
     )
 
     return WorkspaceSpec(
-        api_version="obscura/v1",
+        apiVersion="obscura/v1",
         kind="Workspace",
         metadata=SpecMetadata(
             name=name,

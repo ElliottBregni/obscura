@@ -1061,12 +1061,15 @@ class AgentLoop:
             # ``CORRECTION_INJECTED`` event so the REPL can surface that a
             # course-correction was applied.
             if self._pending_correction:
-                correction = self._pending_correction
+                correction: str = self._pending_correction
                 self._pending_correction = None
-                if current_prompt:
-                    current_prompt = correction + "\n\n" + current_prompt
-                else:
-                    current_prompt = correction
+                # Pyright loses str inference here through the async generator
+                # boundary; see comment on the _call_stream call below.
+                current_prompt = (  # pyright: ignore[reportUnknownVariableType]
+                    correction + "\n\n" + current_prompt
+                    if current_prompt
+                    else correction
+                )
                 correction_event = AgentEvent(
                     kind=AgentEventKind.CORRECTION_INJECTED,
                     turn=state.turn,
@@ -1121,7 +1124,16 @@ class AgentLoop:
 
             try:
                 async with asyncio.timeout(self._turn_timeout_s):
-                    async for chunk in self._call_stream(current_prompt, kwargs):
+                    # NB: pyright reports current_prompt and kwargs as
+                    # ``X | Unknown`` here — pyright loses inference across
+                    # the async-generator iteration boundary in this loop.
+                    # The runtime types are guaranteed by the explicit
+                    # annotations above (``current_prompt: str``,
+                    # ``kwargs: dict[str, Any]``).
+                    async for chunk in self._call_stream(
+                        current_prompt,  # pyright: ignore[reportUnknownArgumentType]
+                        kwargs,  # pyright: ignore[reportUnknownArgumentType]
+                    ):
                         # Fix #4: suppress text only inside tool accumulation.
                         # Text between TOOL_USE_START and TOOL_USE_END is dropped
                         # (hallucinated tool output).  Text after TOOL_USE_END but
@@ -1383,7 +1395,10 @@ class AgentLoop:
                         self._is_context_too_long(exc)
                         and not state.has_attempted_reactive_compact
                     ):
-                        result = await self._reactive_compact(kwargs, state)
+                        result = await self._reactive_compact(
+                            kwargs,  # pyright: ignore[reportUnknownArgumentType]
+                            state,
+                        )
                         if result is not None:
                             kwargs, state = result
                             # Emit compaction event

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import tomllib
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
@@ -87,8 +87,10 @@ def load_spec_file(path: Path) -> AnySpec:
             msg,
             source=str(path),
         )
+    raw_dict = cast(dict[str, Any], raw)
 
-    kind: str | None = raw.get("kind")
+    kind_val = raw_dict.get("kind")
+    kind: str | None = kind_val if isinstance(kind_val, str) else None
     if kind is None:
         msg = f"Missing 'kind' field in {path}"
         raise SpecLoadError(msg, source=str(path))
@@ -104,7 +106,7 @@ def load_spec_file(path: Path) -> AnySpec:
         )
 
     try:
-        return model_cls.model_validate(raw)
+        return model_cls.model_validate(raw_dict)
     except ValidationError as exc:
         msg = f"Validation error in {path}: {exc}"
         raise SpecLoadError(

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_GuardFn = Callable[[Mapping[str, Any]], tuple[bool, str]]
 
-def register_pretool_guard(hooks_manager: object, guard_func: Callable) -> None:
+
+def register_pretool_guard(hooks_manager: object, guard_func: _GuardFn) -> None:
     """Register a PRE_TOOL_USE guard handler.
 
     The guard_func should accept a single `context` mapping and return
@@ -20,10 +23,10 @@ def register_pretool_guard(hooks_manager: object, guard_func: Callable) -> None:
     The registered handler will call guard_func and propagate its result.
     """
 
-    def _handler(*args, **kwargs):
+    def _handler(*args: Any, **kwargs: Any) -> tuple[bool, str]:
         # Expect context to be passed either as first positional arg or as
         # keyword 'context'. Be forgiving.
-        context = None
+        context: Any = None
         if args:
             context = args[0]
         context = context or kwargs.get("context") or {}
@@ -35,26 +38,29 @@ def register_pretool_guard(hooks_manager: object, guard_func: Callable) -> None:
             # Fail safe: veto on unexpected errors
             return False, "vetoed: guard error"
 
+    hm: Any = hooks_manager
     # Try bind_handler API
-    if hasattr(hooks_manager, "bind_handler"):
+    if hasattr(hm, "bind_handler"):
         try:
-            hooks_manager.bind_handler("PRE_TOOL_USE", _handler, when="before")
+            hm.bind_handler("PRE_TOOL_USE", _handler, when="before")
             return
         except Exception:
             pass
 
     # Try register/bind pair
-    if hasattr(hooks_manager, "register") and hasattr(hooks_manager, "bind"):
+    if hasattr(hm, "register") and hasattr(hm, "bind"):
         try:
-            hooks_manager.register("PRE_TOOL_USE")
-            hooks_manager.bind("PRE_TOOL_USE", _handler)
+            hm.register("PRE_TOOL_USE")
+            hm.bind("PRE_TOOL_USE", _handler)
             return
         except Exception:
             pass
 
     # Attach to events dict
-    if hasattr(hooks_manager, "events") and isinstance(hooks_manager.events, dict):
-        hooks_manager.events.setdefault("PRE_TOOL_USE", []).append(_handler)
+    if hasattr(hm, "events") and isinstance(hm.events, dict):
+        hm.events.setdefault("PRE_TOOL_USE", []).append(_handler)
         return
 
-    raise RuntimeError("Unable to register PRE_TOOL_USE handler on provided hooks_manager")
+    raise RuntimeError(
+        "Unable to register PRE_TOOL_USE handler on provided hooks_manager"
+    )

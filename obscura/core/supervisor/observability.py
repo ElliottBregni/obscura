@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, field
 
 # NOTE: datetime import removed  unused in this module.
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.supervisor.types import (
     SupervisorEvent,
@@ -58,7 +58,9 @@ class RunMetrics:
 
     # Drift
     drift_detected: bool = False
-    drift_details: list[dict[str, str]] = field(default_factory=list)
+    drift_details: list[dict[str, str]] = field(
+        default_factory=lambda: cast(list[dict[str, str]], [])
+    )
 
     @property
     def duration_ms(self) -> float:

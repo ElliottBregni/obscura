@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Mapping, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 
-def pre_tool_use_guard(context: Mapping) -> Tuple[bool, str]:
+def pre_tool_use_guard(context: Mapping[str, Any]) -> tuple[bool, str]:
     """Guard that decides whether a tool call from a given context should be
     allowed.
 
@@ -14,20 +15,26 @@ def pre_tool_use_guard(context: Mapping) -> Tuple[bool, str]:
     Returns (allowed, reason).
     """
     initiator = str(context.get("initiator", "user")).lower()
-    session = context.get("session") or {}
+    session: Any = context.get("session") or {}
 
     # Resolve kairos enabled flag from common shapes
     kairos_enabled = False
     try:
-        settings = session.get("settings") if isinstance(session, Mapping) else {}
+        settings: Any = session.get("settings") if isinstance(session, Mapping) else {}
         if not settings:
             settings = session.get("config") if isinstance(session, Mapping) else {}
-        kairos_enabled = bool(settings.get("kairos_enabled") or settings.get("kairos", {}).get("enabled"))
+        kairos_enabled = bool(
+            settings.get("kairos_enabled")
+            or settings.get("kairos", {}).get("enabled")
+        )
     except Exception:
         kairos_enabled = False
 
     # Background-originated calls are vetoed unless kairos_enabled is truthy
     if initiator in ("kairos", "background", "daemon") and not kairos_enabled:
-        return False, "vetoed: background-initiated tool calls require per-session opt-in"
+        return (
+            False,
+            "vetoed: background-initiated tool calls require per-session opt-in",
+        )
 
     return True, "allowed"

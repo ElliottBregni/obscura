@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
@@ -381,9 +381,11 @@ class AgentTemplateStore:
         raw_json = row["template_json"]
         tmpl_json: dict[str, Any] = {}
         if raw_json:
-            parsed = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+            parsed: Any = (
+                json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+            )
             if isinstance(parsed, dict):
-                tmpl_json = parsed
+                tmpl_json = cast(dict[str, Any], parsed)
         created = row["created_at"]
         updated = row["updated_at"]
         if isinstance(created, str):
@@ -404,16 +406,22 @@ class AgentTemplateStore:
         render_raw = row["render_json"]
         render_json: dict[str, Any] = {}
         if render_raw:
-            parsed = json.loads(render_raw) if isinstance(render_raw, str) else render_raw
+            parsed: Any = (
+                json.loads(render_raw) if isinstance(render_raw, str) else render_raw
+            )
             if isinstance(parsed, dict):
-                render_json = parsed
+                render_json = cast(dict[str, Any], parsed)
 
         vars_raw = row["variables"]
         variables: dict[str, str] = {}
         if vars_raw:
-            parsed_vars = json.loads(vars_raw) if isinstance(vars_raw, str) else vars_raw
+            parsed_vars: Any = (
+                json.loads(vars_raw) if isinstance(vars_raw, str) else vars_raw
+            )
             if isinstance(parsed_vars, dict):
-                variables = parsed_vars
+                variables = {
+                    str(k): str(v) for k, v in cast(dict[str, Any], parsed_vars).items()
+                }
 
         created = row["created_at"]
         if isinstance(created, str):
@@ -447,7 +455,10 @@ def _render_template(
             obj = obj.replace(f"{{{{{key}}}}}", value)
         return obj
     if isinstance(obj, dict):
-        return {k: _render_template(v, variables) for k, v in obj.items()}
+        return {
+            k: _render_template(v, variables)
+            for k, v in cast(dict[Any, Any], obj).items()
+        }
     if isinstance(obj, list):
-        return [_render_template(item, variables) for item in obj]
+        return [_render_template(item, variables) for item in cast(list[Any], obj)]
     return obj

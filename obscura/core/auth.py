@@ -368,8 +368,11 @@ def _resolve_codex_oauth_token() -> str | None:
     return None
 
 
-def _has_codex_cli_oauth() -> bool:
-    """Return True when Codex CLI reports an active OAuth login."""
+def _has_codex_cli_oauth() -> bool:  # pyright: ignore[reportUnusedFunction]
+    """Return True when Codex CLI reports an active OAuth login.
+
+    Currently unused — kept as a probe helper for future Codex CLI auth flows.
+    """
     codex_cmd = _resolve_cli_cmd("OBSCURA_CODEX_CLI_CMD", "codex")
     try:
         status = subprocess.run(

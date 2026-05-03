@@ -274,6 +274,7 @@ class CodexBackend(BackendToolHostMixin):
     def validate_model(self, model_id: str) -> bool:
         return True  # Codex validates internally
 
+    @property
     def native(self) -> NativeHandle:
         return NativeHandle(
             client=self._sdk_client,

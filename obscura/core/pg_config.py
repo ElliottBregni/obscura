@@ -15,14 +15,22 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+_psycopg2: Any
+_RealDictCursor: Any
 try:
-    import psycopg2
-    import psycopg2.pool
-    from psycopg2.extras import RealDictCursor
+    import psycopg2  # pyright: ignore[reportMissingImports]
+    import psycopg2.pool  # pyright: ignore[reportMissingImports, reportUnusedImport]  # noqa: F401
+    from psycopg2.extras import RealDictCursor  # pyright: ignore[reportMissingImports]
 
-    HAS_PSYCOPG2 = True
+    _has_psycopg2 = True
+    _psycopg2 = psycopg2
+    _RealDictCursor = RealDictCursor
 except ImportError:
-    HAS_PSYCOPG2 = False
+    _has_psycopg2 = False
+    _psycopg2 = None
+    _RealDictCursor = None
+
+HAS_PSYCOPG2 = _has_psycopg2
 
 
 @dataclass(frozen=True)
@@ -109,7 +117,7 @@ class PGPoolManager:
                 raise ValueError(msg)
 
             cls._config = cfg
-            cls._pool = psycopg2.pool.ThreadedConnectionPool(
+            cls._pool = _psycopg2.pool.ThreadedConnectionPool(
                 cfg.min_connections,
                 cfg.max_connections,
                 host=cfg.host,
@@ -117,7 +125,7 @@ class PGPoolManager:
                 database=cfg.database,
                 user=cfg.user,
                 password=cfg.password,
-                cursor_factory=RealDictCursor,
+                cursor_factory=_RealDictCursor,
             )
             return cls._pool
 

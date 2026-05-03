@@ -3,17 +3,23 @@
 Provides backwards-compatible database initialization based on environment configuration.
 """
 
+from __future__ import annotations
+
 import os
+from typing import Union
 
 from obscura.core.event_store import SQLiteEventStore
+from obscura.core.paths import resolve_obscura_home
 from obscura.core.postgres_event_store import PostgreSQLEventStore
+
+EventStore = Union[SQLiteEventStore, PostgreSQLEventStore]
 
 
 class DatabaseFactory:
     """Factory for creating event store instances based on configuration."""
 
     @staticmethod
-    def create_event_store(db_type: str | None = None):
+    def create_event_store(db_type: str | None = None) -> EventStore:
         """Create an event store instance.
 
         Args:
@@ -48,37 +54,34 @@ class DatabaseFactory:
         raise ValueError(msg)
 
     @staticmethod
-    def _create_sqlite_store():
+    def _create_sqlite_store() -> SQLiteEventStore:
         """Create SQLite event store with default configuration."""
-        return SQLiteEventStore()
+        return SQLiteEventStore(db_path=resolve_obscura_home() / "events.db")
 
     @staticmethod
-    def _create_postgres_store():
+    def _create_postgres_store() -> PostgreSQLEventStore:
         """Create PostgreSQL event store from environment configuration."""
-        config = {
-            "host": os.getenv("OBSCURA_PG_HOST", "localhost"),
-            "port": int(os.getenv("OBSCURA_PG_PORT", "5432")),
-            "database": os.getenv("OBSCURA_PG_DATABASE", "obscura"),
-            "user": os.getenv("OBSCURA_PG_USER", "obscura_user"),
-            "password": os.getenv("OBSCURA_PG_PASSWORD"),
-            "min_connections": int(os.getenv("OBSCURA_PG_MIN_CONNECTIONS", "2")),
-            "max_connections": int(os.getenv("OBSCURA_PG_MAX_CONNECTIONS", "10")),
-        }
-
-        if not config["password"]:
+        password = os.getenv("OBSCURA_PG_PASSWORD")
+        if not password:
             msg = (
                 "OBSCURA_PG_PASSWORD environment variable is required for PostgreSQL. "
                 "Set it to your database password."
             )
-            raise ValueError(
-                msg,
-            )
+            raise ValueError(msg)
 
-        return PostgreSQLEventStore(**config)
+        return PostgreSQLEventStore(
+            host=os.getenv("OBSCURA_PG_HOST", "localhost"),
+            port=int(os.getenv("OBSCURA_PG_PORT", "5432")),
+            database=os.getenv("OBSCURA_PG_DATABASE", "obscura"),
+            user=os.getenv("OBSCURA_PG_USER", "obscura_user"),
+            password=password,
+            min_connections=int(os.getenv("OBSCURA_PG_MIN_CONNECTIONS", "2")),
+            max_connections=int(os.getenv("OBSCURA_PG_MAX_CONNECTIONS", "10")),
+        )
 
 
 # Convenience function for backwards compatibility
-def get_event_store(db_type: str | None = None):
+def get_event_store(db_type: str | None = None) -> EventStore:
     """Get an event store instance.
 
     This is a convenience wrapper around DatabaseFactory.create_event_store().

@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
@@ -240,9 +240,9 @@ class PolicyStore:
         raw = row["policy_json"]
         pjson: dict[str, Any] = {}
         if raw:
-            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            parsed: Any = json.loads(raw) if isinstance(raw, str) else raw
             if isinstance(parsed, dict):
-                pjson = parsed
+                pjson = cast(dict[str, Any], parsed)
         created = row["created_at"]
         if isinstance(created, str):
             created = datetime.fromisoformat(created)

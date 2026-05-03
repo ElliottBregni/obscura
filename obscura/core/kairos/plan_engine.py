@@ -221,13 +221,19 @@ class PlanEngine:
         """Stream the model response and collect into a single string."""
         chunks: list[str] = []
         try:
-            async for chunk in self._backend.stream(  # type: ignore[attr-defined]
+            stream_iter: Any = self._backend.stream(  # type: ignore[attr-defined]
                 messages=[{"role": "user", "content": prompt}],
                 system=_PLANNING_SYSTEM_PROMPT,
                 max_tokens=2048,
-            ):
-                if hasattr(chunk, "text"):
-                    chunks.append(chunk.text)
+            )
+            async for chunk in stream_iter:  # pyright: ignore[reportUnknownVariableType]
+                text_attr: Any = getattr(
+                    chunk,  # pyright: ignore[reportUnknownArgumentType]
+                    "text",
+                    None,
+                )
+                if isinstance(text_attr, str):
+                    chunks.append(text_attr)
                 elif isinstance(chunk, str):
                     chunks.append(chunk)
         except Exception as exc:

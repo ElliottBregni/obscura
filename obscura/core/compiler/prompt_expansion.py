@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def expand_prompt_references(text: str) -> str:
 
 def _expand_chained_line(
     line: str,
-    resolve_skill: object,
+    resolve_skill: Callable[[str], str | None],
     command_loader: object,
 ) -> str | None:
     """Expand a line that starts with $ or @ tokens (chained format).
@@ -94,7 +95,6 @@ def _expand_chained_line(
     """
     from obscura.core.context_lazy import LazyCommandLoader
 
-    assert callable(resolve_skill)
     assert isinstance(command_loader, LazyCommandLoader)
 
     tokens = line.split()

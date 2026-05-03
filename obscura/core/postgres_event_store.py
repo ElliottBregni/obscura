@@ -6,15 +6,28 @@ import asyncio
 import json
 import os
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
+if TYPE_CHECKING:
+    from obscura.core.types import AgentEvent
+
+_psycopg2: Any
+_RealDictCursor: Any
 try:
-    import psycopg2
-    import psycopg2.pool
-    from psycopg2.extras import RealDictCursor
+    import psycopg2  # pyright: ignore[reportMissingImports]
+    import psycopg2.pool  # pyright: ignore[reportMissingImports, reportUnusedImport]  # noqa: F401  needed for psycopg2.pool side-effect load
+    from psycopg2.extras import RealDictCursor  # pyright: ignore[reportMissingImports]
 
-    HAS_PSYCOPG2 = True
+    _has_psycopg2 = True
+    _psycopg2 = psycopg2
+    _RealDictCursor = RealDictCursor
 except ImportError:
-    HAS_PSYCOPG2 = False
+    _has_psycopg2 = False
+    _psycopg2 = None
+    _RealDictCursor = None
+
+# Public re-export for callers checking availability before construction.
+HAS_PSYCOPG2 = _has_psycopg2
 
 from obscura.core.event_store import EventRecord, SessionRecord, SessionStatus
 from obscura.core.types import AgentEventKind
@@ -23,23 +36,23 @@ from obscura.core.types import AgentEventKind
 class PostgreSQLEventStore:
     def __init__(
         self,
-        host=None,
-        port=None,
-        database=None,
-        user=None,
-        password=None,
-        min_connections=2,
-        max_connections=10,
+        host: str | None = None,
+        port: int | None = None,
+        database: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
+        min_connections: int = 2,
+        max_connections: int = 10,
     ) -> None:
         if not HAS_PSYCOPG2:
             msg = "pip install psycopg2-binary"
             raise ImportError(msg)
-        self.host = host or os.getenv("OBSCURA_DB_HOST", "localhost")
-        self.port = port or int(os.getenv("OBSCURA_DB_PORT", "5432"))
-        self.database = database or os.getenv("OBSCURA_DB_NAME", "obscura")
-        self.user = user or os.getenv("OBSCURA_DB_USER", "obscura_user")
-        self.password = password or os.getenv("OBSCURA_DB_PASSWORD", "")
-        self._pool = psycopg2.pool.ThreadedConnectionPool(
+        self.host: str = host or os.getenv("OBSCURA_DB_HOST", "localhost")
+        self.port: int = port or int(os.getenv("OBSCURA_DB_PORT", "5432"))
+        self.database: str = database or os.getenv("OBSCURA_DB_NAME", "obscura")
+        self.user: str = user or os.getenv("OBSCURA_DB_USER", "obscura_user")
+        self.password: str = password or os.getenv("OBSCURA_DB_PASSWORD", "")
+        self._pool: Any = _psycopg2.pool.ThreadedConnectionPool(
             min_connections,
             max_connections,
             host=self.host,
@@ -47,14 +60,14 @@ class PostgreSQLEventStore:
             database=self.database,
             user=self.user,
             password=self.password,
-            cursor_factory=RealDictCursor,
+            cursor_factory=_RealDictCursor,
         )
         self._init_schema()
 
-    def _get_conn(self):
+    def _get_conn(self) -> Any:
         return self._pool.getconn()
 
-    def _put_conn(self, conn) -> None:
+    def _put_conn(self, conn: Any) -> None:
         self._pool.putconn(conn)
 
     def _init_schema(self) -> None:
@@ -80,17 +93,17 @@ class PostgreSQLEventStore:
 
     async def create_session(
         self,
-        session_id,
-        agent,
+        session_id: str,
+        agent: str,
         *,
-        backend="",
-        model="",
-        source="live",
-        parent_session_id="",
-        project="",
-        summary="",
-        metadata=None,
-    ):
+        backend: str = "",
+        model: str = "",
+        source: str = "live",
+        parent_session_id: str = "",
+        project: str = "",
+        summary: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> SessionRecord:
         return await asyncio.to_thread(
             self._create_session_sync,
             session_id,
@@ -106,16 +119,16 @@ class PostgreSQLEventStore:
 
     def _create_session_sync(
         self,
-        session_id,
-        agent,
-        backend,
-        model,
-        source,
-        parent_session_id,
-        project,
-        summary,
-        metadata,
-    ):
+        session_id: str,
+        agent: str,
+        backend: str,
+        model: str,
+        source: str,
+        parent_session_id: str,
+        project: str,
+        summary: str,
+        metadata: dict[str, Any] | None,
+    ) -> SessionRecord:
         now = datetime.now(UTC)
         conn = self._get_conn()
         try:
@@ -156,18 +169,25 @@ class PostgreSQLEventStore:
             updated_at=now,
         )
 
-    async def get_session(self, session_id):
+    async def get_session(self, session_id: str) -> SessionRecord | None:
         return await asyncio.to_thread(self._get_session_sync, session_id)
 
-    async def append(self, session_id, event):
+    async def append(self, session_id: str, event: AgentEvent) -> EventRecord:
         return await asyncio.to_thread(self._append_sync, session_id, event)
 
-    async def get_events(self, session_id, *, after_seq=0):
+    async def get_events(
+        self, session_id: str, *, after_seq: int = 0
+    ) -> list[EventRecord]:
         return await asyncio.to_thread(self._get_events_sync, session_id, after_seq)
 
     async def list_sessions(
-        self, *, status=None, backend=None, source=None, parent_session_id=None
-    ):
+        self,
+        *,
+        status: SessionStatus | None = None,
+        backend: str | None = None,
+        source: str | None = None,
+        parent_session_id: str | None = None,
+    ) -> list[SessionRecord]:
         return await asyncio.to_thread(
             self._list_sessions_sync,
             status,
@@ -176,7 +196,7 @@ class PostgreSQLEventStore:
             parent_session_id,
         )
 
-    def _get_session_sync(self, session_id):
+    def _get_session_sync(self, session_id: str) -> SessionRecord | None:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -184,24 +204,26 @@ class PostgreSQLEventStore:
                     "SELECT * FROM events.sessions WHERE id = %s",
                     (session_id,),
                 )
-                row = cur.fetchone()
-                if not row:
+                row_any: Any = cur.fetchone()
+                if not row_any:
                     return None
-                meta = (
-                    row["metadata"]
-                    if isinstance(row["metadata"], dict)
-                    else json.loads(row["metadata"] or "{}")
+                row = cast(dict[str, Any], row_any)
+                meta_raw: Any = row["metadata"]
+                meta: dict[str, Any] = (
+                    cast(dict[str, Any], meta_raw)
+                    if isinstance(meta_raw, dict)
+                    else json.loads(meta_raw or "{}")
                 )
                 return SessionRecord(
-                    id=row["id"],
+                    id=str(row["id"]),
                     status=SessionStatus(row["status"]),
-                    backend=row["backend"],
-                    model=row["model"],
-                    active_agent=row["active_agent"],
-                    source=row["source"],
-                    project=row["project"],
-                    summary=row["summary"],
-                    message_count=row["message_count"],
+                    backend=str(row["backend"]),
+                    model=str(row["model"]),
+                    active_agent=str(row["active_agent"]),
+                    source=str(row["source"]),
+                    project=str(row["project"]),
+                    summary=str(row["summary"]),
+                    message_count=int(row["message_count"]),
                     metadata=meta,
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
@@ -209,9 +231,9 @@ class PostgreSQLEventStore:
         finally:
             self._put_conn(conn)
 
-    def _append_sync(self, session_id, event):
+    def _append_sync(self, session_id: str, event: AgentEvent) -> EventRecord:
         now = datetime.now(UTC)
-        payload = {
+        payload: dict[str, Any] = {
             "kind": event.kind.value,
             "text": event.text,
             "tool_name": event.tool_name,
@@ -222,13 +244,15 @@ class PostgreSQLEventStore:
             "turn": event.turn,
         }
         conn = self._get_conn()
+        seq: int = 0
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COALESCE(MAX(seq), 0) + 1 FROM events.events WHERE session_id = %s",
                     (session_id,),
                 )
-                seq = cur.fetchone()["coalesce"]
+                seq_row = cast(dict[str, Any], cur.fetchone())
+                seq = int(seq_row["coalesce"])
                 cur.execute(
                     "INSERT INTO events.events (session_id, seq, kind, payload, timestamp) VALUES (%s, %s, %s, %s, %s)",
                     (session_id, seq, event.kind.value, json.dumps(payload), now),
@@ -248,7 +272,7 @@ class PostgreSQLEventStore:
             timestamp=now,
         )
 
-    def _get_events_sync(self, session_id, after_seq):
+    def _get_events_sync(self, session_id: str, after_seq: int) -> list[EventRecord]:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -256,26 +280,40 @@ class PostgreSQLEventStore:
                     "SELECT * FROM events.events WHERE session_id = %s AND seq > %s ORDER BY seq",
                     (session_id, after_seq),
                 )
-                return [
-                    EventRecord(
-                        session_id=r["session_id"],
-                        seq=r["seq"],
-                        kind=AgentEventKind(r["kind"]),
-                        payload=r["payload"]
-                        if isinstance(r["payload"], dict)
-                        else json.loads(r["payload"]),
-                        timestamp=r["timestamp"],
+                rows = cast(list[dict[str, Any]], cur.fetchall())
+                results: list[EventRecord] = []
+                for r in rows:
+                    payload_raw: Any = r["payload"]
+                    payload: dict[str, Any] = (
+                        cast(dict[str, Any], payload_raw)
+                        if isinstance(payload_raw, dict)
+                        else json.loads(payload_raw)
                     )
-                    for r in cur.fetchall()
-                ]
+                    results.append(
+                        EventRecord(
+                            session_id=str(r["session_id"]),
+                            seq=int(r["seq"]),
+                            kind=AgentEventKind(r["kind"]),
+                            payload=payload,
+                            timestamp=r["timestamp"],
+                        )
+                    )
+                return results
         finally:
             self._put_conn(conn)
 
-    def _list_sessions_sync(self, status, backend, source, parent_session_id=None):
+    def _list_sessions_sync(
+        self,
+        status: SessionStatus | None,
+        backend: str | None,
+        source: str | None,
+        parent_session_id: str | None = None,
+    ) -> list[SessionRecord]:
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                query, params = "SELECT * FROM events.sessions WHERE 1=1", []
+                query = "SELECT * FROM events.sessions WHERE 1=1"
+                params: list[Any] = []
                 if status:
                     query += " AND status = %s"
                     params.append(status.value)
@@ -290,26 +328,35 @@ class PostgreSQLEventStore:
                     params.append(parent_session_id)
                 query += " ORDER BY updated_at DESC"
                 cur.execute(query, params)
-                return [
-                    SessionRecord(
-                        id=r["id"],
-                        status=SessionStatus(r["status"]),
-                        backend=r["backend"],
-                        model=r["model"],
-                        active_agent=r["active_agent"],
-                        source=r["source"],
-                        parent_session_id=r.get("parent_session_id", "") or "",
-                        project=r["project"],
-                        summary=r["summary"],
-                        message_count=r["message_count"],
-                        metadata=r["metadata"]
-                        if isinstance(r["metadata"], dict)
-                        else json.loads(r["metadata"] or "{}"),
-                        created_at=r["created_at"],
-                        updated_at=r["updated_at"],
+                rows = cast(list[dict[str, Any]], cur.fetchall())
+                results: list[SessionRecord] = []
+                for r in rows:
+                    meta_raw: Any = r["metadata"]
+                    meta: dict[str, Any] = (
+                        cast(dict[str, Any], meta_raw)
+                        if isinstance(meta_raw, dict)
+                        else json.loads(meta_raw or "{}")
                     )
-                    for r in cur.fetchall()
-                ]
+                    results.append(
+                        SessionRecord(
+                            id=str(r["id"]),
+                            status=SessionStatus(r["status"]),
+                            backend=str(r["backend"]),
+                            model=str(r["model"]),
+                            active_agent=str(r["active_agent"]),
+                            source=str(r["source"]),
+                            parent_session_id=str(
+                                r.get("parent_session_id", "") or ""
+                            ),
+                            project=str(r["project"]),
+                            summary=str(r["summary"]),
+                            message_count=int(r["message_count"]),
+                            metadata=meta,
+                            created_at=r["created_at"],
+                            updated_at=r["updated_at"],
+                        )
+                    )
+                return results
         finally:
             self._put_conn(conn)
 

@@ -247,7 +247,7 @@ class PromptAssembler:
         )
 
         # Find and potentially trim the history section
-        result = []
+        result: list[PromptSection] = []
         for section in sections:
             if section.name == "session_history":
                 if section.token_estimate <= available_for_history:
@@ -312,7 +312,7 @@ def format_tool_definitions(tools: list[dict[str, Any]]) -> str:
     Sorted by name for deterministic ordering.
     """
     sorted_tools = sorted(tools, key=lambda t: t.get("name", ""))
-    parts = []
+    parts: list[str] = []
     for tool in sorted_tools:
         name = tool.get("name", "unknown")
         desc = tool.get("description", "")

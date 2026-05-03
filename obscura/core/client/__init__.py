@@ -7,6 +7,7 @@ model alias resolution and safety guards.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -20,6 +21,7 @@ from obscura.core.types import (
     Backend,
     BackendCapabilities,
     BackendProtocol,
+    ConfirmationCapable,
     HookPoint,
     Message,
     NativeHandle,
@@ -488,7 +490,7 @@ class ObscuraClient:
         # AgentLoop.on_confirm (Claude SDK executes tools internally via MCP,
         # so the loop's confirmation gate is never reached).
         loop_confirm = on_confirm
-        if on_confirm and self._backend_type == Backend.CLAUDE:
+        if on_confirm and isinstance(self._backend, ConfirmationCapable):
             from obscura.core.types import ToolCallInfo
 
             def _wrap_confirm(name: str, inp: dict[str, Any]) -> bool:
@@ -558,9 +560,11 @@ class ObscuraClient:
         Safe to call between independent prompts (e.g. daemon triggers)
         to avoid stale session state in event-driven backends.
         """
-        reset_fn = getattr(self._backend, "reset_session", None)
+        reset_fn: Any = getattr(self._backend, "reset_session", None)
         if callable(reset_fn):
-            await reset_fn()
+            result = reset_fn()
+            if inspect.isawaitable(result):
+                await result
 
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new persistent session."""

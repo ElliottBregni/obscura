@@ -11,7 +11,7 @@ All specs follow a Kubernetes-like envelope: apiVersion, kind, metadata, spec.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 
@@ -97,7 +97,9 @@ class TemplateSpecBody(BaseModel):
     tool_routing: ToolRoutingSpec | None = None
 
     # MCP servers
-    mcp_servers: list[MCPServerSpec] = Field(default_factory=list)
+    mcp_servers: list[MCPServerSpec] = Field(
+        default_factory=lambda: cast(list[MCPServerSpec], [])
+    )
 
     # Config defaults passed to the agent runtime
     config: dict[str, Any] = Field(default_factory=_empty_dict)
@@ -301,7 +303,9 @@ class WorkspaceSpecBody(BaseModel):
     memory: MemoryBindingSpec | None = None
 
     # Agent instances to create
-    agents: list[WorkspaceAgentRef] = Field(default_factory=list)
+    agents: list[WorkspaceAgentRef] = Field(
+        default_factory=lambda: cast(list[WorkspaceAgentRef], [])
+    )
 
     # Startup behavior
     startup: StartupSpec = Field(default_factory=StartupSpec)

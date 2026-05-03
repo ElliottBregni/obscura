@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.types import ChunkKind, StreamChunk, StreamMetadata
 
@@ -131,20 +131,21 @@ class EventToIteratorBridge:
                     break
             # Also check dict-style access
             if tool_input is None and isinstance(data, dict):
+                data_dict = cast(dict[str, Any], data)
                 for key in ("tool_input", "input", "arguments", "parameters"):
-                    if key in data:
-                        tool_input = data[key]
+                    if key in data_dict:
+                        tool_input = data_dict[key]
                         break
             if tool_input is not None:
                 if isinstance(tool_input, str):
                     delta = tool_input
                 elif isinstance(tool_input, dict):
-                    delta = json.dumps(tool_input)
+                    delta = json.dumps(cast(dict[str, Any], tool_input))
                 else:
                     try:
                         delta = json.dumps(tool_input)
                     except (TypeError, ValueError):
-                        delta = str(tool_input)
+                        delta = str(cast(object, tool_input))
                 self.push(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_DELTA,

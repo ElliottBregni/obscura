@@ -19,7 +19,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
@@ -263,7 +263,7 @@ class SessionHookManager:
                 if result is None:
                     return None
                 if isinstance(result, dict):
-                    ctx = result
+                    ctx = cast(dict[str, Any], result)
 
             except Exception:
                 logger.exception(

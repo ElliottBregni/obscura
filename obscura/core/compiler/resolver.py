@@ -9,7 +9,7 @@ which itself extends is rejected).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.compiler.errors import ResolutionError
 from obscura.core.compiler.specs import (
@@ -234,7 +234,7 @@ def expand_workspace_packs(
     )
 
     return WorkspaceSpec(
-        api_version=workspace.api_version,
+        apiVersion=workspace.api_version,
         kind="Workspace",
         metadata=workspace.metadata,
         spec=new_body,
@@ -244,7 +244,10 @@ def expand_workspace_packs(
 def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> None:
     """Recursively merge *override* into *base* (mutates *base*)."""
     for key, value in override.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            _deep_merge_dict(base[key], value)
+        existing = base.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            _deep_merge_dict(
+                cast(dict[str, Any], existing), cast(dict[str, Any], value)
+            )
         else:
             base[key] = value

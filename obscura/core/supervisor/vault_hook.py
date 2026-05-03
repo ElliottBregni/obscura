@@ -15,7 +15,7 @@ boundaries: once at session start, once at session end.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from obscura.core.supervisor.session_hooks import SessionHookManager
@@ -63,14 +63,14 @@ async def _ingest_and_inject(context: dict[str, Any]) -> None:
         if changed_files:
             for meta in changed_files:
                 try:
-                    vs._ingest_file(meta)
+                    vs._ingest_file(meta)  # pyright: ignore[reportPrivateUsage]
                 except Exception:
                     logger.debug("Vault ingest failed for %s", meta.path, exc_info=True)
 
             # Update hashes so we don't re-ingest next run.
             for meta in vs.scan("user"):
-                vs._prev_hashes[str(meta.path)] = meta.hash
-            vs._save_hashes()
+                vs._prev_hashes[str(meta.path)] = meta.hash  # pyright: ignore[reportPrivateUsage]
+            vs._save_hashes()  # pyright: ignore[reportPrivateUsage]
 
             logger.info("Vault ingest: %d file(s) synced", len(changed_files))
 
@@ -94,12 +94,12 @@ async def _export_on_finalize(context: dict[str, Any]) -> None:
         if not vs.vault_dir.is_dir():
             return
 
-        exported = vs._export_all()
+        exported = vs._export_all()  # pyright: ignore[reportPrivateUsage]
 
         # Update hashes for all zones.
         for meta in vs.scan():
-            vs._prev_hashes[str(meta.path)] = meta.hash
-        vs._save_hashes()
+            vs._prev_hashes[str(meta.path)] = meta.hash  # pyright: ignore[reportPrivateUsage]
+        vs._save_hashes()  # pyright: ignore[reportPrivateUsage]
 
         logger.info("Vault export: %d file(s) written", exported)
     except Exception:
@@ -121,7 +121,7 @@ def _vault_relevance_score(meta: Any, query_words: set[str]) -> int:
     if fm.get("tags"):
         tags = fm["tags"]
         if isinstance(tags, list):
-            candidates.extend(str(t).lower() for t in tags)
+            candidates.extend(str(t).lower() for t in cast(list[Any], tags))
         else:
             candidates.append(str(tags).lower())
     if fm.get("type"):

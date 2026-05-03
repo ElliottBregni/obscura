@@ -69,6 +69,8 @@ from obscura.core.supervisor.types import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from obscura.core.types import ToolSpec
+
 logger = logging.getLogger(__name__)
 
 
@@ -236,11 +238,14 @@ class Supervisor:
             )
 
             # Best-effort user resolution for profile injection.
-            _user = None
+            _user: Any = None
             try:
-                from obscura.auth.context import current_user
-
-                _user = current_user()
+                # obscura.auth.context.current_user is provided when running in
+                # an authenticated runtime; absent in standalone tooling.
+                auth_ctx: Any = __import__(
+                    "obscura.auth.context", fromlist=["current_user"]
+                )
+                _user = auth_ctx.current_user()
             except Exception:
                 pass
             register_profile_goal_hooks(hooks, user=_user)
@@ -290,7 +295,7 @@ class Supervisor:
             # expired), which the raw lambda never checked.  The named callback
             # raises LockExpiredError on False so _tick() logs it and the run
             # task is cancelled cleanly rather than continuing with a dead lock.
-            _run_task: asyncio.Task | None = None
+            _run_task: asyncio.Task[Any] | None = None
 
             async def _heartbeat_tick(hb: Any) -> None:
                 refreshed = await self._lock.heartbeat(
@@ -308,13 +313,7 @@ class Supervisor:
                     )
                     if _run_task is not None and not _run_task.done():
                         _run_task.cancel()
-                    msg = (
-                        f"Session lock for {session_id!r} expired or was stolen "
-                        f"during run {run_id!r} (heartbeat seq={hb.seq})"
-                    )
-                    raise LockExpiredError(
-                        msg,
-                    )
+                    raise LockExpiredError(session_id, holder_id)
 
             heartbeat.on_tick(_heartbeat_tick)
             # FIX: Capture current task BEFORE starting the heartbeat so the
@@ -361,7 +360,9 @@ class Supervisor:
             # Freeze tool registry
             tool_snapshot: FrozenToolRegistry | None = None
             if tool_registry is not None:
-                specs = tool_registry.all() if hasattr(tool_registry, "all") else []
+                specs: list[ToolSpec] = (
+                    tool_registry.all() if hasattr(tool_registry, "all") else []
+                )
                 tool_snapshot = FrozenToolRegistry.from_specs(specs)
                 await asyncio.to_thread(
                     self._tool_store.save,
