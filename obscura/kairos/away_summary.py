@@ -9,6 +9,9 @@ from __future__ import annotations
 import logging
 import time
 
+from obscura.core.client import ObscuraClient
+from obscura.core.config import ObscuraConfig
+
 logger = logging.getLogger(__name__)
 
 # Minimum idle time before generating away summary (seconds).
@@ -106,9 +109,6 @@ async def _generate_llm_summary(context: str) -> str:
     Returns an empty string if the LLM is unavailable or fails.
     """
     try:
-        from obscura.core.client import ObscuraClient
-        from obscura.core.config import ObscuraConfig
-
         cfg = ObscuraConfig.load()
         prompt = f"{AWAY_SUMMARY_PROMPT}\n\nRecent conversation:\n{context[:3000]}"
         default_model: str | None = getattr(cfg, "default_model", None)

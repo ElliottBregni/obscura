@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core.config_io import try_load_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,8 +206,6 @@ def load_decay_config_from_disk() -> DecayConfig:
     section doesn't exist or config can't be loaded.
     """
     try:
-        from obscura.core.config_io import try_load_config
-
         home_cfg = try_load_config(
             Path.home() / ".obscura" / "config.toml",
         )

@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.pg_config import PGPoolManager
+from obscura.memory import MemoryKey
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -106,8 +107,6 @@ class PostgreSQLMemoryStore:
         ttl: timedelta | None = None,
     ) -> None:
         """Store a value in memory."""
-        from obscura.memory import MemoryKey
-
         if isinstance(key, MemoryKey):
             namespace = key.namespace
             key = key.key
@@ -141,8 +140,6 @@ class PostgreSQLMemoryStore:
         default: Any = None,
     ) -> Any:
         """Retrieve a value from memory. Returns default if not found or expired."""
-        from obscura.memory import MemoryKey
-
         if isinstance(key, MemoryKey):
             namespace = key.namespace
             key = key.key
@@ -173,8 +170,6 @@ class PostgreSQLMemoryStore:
 
     def delete(self, key: str, namespace: str = "default") -> bool:
         """Delete a key. Returns True if deleted."""
-        from obscura.memory import MemoryKey
-
         if isinstance(key, MemoryKey):
             namespace = key.namespace
             key = key.key

@@ -13,6 +13,13 @@ from obscura.auth.rbac import require_any_role, require_role
 from obscura.deps import audit_logs, get_runtime
 
 from obscura.auth.models import AuthenticatedUser
+from obscura.memory import MemoryStore
+from obscura.routes.agents import get_agent_templates
+from obscura.routes.webhooks import get_webhooks_store
+from obscura.routes.workflows import (
+    get_workflow_executions_store,
+    get_workflows_store,
+)
 
 if TYPE_CHECKING:
     from obscura.core.rate_limiter import RateLimiter
@@ -125,17 +132,8 @@ async def metrics_get(
         by_status[status] = by_status.get(status, 0) + 1
         by_model[model] = by_model.get(model, 0) + 1
 
-    from obscura.memory import MemoryStore
-
     store = MemoryStore.for_user(user)
     memory_stats = store.get_stats()
-
-    from obscura.routes.agents import get_agent_templates
-    from obscura.routes.webhooks import get_webhooks_store
-    from obscura.routes.workflows import (
-        get_workflow_executions_store,
-        get_workflows_store,
-    )
 
     return JSONResponse(
         content={

@@ -19,6 +19,9 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from obscura.core.auth import AuthConfig
+from obscura.providers.copilot import CopilotBackend
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -186,9 +189,6 @@ class MemoryConsolidator:
         and makes a single completion call.
         """
         import asyncio
-
-        from obscura.core.auth import AuthConfig
-        from obscura.providers.copilot import CopilotBackend
 
         auth = AuthConfig()
         backend = CopilotBackend(

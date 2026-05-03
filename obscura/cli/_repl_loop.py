@@ -1066,18 +1066,16 @@ async def repl(
 
                 # *eval -- benchmark a command/skill chain
                 if user_input.startswith("*"):
-                    import subprocess as _sp
-
                     from obscura.cli.render import print_error as _pe
                     from obscura.cli.render import print_info as _pi
 
                     def _snapshot_git() -> str | None:
                         try:
-                            r = _sp.run(
+                            r = subprocess.run(
                                 ["git", "diff", "--name-only", "HEAD"],
                                 capture_output=True, text=True, timeout=5,
                             )
-                            u = _sp.run(
+                            u = subprocess.run(
                                 ["git", "ls-files", "--others", "--exclude-standard"],
                                 capture_output=True, text=True, timeout=5,
                             )
@@ -1088,11 +1086,11 @@ async def repl(
 
                     def _revert_changes(before_files: str | None) -> list[str]:
                         try:
-                            r = _sp.run(
+                            r = subprocess.run(
                                 ["git", "diff", "--name-only", "HEAD"],
                                 capture_output=True, text=True, timeout=5,
                             )
-                            u = _sp.run(
+                            u = subprocess.run(
                                 ["git", "ls-files", "--others", "--exclude-standard"],
                                 capture_output=True, text=True, timeout=5,
                             )
@@ -1105,14 +1103,13 @@ async def repl(
                             for f in sorted(new_files):
                                 if not f:
                                     continue
-                                cr = _sp.run(
+                                cr = subprocess.run(
                                     ["git", "checkout", "HEAD", "--", f],
                                     capture_output=True, timeout=5,
                                 )
                                 if cr.returncode != 0:
-                                    import os as _os2
                                     try:
-                                        _os2.remove(f)
+                                        os.remove(f)
                                     except OSError:
                                         continue
                                 reverted.append(f)
@@ -1235,14 +1232,13 @@ async def repl(
                     ss.reset()
 
                     try:
-                        import time as _time
                         from obscura.eval.models import EvalRunSummary
                         from obscura.eval.store import EvalResultStore
 
                         _pass_ct = grade_response.upper().count("| PASS")
                         _fail_ct = len(criteria) - _pass_ct
                         summary = EvalRunSummary(
-                            run_id=f"cmd-{cmd_name}-{int(_time.time())}",
+                            run_id=f"cmd-{cmd_name}-{int(time.time())}",
                             suite_id=f"command:{cmd_name}",
                             backend=str(getattr(ctx, "backend_name", "unknown")),
                             model=str(getattr(ctx, "model_name", "unknown")),

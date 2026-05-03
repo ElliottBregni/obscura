@@ -47,7 +47,15 @@ from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
 
 import contextlib
 
+from obscura.memory.events import EventKind, get_default_sink, make_event
+from obscura.vector_memory.backends.postgres_backend import PostgreSQLVectorBackend
+from obscura.vector_memory.consolidator import MemoryConsolidator
 from obscura.vector_memory.decay import DecayConfig, load_decay_config_from_disk
+from obscura.vector_memory.vector_memory_filters import (
+    DateRangeFilter,
+    MemoryTypeFilter,
+)
+from obscura.vector_memory.vector_memory_rerank import RecencyReranker
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -200,8 +208,6 @@ class VectorMemoryStore:
         ttl_seconds: float | None,
     ) -> None:
         """Emit a memory event after the backend has accepted the write."""
-        from obscura.memory.events import EventKind, get_default_sink, make_event
-
         sink = self._event_sink if self._event_sink is not None else get_default_sink()
         event_kind: EventKind = kind  # type: ignore[assignment]
         sink.emit(
@@ -267,10 +273,6 @@ class VectorMemoryStore:
         # PostgreSQL backend
         if backend_type == "postgresql":
             try:
-                from obscura.vector_memory.backends.postgres_backend import (
-                    PostgreSQLVectorBackend,
-                )
-
                 return PostgreSQLVectorBackend(config=config)
             except Exception as e:
                 logger.warning(
@@ -401,11 +403,6 @@ class VectorMemoryStore:
             List of memories sorted by similarity (highest first)
 
         """
-        from obscura.vector_memory.vector_memory_filters import (
-            DateRangeFilter,
-            MemoryTypeFilter,
-        )
-
         query_embedding = self.embedding_fn(query)
 
         # Build filter list
@@ -473,8 +470,6 @@ class VectorMemoryStore:
             List of memories sorted by final_score (highest first)
 
         """
-        from obscura.vector_memory.vector_memory_rerank import RecencyReranker
-
         # Stage 1: get candidate pool
         candidates = self.search_similar(
             query=query,
@@ -575,10 +570,8 @@ class VectorMemoryStore:
         except Exception:
             _log.debug("purge_expired failed", exc_info=True)
 
-        # 2. Consolidation (import here to avoid circular)
+        # 2. Consolidation
         try:
-            from obscura.vector_memory.consolidator import MemoryConsolidator
-
             consolidator = MemoryConsolidator(store=self, config=self.decay_config)
             consolidated, summaries = consolidator.consolidate()
         except Exception:

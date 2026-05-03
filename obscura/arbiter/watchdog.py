@@ -17,6 +17,7 @@ lightweight, <50ms).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -242,7 +243,6 @@ class ArbiterWatchdog:
             from obscura.core.task_queue import (
                 _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
             )
-            import re
 
             def _kw(text: str) -> set[str]:
                 words = re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", text.lower())

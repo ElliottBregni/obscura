@@ -8,7 +8,9 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
+from obscura.core.agent_loop import AgentLoop
 from obscura.core.hooks import HookRegistry
+from obscura.core.types import AgentEventKind
 from obscura.eval.models import (
     EvalCaseResult,
     EvalRunSummary,
@@ -56,9 +58,6 @@ class EvalEngine:
         run_id: str,
     ) -> EvalCaseResult:
         """Execute a single eval case and return the scored result."""
-        from obscura.core.agent_loop import AgentLoop
-        from obscura.core.types import AgentEventKind
-
         start_ms = time.monotonic_ns() // 1_000_000
 
         hooks = HookRegistry()

@@ -28,9 +28,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import re
 import time
 from dataclasses import dataclass, field
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -77,8 +79,6 @@ def _get_phantom_message_preamble() -> str:
     When phantom mode is active (``OBSCURA_PHANTOM=1``), returns a preamble
     that makes the agent respond as the user.  Returns empty string otherwise.
     """
-    import os
-
     # Check proxy-specific env first, then fall back to global phantom.
     proxy_env = os.environ.get("OBSCURA_PHANTOM_PROXY", "").strip().lower()
     global_env = os.environ.get("OBSCURA_PHANTOM", "").strip().lower()
@@ -106,8 +106,6 @@ def _get_phantom_message_preamble() -> str:
         # Fall back to markdown profile.
         try:
             from obscura.kairos.user_profile import UserProfile
-
-            import re
 
             text = UserProfile().read()
             m = re.search(r"\*\*Name\*\*:\s*(.+?)(?:\s*\(|$)", text, re.MULTILINE)
@@ -1221,8 +1219,6 @@ def _cron_matches_now(cron_expr: str) -> bool:
     Supports ``*``, integer literals, and ``*/N`` step syntax.
     Does **not** support ranges or comma lists (add later if needed).
     """
-    from datetime import datetime
-
     fields = cron_expr.strip().split()
     if len(fields) != 5:
         logger.warning("Invalid cron expression (expected 5 fields): %s", cron_expr)

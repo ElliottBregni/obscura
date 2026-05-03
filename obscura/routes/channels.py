@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
+from obscura.integrations.messaging.store import ChannelConfigStore
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
@@ -235,8 +236,6 @@ _config_store: Any = None
 def _get_config_store() -> Any:
     global _config_store  # noqa: PLW0603
     if _config_store is None:
-        from obscura.integrations.messaging.store import ChannelConfigStore
-
         _config_store = ChannelConfigStore()
     return _config_store
 

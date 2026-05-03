@@ -34,8 +34,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from obscura.core.tools import ToolRegistry
-
+from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     HookContext,
     HookPoint,
@@ -63,8 +62,6 @@ class MCPBackend:
         mcp_servers: list[MCPConnectionConfig] | None = None,
         name: str = "mcp",
     ) -> None:
-        from obscura.core.tools import ToolRegistry
-
         self.name = name
         self.mcp_servers = mcp_servers or []
         self._session_manager = MCPSessionManager()
@@ -156,8 +153,6 @@ class MCPBackend:
 
     async def _refresh_tools(self) -> None:
         """Refresh the list of available tools from all servers."""
-        from obscura.core.tools import ToolRegistry
-
         self._tools = []
         self._tool_registry = ToolRegistry()
 

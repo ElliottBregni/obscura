@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.agent_loop import AgentLoop, call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
 from obscura.core.tool_policy import ToolPolicy
-from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -29,6 +29,9 @@ from obscura.core.types import (
     ToolChoice,
     ToolSpec,
 )
+from obscura.integrations.mcp.discovery import register_external_mcp_tools
+from obscura.plugins.capabilities import build_capability_map_section
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 if TYPE_CHECKING:
@@ -229,10 +232,6 @@ class ClaudeBackend(BackendToolHostMixin):
         # appear in the system prompt's tool listing and are discoverable
         # via tool_search. Claude SDK still dispatches the actual calls
         # via mcp_servers passthrough — these specs are discovery-only.
-        from obscura.integrations.mcp.discovery import (
-            register_external_mcp_tools,
-        )
-
         await register_external_mcp_tools(self, self._mcp_servers)
 
         # Snapshot baseline MCP subprocess PIDs so we can identify (and
@@ -517,8 +516,6 @@ class ClaudeBackend(BackendToolHostMixin):
         Yields ``AgentEvent`` instances as the model streams text,
         calls tools, and iterates across multiple turns.
         """
-        from obscura.core.agent_loop import AgentLoop
-
         loop = AgentLoop(
             self,
             self._tool_registry,
@@ -739,8 +736,6 @@ class ClaudeBackend(BackendToolHostMixin):
             "You also have access to Claude's built-in tools (Bash, Read, Edit, etc.).",
         )
         try:
-            from obscura.plugins.capabilities import build_capability_map_section
-
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -768,7 +763,6 @@ class ClaudeBackend(BackendToolHostMixin):
             undeclared-kwarg tolerance match the copilot and agent-loop
             paths.
             """
-            from obscura.core.agent_loop import call_tool_handler
 
             async def _async_wrapper(
                 arguments: dict[str, Any] | None = None, **kwargs: Any
@@ -895,13 +889,11 @@ class ClaudeBackend(BackendToolHostMixin):
 # Lazy telemetry helpers
 # ---------------------------------------------------------------------------
 
-from obscura.telemetry.traces import NoOpTracer
+from obscura.telemetry.traces import NoOpTracer, get_tracer
 
 
 def _get_backend_tracer() -> Any:
     try:
-        from obscura.telemetry.traces import get_tracer
-
         return get_tracer("obscura.claude_backend")
     except Exception:
         return NoOpTracer()

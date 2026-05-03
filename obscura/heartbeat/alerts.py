@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING, Any, override
 
 import httpx
 
+from obscura.agent.interaction import AttentionPriority
 from obscura.heartbeat.types import Alert, HealthRecord, HealthStatus
+from obscura.notifications.native import NativeNotifier
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -271,15 +273,11 @@ class NativeNotificationChannel(AlertChannel):
     name = "native"
 
     def __init__(self) -> None:
-        from obscura.notifications.native import NativeNotifier
-
         self._notifier = NativeNotifier()
 
     @override
     async def send(self, alert: Alert) -> bool:
         """Send a native macOS notification for the alert."""
-        from obscura.agent.interaction import AttentionPriority
-
         priority_map: dict[HealthStatus, AttentionPriority] = {
             HealthStatus.CRITICAL: AttentionPriority.CRITICAL,
             HealthStatus.WARNING: AttentionPriority.HIGH,
@@ -301,8 +299,6 @@ class NativeNotificationChannel(AlertChannel):
     @override
     async def test(self) -> bool:
         """Test the native notification channel."""
-        from obscura.agent.interaction import AttentionPriority
-
         try:
             await self._notifier.notify(
                 title="Obscura Heartbeat",

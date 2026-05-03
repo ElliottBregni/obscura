@@ -30,6 +30,7 @@ import http.server
 import json
 import logging
 import os
+import shlex
 import socket
 import threading
 import time
@@ -839,8 +840,6 @@ def secrets_export(shell: str, only: str | None) -> None:
     Values are shell-escaped so paste-in-random-string secrets don't break
     the shell. Commented lines are NEVER emitted for unset names.
     """
-    import shlex
-
     if only:
         requested = [n.strip().upper() for n in only.split(",") if n.strip()]
     else:
@@ -884,9 +883,7 @@ def secrets_strict_env(tail: int, clear: bool) -> None:
 
     Or persist it for your user by adding the line to ``~/.obscura/.env``.
     """
-    import os as _os
-
-    strict_on = _os.environ.get("OBSCURA_TOOL_ENV_STRICT", "").strip().lower() in {
+    strict_on = os.environ.get("OBSCURA_TOOL_ENV_STRICT", "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -1352,8 +1349,6 @@ def profile_group() -> None:
 @profile_group.command("show")
 def profile_show() -> None:
     """Print the full profile in human-readable form."""
-    import json as _json
-
     client = _profile_client()
     try:
         profile = client.load()
@@ -1362,7 +1357,7 @@ def profile_show() -> None:
 
     data = profile.model_dump(mode="json")
     devices = data.pop("devices", [])
-    click.echo(_json.dumps(data, indent=2, sort_keys=True))
+    click.echo(json.dumps(data, indent=2, sort_keys=True))
     if devices:
         click.echo(f"\nDevices ({len(devices)}):")
         for dev in devices:
@@ -1380,8 +1375,6 @@ def profile_show() -> None:
 @click.argument("field_name")
 def profile_get(field_name: str) -> None:
     """Print a single field's value."""
-    import json as _json
-
     if field_name == "devices":
         raise click.ClickException(
             "Use `profile device list` to view devices.",
@@ -1402,7 +1395,7 @@ def profile_get(field_name: str) -> None:
     if value is None:
         click.echo("(unset)")
     elif isinstance(value, list):
-        click.echo(_json.dumps(value))
+        click.echo(json.dumps(value))
     else:
         click.echo(str(value))
 

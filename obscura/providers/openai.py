@@ -17,9 +17,9 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast, override
 
+from obscura.core.agent_loop import AgentLoop
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
-from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -40,6 +40,8 @@ from obscura.core.types import (
     ToolSpec,
     UnifiedRequest,
 )
+from obscura.plugins.capabilities import build_capability_map_section
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.models import (
     ChatMessage,
     CompletionParams,

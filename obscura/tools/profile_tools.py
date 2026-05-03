@@ -24,6 +24,9 @@ The vector-backed layer adds proper decay:
 from __future__ import annotations
 
 import json
+import re
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.auth.cli_user import current_cli_user
@@ -179,9 +182,6 @@ def profile_update(fact: str, memory_type: str = "fact") -> str:
             }
             category = _type_to_category.get(memory_type, ProfileCategory.LEARNED)
 
-            import re
-            import time
-
             key = f"{category.value}.{re.sub(r'[^\\w]', '_', fact[:40].lower()).strip('_')}_{int(time.time()) % 10000}"
             structured_fact = ProfileFact(
                 key=key,
@@ -243,8 +243,6 @@ def profile_sync() -> str:
 
     # Use new migration path.
     try:
-        from pathlib import Path
-
         from obscura.profile.migrate import migrate_flat_profile
 
         # Try project-level first, then home.

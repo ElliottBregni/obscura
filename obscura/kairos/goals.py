@@ -26,6 +26,9 @@ from typing import Any, cast
 
 import yaml
 
+from obscura.core.task_queue import TaskQueue
+from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
+
 logger = logging.getLogger(__name__)
 
 _GOALS_DIR = Path.home() / ".obscura" / "goals"
@@ -266,8 +269,6 @@ class GoalBoard:
     def _auto_decompose(self, goal: Goal) -> None:
         """Push acceptance criteria as tasks into the queue and link them."""
         try:
-            from obscura.core.task_queue import TaskQueue
-
             q = TaskQueue()
             priority = goal.priority_rank * 25  # critical=0, high=25, medium=50, low=75
             task_ids: list[str] = []
@@ -333,8 +334,6 @@ class GoalBoard:
         if goal is None or not goal.tasks:
             return goal
         try:
-            from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
-
             conn = _get_db()
             total = len(goal.tasks)
             completed = 0

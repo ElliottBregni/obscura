@@ -18,7 +18,6 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
-from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     Backend,
     BackendCapabilities,
@@ -33,6 +32,9 @@ from obscura.core.types import (
     StreamChunk,
     StreamMetadata,
 )
+from obscura.integrations.mcp.discovery import register_external_mcp_tools
+from obscura.plugins.capabilities import build_capability_map_section
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 if TYPE_CHECKING:
@@ -328,10 +330,6 @@ class CodexBackend(BackendToolHostMixin):
     # -- Lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
-        from obscura.integrations.mcp.discovery import (
-            register_external_mcp_tools,
-        )
-
         await register_external_mcp_tools(self, self._mcp_servers)
 
         sdk_cls, module_name = self._import_sdk_class()
@@ -565,8 +563,6 @@ class CodexBackend(BackendToolHostMixin):
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
-            from obscura.plugins.capabilities import build_capability_map_section
-
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")

@@ -28,6 +28,7 @@ from obscura.profile.models import (
     register_profile_decay_profiles,
 )
 from obscura.vector_memory.decay import compute_decay
+from obscura.vector_memory.vector_memory import VectorMemoryStore as VMS
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -73,8 +74,6 @@ class ProfileStore:
                 return cls._instances[user.user_id]
 
             if vector_store is None:
-                from obscura.vector_memory.vector_memory import VectorMemoryStore as VMS
-
                 vector_store = VMS.for_user(user)
 
             instance = cls(vector_store, user.user_id)

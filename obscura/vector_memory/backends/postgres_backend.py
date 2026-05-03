@@ -17,11 +17,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from obscura.core.pg_config import PGPoolManager
+from obscura.memory import MemoryKey
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
 from obscura.vector_memory.vector_memory_filters import match_metadata_filters
 
 if TYPE_CHECKING:
-    from obscura.memory import MemoryKey
     from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 logger = logging.getLogger(__name__)
@@ -236,8 +236,6 @@ class PostgreSQLVectorBackend:
 
     def list_keys(self, namespace: str | None = None) -> list[MemoryKey]:
         """List all keys."""
-        from obscura.memory import MemoryKey
-
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -356,8 +354,6 @@ class PostgreSQLVectorBackend:
 
     @staticmethod
     def _row_to_entry(row: Any) -> VectorEntry:
-        from obscura.memory import MemoryKey
-
         emb = row["embedding"]
         if isinstance(emb, str):
             emb = json.loads(emb)

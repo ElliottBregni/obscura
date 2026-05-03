@@ -25,6 +25,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
+from obscura.core.pg_config import is_pg_configured
+
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
     from obscura.memory.events import EventSink
@@ -106,6 +108,7 @@ class MemoryStore:
         ttl_seconds: float | None,
     ) -> None:
         """Emit a memory event. Imported lazily so NullSink stays near-free."""
+        # lazy: avoid circular dep with obscura.memory.events (imports MemoryKey from here)
         from obscura.memory.events import EventKind, get_default_sink, make_event
 
         sink = self._event_sink if self._event_sink is not None else get_default_sink()
@@ -422,9 +425,8 @@ def create_memory_store(user: AuthenticatedUser) -> MemoryStore:
     :class:`~obscura.memory.postgres_memory.PostgreSQLMemoryStore`.
     Otherwise returns the default SQLite-backed :class:`MemoryStore`.
     """
-    from obscura.core.pg_config import is_pg_configured
-
     if is_pg_configured():
+        # lazy: avoid circular dep with obscura.memory (postgres_memory imports MemoryKey from here)
         from obscura.memory.postgres_memory import PostgreSQLMemoryStore
 
         return PostgreSQLMemoryStore.for_user(user)  # type: ignore[return-value]

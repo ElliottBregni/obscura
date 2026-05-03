@@ -12,11 +12,13 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from obscura.core.agent_loop import AgentLoop
+from obscura.core.hooks import HookRegistry
 from obscura.core.types import AgentEvent, AgentEventKind, BackendProtocol
 from obscura.parity.models import ScenarioExpectation, ScenarioResult, ScenarioSpec
+from obscura.parity.tool_middleware import ToolRecordReplayMiddleware
 
 if TYPE_CHECKING:
-    from obscura.core.hooks import HookRegistry
     from obscura.core.tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -116,10 +118,6 @@ class AgentLoopScenarioExecutor:
         return await self._execute_async(spec)
 
     async def _execute_async(self, spec: ScenarioSpec) -> ScenarioResult:
-        from obscura.core.agent_loop import AgentLoop
-        from obscura.core.hooks import HookRegistry
-        from obscura.parity.tool_middleware import ToolRecordReplayMiddleware
-
         hooks = self._hooks or HookRegistry()
 
         # Install middleware based on tool_mode

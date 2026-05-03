@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as _dt_module
 import json
 import os
 import re
 import shlex
+import shutil
+import signal
+import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -1525,21 +1530,19 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_jitter(args: str, _ctx: REPLContext) -> str | None:
     """Show or set the reasoning jitter delay (OBSCURA_REASONING_JITTER_MS)."""
-    import os as _os
-
     val = args.strip()
     if not val:
-        current = _os.environ.get("OBSCURA_REASONING_JITTER_MS", "0")
+        current = os.environ.get("OBSCURA_REASONING_JITTER_MS", "0")
         print_info(
             f"Reasoning jitter: {current}ms  (set with /jitter <ms> or /jitter off)",
         )
         return None
     if val == "off":
-        _os.environ["OBSCURA_REASONING_JITTER_MS"] = "0"
+        os.environ["OBSCURA_REASONING_JITTER_MS"] = "0"
         print_ok("Reasoning jitter disabled (0ms).")
         return None
     if val.isdigit():
-        _os.environ["OBSCURA_REASONING_JITTER_MS"] = val
+        os.environ["OBSCURA_REASONING_JITTER_MS"] = val
         print_ok(f"Reasoning jitter set to {val}ms.")
         return None
     print_error("Usage: /jitter [<ms> | off]")
@@ -2867,8 +2870,6 @@ async def _swarm_background(
     ctx: REPLContext,
 ) -> None:
     """Background coroutine that runs all swarm agents and collects results."""
-    import asyncio as _aio
-
     run = ctx.swarm_runs[swarm_id]
     run["status"] = "running"
 
@@ -2884,7 +2885,7 @@ async def _swarm_background(
     ]
 
     try:
-        results: list[tuple[str, str]] = await _aio.gather(*coros)
+        results: list[tuple[str, str]] = await asyncio.gather(*coros)
         run["results"] = results
 
         # Synthesize
@@ -2921,8 +2922,6 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
       /swarm results [id]        Show results of a swarm run
       /swarm stop [id|all]       Cancel running swarm(s)
     """
-    import asyncio as _aio
-
     from obscura.tools.swarm import load_agent_configs
 
     tokens = shlex.split(args) if args else []
@@ -3080,7 +3079,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
     }
     ctx.swarm_runs[swarm_id] = run_state
 
-    bg_task = _aio.create_task(
+    bg_task = asyncio.create_task(
         _swarm_background(
             swarm_id=swarm_id,
             task=task,
@@ -3603,7 +3602,6 @@ async def cmd_pack(args: str, ctx: REPLContext) -> str | None:
             return None
         pack_name = tokens[1]
         import textwrap
-        from pathlib import Path
 
         # Try local .obscura/specs/packs first, then global
         local_dir = Path.cwd() / ".obscura" / "specs" / "packs"
@@ -4629,8 +4627,6 @@ async def _running_detail(
 
 async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
     """Kill all running agents, daemons, swarms, and supervisor."""
-    import asyncio as _asyncio
-
     stopped = 0
 
     # 1. Stop all agents in the runtime
@@ -4654,7 +4650,7 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
     # 3. Stop supervisor (kills all managed daemons)
     if ctx.supervisor_task is not None and not ctx.supervisor_task.done():
         ctx.supervisor_task.cancel()
-        with contextlib.suppress(_asyncio.CancelledError, Exception):
+        with contextlib.suppress(asyncio.CancelledError, Exception):
             await ctx.supervisor_task
         stopped += 1
         ctx.supervisor = None
@@ -4965,8 +4961,6 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
     if not entries:
         print_info("No audit entries found.")
         return None
-
-    from datetime import datetime
 
     table = Table(title=f"Broker Audit (last {len(entries)})", expand=False)
     table.add_column("time", style="dim", width=8)
@@ -5350,9 +5344,6 @@ async def cmd_cost(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
     """Run environment diagnostics."""
-    import shutil
-    import sys
-
     checks: list[tuple[str, str, str]] = []  # (name, status, detail)
 
     # Python version
@@ -5484,10 +5475,6 @@ async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
 
     Usage: /caffeinate [on|off|status]
     """
-    import os as _os
-    import signal as _signal
-    import subprocess as _sp
-
     sub = args.strip().lower()
 
     pid_attr = "_caffeinate_pid"
@@ -5495,7 +5482,7 @@ async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
 
     def _is_alive(pid: int) -> bool:
         try:
-            _os.kill(pid, 0)
+            os.kill(pid, 0)
             return True
         except (OSError, ProcessLookupError):
             return False
@@ -5504,10 +5491,10 @@ async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
         if current_pid and _is_alive(current_pid):
             print_info(f"Already caffeinated (pid {current_pid})")
             return None
-        proc = _sp.Popen(
+        proc = subprocess.Popen(
             ["caffeinate", "-dims"],
-            stdout=_sp.DEVNULL,
-            stderr=_sp.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         setattr(cmd_caffeinate, pid_attr, proc.pid)
         print_ok(f"Caffeinated — system sleep blocked (pid {proc.pid})")
@@ -5515,7 +5502,7 @@ async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
 
     if sub == "off":
         if current_pid and _is_alive(current_pid):
-            _os.kill(current_pid, _signal.SIGTERM)
+            os.kill(current_pid, signal.SIGTERM)
             setattr(cmd_caffeinate, pid_attr, None)
             print_ok("Caffeinate stopped — system can sleep again")
         else:
@@ -5555,8 +5542,6 @@ async def cmd_debug(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
     """AI-assisted git commit from staged changes."""
-    import asyncio as _aio
-
     # Gather git context
     cmds = {
         "status": "git status",
@@ -5566,10 +5551,10 @@ async def cmd_commit(args: str, ctx: REPLContext) -> str | None:
     }
     results: dict[str, str] = {}
     for key, cmd in cmds.items():
-        proc = await _aio.create_subprocess_shell(
+        proc = await asyncio.create_subprocess_shell(
             cmd,
-            stdout=_aio.subprocess.PIPE,
-            stderr=_aio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         results[key] = stdout.decode("utf-8", errors="replace").strip()
@@ -5624,15 +5609,13 @@ Do NOT use --amend, --no-verify, or -i flags. Do NOT commit .env or credential f
 
 async def cmd_review(args: str, ctx: REPLContext) -> str | None:
     """AI code review of changes. Usage: /review [PR number or ref]."""
-    import asyncio as _aio
-
     ref = args.strip() or "HEAD"
-    proc = await _aio.create_subprocess_exec(
+    proc = await asyncio.create_subprocess_exec(
         "git",
         "diff",
         ref,
-        stdout=_aio.subprocess.PIPE,
-        stderr=_aio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     stdout, _ = await proc.communicate()
     diff = stdout.decode("utf-8", errors="replace").strip()
@@ -5669,8 +5652,6 @@ Be concise. Focus on real issues, not style preferences."""
 
 async def cmd_pr(args: str, ctx: REPLContext) -> str | None:
     """AI-assisted pull request creation. Usage: /pr [base-branch]."""
-    import asyncio as _aio
-
     base = args.strip() or "main"
 
     # Gather git context in parallel
@@ -5683,10 +5664,10 @@ async def cmd_pr(args: str, ctx: REPLContext) -> str | None:
     }
     results: dict[str, str] = {}
     for key, cmd in cmds.items():
-        proc = await _aio.create_subprocess_shell(
+        proc = await asyncio.create_subprocess_shell(
             cmd,
-            stdout=_aio.subprocess.PIPE,
-            stderr=_aio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         results[key] = stdout.decode("utf-8", errors="replace").strip()
@@ -5761,15 +5742,13 @@ Do NOT use --force. Do NOT push to {base} directly."""
 
 async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
     """Security-focused code review. Usage: /security-review [ref]."""
-    import asyncio as _aio
-
     ref = args.strip() or "HEAD"
-    proc = await _aio.create_subprocess_exec(
+    proc = await asyncio.create_subprocess_exec(
         "git",
         "diff",
         ref,
-        stdout=_aio.subprocess.PIPE,
-        stderr=_aio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     stdout, _ = await proc.communicate()
     diff = stdout.decode("utf-8", errors="replace").strip()
@@ -5821,19 +5800,17 @@ Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
 
 async def cmd_ultrareview(args: str, ctx: REPLContext) -> str | None:
     """Multi-agent parallel code review. Usage: /ultrareview [PR#|ref]."""
-    import asyncio as _aio
-
     ref = args.strip()
 
     # If a PR number is given, fetch the diff from GitHub
     if ref and ref.isdigit():
-        proc = await _aio.create_subprocess_exec(
+        proc = await asyncio.create_subprocess_exec(
             "gh",
             "pr",
             "diff",
             ref,
-            stdout=_aio.subprocess.PIPE,
-            stderr=_aio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
         diff = stdout.decode("utf-8", errors="replace").strip()
@@ -5846,12 +5823,12 @@ async def cmd_ultrareview(args: str, ctx: REPLContext) -> str | None:
     else:
         # Local diff — use subprocess_exec to prevent shell injection
         git_ref = ref or "HEAD"
-        proc = await _aio.create_subprocess_exec(
+        proc = await asyncio.create_subprocess_exec(
             "git",
             "diff",
             git_ref,
-            stdout=_aio.subprocess.PIPE,
-            stderr=_aio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         diff = stdout.decode("utf-8", errors="replace").strip()
@@ -6011,7 +5988,7 @@ Rules:
         return name, "".join(output_lines)
 
     # Run all 5 in parallel
-    results: list[tuple[str, str]] = await _aio.gather(
+    results: list[tuple[str, str]] = await asyncio.gather(
         *[_run_specialist(i, n, p, f) for i, (n, p, f) in enumerate(specialists)],
     )
 
@@ -6143,10 +6120,8 @@ async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
 
     if sub == "on" or (not sub and not current):
         # Check dependencies
-        import shutil as _shutil
-
-        has_sox = _shutil.which("rec") is not None
-        has_arecord = _shutil.which("arecord") is not None
+        has_sox = shutil.which("rec") is not None
+        has_arecord = shutil.which("arecord") is not None
         if not has_sox and not has_arecord:
             print_error("Voice mode requires SoX (rec) or ALSA (arecord).")
             print_info(
@@ -6447,9 +6422,7 @@ async def cmd_arbiter(args: str, _ctx: REPLContext) -> str | None:
 
             console.print(f"[bold]Last {len(recent)} verdicts:[/bold]")
             for row in recent:
-                import datetime as _dt
-
-                ts = _dt.datetime.fromtimestamp(row["created_at"]).strftime(
+                ts = datetime.fromtimestamp(row["created_at"]).strftime(
                     "%Y-%m-%d %H:%M"
                 )
                 v = row["verdict"].upper()
@@ -6521,20 +6494,17 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
       /kairos proactive on|off       Toggle proactive tick loop
       /kairos dream on|off           Toggle dream consolidation
     """
-    import json as _json
-    from pathlib import Path as _Path
-
     from obscura.kairos.engine import is_kairos_enabled, set_kairos_mode
 
     def _write_setting(k: str, v: bool) -> None:
         """Persist toggle under ~/.obscura/settings.json (best-effort)."""
         try:
-            sp = _Path.home() / ".obscura" / "settings.json"
+            sp = Path.home() / ".obscura" / "settings.json"
             sp.parent.mkdir(parents=True, exist_ok=True)
             data: dict[str, object] = {}
             if sp.is_file():
                 try:
-                    data = _json.loads(sp.read_text(encoding="utf-8"))
+                    data = json.loads(sp.read_text(encoding="utf-8"))
                 except Exception:
                     data = {}
             # dot-notation like "kairos.enabled"
@@ -6545,7 +6515,7 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
                     cur[part] = {}
                 cur = cur[part]  # type: ignore[assignment]
             cur[parts[-1]] = v
-            sp.write_text(_json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            sp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         except Exception:
             pass
 
@@ -6554,15 +6524,13 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
         status = "ON" if is_kairos_enabled() else "OFF"
         print_info(f"KAIROS mode: {status}")
         # Feature status (resolved on demand by engine at runtime)
-        import os as _os
-
-        pro = _os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").lower() not in (
+        pro = os.environ.get("OBSCURA_KAIROS_PROACTIVE", "").lower() not in (
             "0",
             "false",
             "no",
             "off",
         )
-        dr = _os.environ.get("OBSCURA_KAIROS_DREAM", "").lower() not in (
+        dr = os.environ.get("OBSCURA_KAIROS_DREAM", "").lower() not in (
             "0",
             "false",
             "no",
@@ -6594,14 +6562,12 @@ async def cmd_kairos(args: str, ctx: REPLContext) -> str | None:
             print_error("Usage: /kairos proactive on|off   or   /kairos dream on|off")
             return None
         enabled = tokens[1] == "on"
-        import os as _os
-
         if tokens[0] == "proactive":
-            _os.environ["OBSCURA_KAIROS_PROACTIVE"] = "1" if enabled else "0"
+            os.environ["OBSCURA_KAIROS_PROACTIVE"] = "1" if enabled else "0"
             _write_setting("kairos.proactive", enabled)
             print_ok(f"Kairos proactive ticks {'enabled' if enabled else 'disabled'}.")
         else:
-            _os.environ["OBSCURA_KAIROS_DREAM"] = "1" if enabled else "0"
+            os.environ["OBSCURA_KAIROS_DREAM"] = "1" if enabled else "0"
             _write_setting("kairos.dream", enabled)
             print_ok(
                 f"Kairos dream consolidation {'enabled' if enabled else 'disabled'}.",
@@ -6955,8 +6921,6 @@ async def cmd_tag(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_version(_args: str, _ctx: REPLContext) -> str | None:
     """Show Obscura version and system info."""
-    import sys
-
     try:
         from importlib.metadata import version as pkg_version
 
@@ -6997,8 +6961,6 @@ async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
     for role, text in reversed(ctx.message_history):
         if role == "assistant":
             try:
-                import subprocess
-
                 proc = subprocess.run(
                     ["pbcopy"]
                     if sys.platform == "darwin"
@@ -7124,10 +7086,8 @@ async def cmd_log(args: str, _ctx: REPLContext) -> str | None:
             etype = entry.get("type", "?")
             data = entry.get("data", {})
 
-            import datetime
-
             time_str = (
-                datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+                _dt_module.datetime.fromtimestamp(ts).strftime("%H:%M:%S")
                 if ts
                 else "??:??:??"
             )
@@ -8158,8 +8118,6 @@ async def cmd_logout(args: str, _ctx: REPLContext) -> str | None:
 
 async def cmd_whoami(_args: str, _ctx: REPLContext) -> str | None:
     """Show the currently authenticated Supabase user. Usage: /whoami."""
-    import time as _time
-
     from obscura.cli.auth_commands import CREDENTIALS_PATH, load_session
 
     session = load_session()
@@ -8167,7 +8125,7 @@ async def cmd_whoami(_args: str, _ctx: REPLContext) -> str | None:
         print_info("Not signed in. Run /login to authenticate via Supabase.")
         return None
 
-    remaining = session.expires_at - int(_time.time())
+    remaining = session.expires_at - int(time.time())
     state = "valid" if remaining > 0 else "EXPIRED"
     gh_state = "yes" if session.provider_token else "no"
     console.print(f"  user:         {session.email or session.user_id}")
@@ -8384,8 +8342,6 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
     sub = args.strip().lower()
 
     if sub == "report":
-        import sys as _sys
-
         try:
             from importlib.metadata import version as pkg_version
 
@@ -8394,15 +8350,13 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
             ver = "dev"
         report = (
             f"## Bug Report\n\n"
-            f"- Obscura {ver}, Python {_sys.version_info.major}.{_sys.version_info.minor}, "
-            f"{_sys.platform}\n"
+            f"- Obscura {ver}, Python {sys.version_info.major}.{sys.version_info.minor}, "
+            f"{sys.platform}\n"
             f"- Backend: {ctx.backend}, Model: {ctx.model or 'default'}\n\n"
             f"### What happened?\n\n### Steps to reproduce\n\n1. \n"
         )
         console.print(report)
         try:
-            import subprocess
-
             subprocess.run(
                 ["pbcopy"]
                 if __import__("sys").platform == "darwin"
@@ -8447,10 +8401,7 @@ async def cmd_bug(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_terminal_setup(_args: str, _ctx: REPLContext) -> str | None:
     """Diagnose and configure terminal capabilities."""
-    import shutil as _shutil
-    import sys as _sys
-
-    cols, rows = _shutil.get_terminal_size()
+    cols, rows = shutil.get_terminal_size()
     term = os.environ.get("TERM", "unknown")
     colorterm = os.environ.get("COLORTERM", "")
     lang = os.environ.get("LANG", "")
@@ -8470,7 +8421,7 @@ async def cmd_terminal_setup(_args: str, _ctx: REPLContext) -> str | None:
         f"  256-color: {_c(s256)}  True-color: {_c(strue)}  Unicode: {_c(suni)}"
     )
     console.print(
-        f"  TTY: stdin={_c(_sys.stdin.isatty())} stdout={_c(_sys.stdout.isatty())}"
+        f"  TTY: stdin={_c(sys.stdin.isatty())} stdout={_c(sys.stdout.isatty())}"
     )
 
     issues: list[str] = []
@@ -8570,8 +8521,6 @@ async def cmd_goal(args: str, ctx: REPLContext) -> str | None:
 
 def _remove_goal_from_prompt(ctx: REPLContext) -> None:
     """Strip the goal injection from the system prompt."""
-    import re
-
     ctx.system_prompt = re.sub(
         r"\n\n\[SESSION GOAL\].*?Prioritize actions that advance it\.",
         "",
@@ -8818,15 +8767,13 @@ async def cmd_checkpoint(args: str, ctx: REPLContext) -> str | None:
         return None
 
     if sub == "save":
-        import datetime
-
         name = rest or f"cp-{len(checkpoints) + 1}"
         checkpoints[name] = {
             "history": list(ctx.message_history),
             "system_prompt": ctx.system_prompt,
             "file_changes": list(ctx.file_changes),
             "msg_count": len(ctx.message_history),
-            "saved_at": datetime.datetime.now(UTC).strftime("%H:%M:%S"),
+            "saved_at": datetime.now(UTC).strftime("%H:%M:%S"),
         }
         ctx._checkpoints = checkpoints  # type: ignore[attr-defined]
         print_ok(f"Checkpoint '{name}' saved ({len(ctx.message_history)} messages).")
@@ -9044,8 +8991,6 @@ async def cmd_context_inject(args: str, ctx: REPLContext) -> str | None:
 
     if text == "--paste":
         try:
-            import subprocess
-
             proc = subprocess.run(
                 ["pbpaste"]
                 if __import__("sys").platform == "darwin"
@@ -9156,8 +9101,6 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
 
 def _remove_block_from_prompt(ctx: REPLContext, tag: str) -> None:
     """Remove a tagged block like [TAG] ... from the system prompt."""
-    import re
-
     ctx.system_prompt = re.sub(
         rf"\n\n\[{re.escape(tag)}\].*?(?=\n\n\[|$)",
         "",
@@ -9350,8 +9293,6 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
     # Markdown fallback for name.
     if name == "the user":
         try:
-            import re
-
             from obscura.kairos.user_profile import UserProfile
 
             text = UserProfile().read()
@@ -9844,8 +9785,6 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
 
 async def _interview_input() -> str:
     """Read user input during interview (supports async)."""
-    import asyncio
-
     loop = asyncio.get_event_loop()
 
     def _read() -> str:

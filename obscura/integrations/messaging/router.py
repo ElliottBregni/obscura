@@ -31,6 +31,8 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import datetime
+import hashlib
 import logging
 import time
 from dataclasses import dataclass
@@ -417,9 +419,6 @@ class ChannelRouter:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Convenience: build a PlatformMessage and dispatch it."""
-        import datetime
-        import hashlib
-
         _channel_id = channel_id or f"dm:{sender_id}"
         _message_id = (
             message_id

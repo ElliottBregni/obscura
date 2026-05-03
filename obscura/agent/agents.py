@@ -27,13 +27,16 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import uuid
+import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum, auto
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
@@ -183,8 +186,6 @@ class AgentConfig(BaseModel):
     @property
     def model(self) -> str:
         """Deprecated: use provider instead."""
-        import warnings
-
         warnings.warn(
             "AgentConfig.model is deprecated. Use .provider instead.",
             DeprecationWarning,
@@ -740,8 +741,6 @@ class Agent:
 
         # Wire eval-driven tool router into the backend
         try:
-            from pathlib import Path
-
             from obscura.core.compiler.compiled import ToolRoutingConfig
             from obscura.core.tool_router import ToolRouter
             from obscura.core.tool_score_index import ToolScoreIndex
@@ -811,7 +810,6 @@ class Agent:
                 if hook_reg is None:
                     hook_reg = HookRegistry()
                     self._client._hooks = hook_reg  # pyright: ignore[reportPrivateUsage]
-                import inspect
 
                 # Defer factory execution until the hook is actually run. Some
                 # test suites patch the factory with AsyncMock() which would

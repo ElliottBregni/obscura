@@ -15,9 +15,9 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.agent_loop import AgentLoop
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
-from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     Backend,
@@ -35,6 +35,7 @@ from obscura.core.types import (
     ToolChoice,
     ToolSpec,
 )
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.models import (
     ChatMessage,
     CompletionParams,
@@ -450,8 +451,6 @@ class LocalLLMBackend(BackendToolHostMixin):
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with tool execution."""
-        from obscura.core.agent_loop import AgentLoop
-
         loop = AgentLoop(
             self,
             self._tool_registry,
@@ -714,13 +713,11 @@ def _parse_tool_input(raw: str) -> dict[str, Any]:
 # Lazy telemetry helpers
 # ---------------------------------------------------------------------------
 
-from obscura.telemetry.traces import NoOpTracer
+from obscura.telemetry.traces import NoOpTracer, get_tracer
 
 
 def _get_backend_tracer() -> Any:
     try:
-        from obscura.telemetry.traces import get_tracer
-
         return get_tracer("obscura.localllm_backend")
     except Exception:
         return NoOpTracer()

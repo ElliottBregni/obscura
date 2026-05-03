@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from obscura.core.types import Backend
 from obscura.parity.models import (
     BackendConformance,
     ContractCheckResult,
     MethodContract,
 )
+from obscura.providers.claude import ClaudeBackend
+from obscura.providers.copilot import CopilotBackend
+from obscura.providers.localllm import LocalLLMBackend
+from obscura.providers.moonshot import MoonshotBackend
+from obscura.providers.openai import OpenAIBackend
 
 
 def evaluate_backend_conformance(
@@ -21,13 +27,6 @@ def evaluate_backend_conformance(
     # ``backend._backend`` doesn't exist consistently; infer from capabilities owner.
     # Every backend implementation here exposes a ``native`` property and capabilities().
     # Backend enum is available from ``backend.native.meta`` only after start, so use class mapping.
-    from obscura.core.types import Backend
-    from obscura.providers.claude import ClaudeBackend
-    from obscura.providers.copilot import CopilotBackend
-    from obscura.providers.localllm import LocalLLMBackend
-    from obscura.providers.moonshot import MoonshotBackend
-    from obscura.providers.openai import OpenAIBackend
-
     if isinstance(backend, MoonshotBackend):
         backend_enum = Backend.MOONSHOT
     elif isinstance(backend, OpenAIBackend):

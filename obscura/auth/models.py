@@ -6,7 +6,7 @@ by the JWT validation middleware and consumed by RBAC dependencies.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 # ---------------------------------------------------------------------------
 # Roles
@@ -59,6 +59,20 @@ class AuthenticatedUser(BaseModel):
     # Supabase session_id (JWT ``session_id`` claim). Used for revocation
     # checks against ``auth.sessions`` on sensitive routes.
     session_id: str | None = None
+
+    @field_validator("roles", mode="after")
+    @classmethod
+    def _expand_admin(cls, roles: tuple[str, ...]) -> tuple[str, ...]:
+        """Admin grants every role. Expand the tuple at construction time so
+        direct ``.roles`` consumers (telemetry, API responses, capability
+        checks) see the full set, not just ``("admin",)``.
+        """
+        if "admin" not in roles:
+            return roles
+        # Preserve admin first, then append every other valid role in a
+        # stable order so equality / hashing is deterministic.
+        rest = tuple(sorted(VALID_ROLES - {"admin"}))
+        return ("admin", *rest)
 
     # -- convenience helpers ------------------------------------------------
 

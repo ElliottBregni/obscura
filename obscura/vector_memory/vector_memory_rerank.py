@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from obscura.vector_memory.decay import compute_decay
+
 if TYPE_CHECKING:
     from obscura.vector_memory import VectorMemoryEntry
 
@@ -120,8 +122,6 @@ class RecencyReranker:
         query_embedding: list[float],
     ) -> float:
         if self.decay_config is not None:
-            from obscura.vector_memory.decay import compute_decay
-
             accessed_at = getattr(entry, "accessed_at", None)
             return (
                 compute_decay(

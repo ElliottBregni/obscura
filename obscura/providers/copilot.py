@@ -12,11 +12,11 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, cast, override
 
+from obscura.core.agent_loop import AgentLoop, call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
-from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.core.types import (
     AgentEvent,
     AgentHookConfig,
@@ -30,9 +30,13 @@ from obscura.core.types import (
     Role,
     SessionRef,
     StreamChunk,
+    StreamMetadata,
     ToolChoice,
     ToolSpec,
 )
+from obscura.integrations.mcp.discovery import register_external_mcp_tools
+from obscura.plugins.capabilities import build_capability_map_section
+from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
 
 if TYPE_CHECKING:
@@ -228,10 +232,6 @@ class CopilotBackend(BackendToolHostMixin):
         """Initialize the Copilot client and create a default session."""
         from copilot import CopilotClient, SubprocessConfig
 
-        from obscura.integrations.mcp.discovery import (
-            register_external_mcp_tools,
-        )
-
         await register_external_mcp_tools(self, self._mcp_servers)
 
         client_config: SubprocessConfig | None = None
@@ -363,8 +363,6 @@ class CopilotBackend(BackendToolHostMixin):
             # Enrich the error chunk with runtime context so downstream
             # consumers (event store, supervisor) see session/model info
             # instead of all-None fields.
-            from obscura.core.types import StreamMetadata
-
             session_id = ""
             if self._session and hasattr(self._session, "session_id"):
                 session_id = str(self._session.session_id)
@@ -517,8 +515,6 @@ class CopilotBackend(BackendToolHostMixin):
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
-            from obscura.plugins.capabilities import build_capability_map_section
-
             cap_section = build_capability_map_section(self._tools)
             if cap_section:
                 lines.append("")
@@ -553,8 +549,6 @@ class CopilotBackend(BackendToolHostMixin):
             async for event in backend.run_loop("Fix the bug", max_turns=5):
                 print(event)
         """
-        from obscura.core.agent_loop import AgentLoop
-
         loop = AgentLoop(
             self,
             self._tool_registry,
@@ -630,8 +624,6 @@ class CopilotBackend(BackendToolHostMixin):
             def _wrapper_factory(bound_spec: ToolSpec) -> Callable[..., Any]:
                 async def wrapped(invocation: Any) -> Any:
                     from copilot.tools import ToolResult as CopilotToolResult
-
-                    from obscura.core.agent_loop import call_tool_handler
 
                     try:
                         raw_args = invocation.arguments
@@ -920,13 +912,11 @@ public_make_handler = _make_handler
 # Lazy telemetry helpers
 # ---------------------------------------------------------------------------
 
-from obscura.telemetry.traces import NoOpTracer
+from obscura.telemetry.traces import NoOpTracer, get_tracer
 
 
 def _get_backend_tracer() -> Any:
     try:
-        from obscura.telemetry.traces import get_tracer
-
         return get_tracer("obscura.copilot_backend")
     except Exception:
         return NoOpTracer()

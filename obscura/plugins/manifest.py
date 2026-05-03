@@ -13,7 +13,9 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
+import warnings
 from pathlib import Path
 from typing import Any, cast
 
@@ -370,8 +372,6 @@ def parse_manifest_file(path: Path) -> PluginSpec:
             msg = f"Failed to parse TOML: {exc}"
             raise ManifestError(msg, path) from exc
     elif suffix in (".yaml", ".yml"):
-        import warnings
-
         warnings.warn(
             f"YAML plugin manifests are deprecated; migrate {path.name} to TOML.",
             DeprecationWarning,
@@ -380,8 +380,6 @@ def parse_manifest_file(path: Path) -> PluginSpec:
         try:
             import yaml
         except ImportError:
-            import json
-
             try:
                 data = json.loads(path.read_text())
             except Exception as exc:
@@ -395,8 +393,6 @@ def parse_manifest_file(path: Path) -> PluginSpec:
                 raise ManifestError(msg, path) from exc
     else:
         # JSON fallback
-        import json
-
         try:
             data = json.loads(path.read_text())
         except Exception as exc:

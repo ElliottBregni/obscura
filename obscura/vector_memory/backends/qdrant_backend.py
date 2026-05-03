@@ -25,6 +25,7 @@ from qdrant_client.models import (
 
 from obscura.memory import MemoryKey
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
+from obscura.vector_memory.decay import compute_decay as _compute_decay
 
 if TYPE_CHECKING:
     from obscura.vector_memory.vector_memory_filters import MetadataFilter
@@ -334,8 +335,6 @@ class QdrantBackend:
             # Per-type decay via centralized compute_decay
             decay: float
             if self._decay_config is not None:
-                from obscura.vector_memory.decay import compute_decay as _compute_decay
-
                 decay = float(
                     _compute_decay(
                         memory_type,

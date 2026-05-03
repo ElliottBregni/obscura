@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import datetime
 import os
 import shlex
 import subprocess
@@ -135,8 +137,6 @@ async def securitytrails_domain(domain: str, **_: Any) -> dict[str, Any]:
 
 
 async def censys_search(query: str, per_page: int = 10, **_: Any) -> dict[str, Any]:
-    import base64
-
     api_id = _env("CENSYS_API_ID")
     api_secret = _env("CENSYS_API_SECRET")
     auth = base64.b64encode(f"{api_id}:{api_secret}".encode()).decode("utf-8")
@@ -482,8 +482,6 @@ async def datadog_list_logs(
     limit: int = 50,
     **_: Any,
 ) -> dict[str, Any]:
-    import datetime
-
     now = datetime.datetime.now(datetime.timezone.utc)
     default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -509,8 +507,6 @@ async def datadog_query_metrics(
     to_ts: int | None = None,
     **_: Any,
 ) -> dict[str, Any]:
-    import time
-
     now = int(time.time())
     params: dict[str, Any] = {
         "query": query,
@@ -532,8 +528,6 @@ async def datadog_list_traces(
     limit: int = 50,
     **_: Any,
 ) -> dict[str, Any]:
-    import datetime
-
     now = datetime.datetime.now(datetime.timezone.utc)
     default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -644,8 +638,6 @@ async def datadog_schedule_downtime(
     message: str | None = None,
     **_: Any,
 ) -> dict[str, Any]:
-    import time
-
     body: dict[str, Any] = {
         "scope": scope,
         "start": start if start is not None else int(time.time()),

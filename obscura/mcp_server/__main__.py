@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 
+from obscura.mcp_server.server import mcp
+
 
 def main() -> None:
     """Entry point for the Obscura MCP server."""
@@ -28,8 +30,6 @@ def main() -> None:
         help="Host for HTTP/SSE transport (default: 0.0.0.0)",
     )
     args = parser.parse_args()
-
-    from obscura.mcp_server.server import mcp
 
     if args.transport == "stdio":
         mcp.run(transport="stdio")

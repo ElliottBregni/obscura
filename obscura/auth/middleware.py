@@ -17,7 +17,9 @@ authentication.
 from __future__ import annotations
 
 import logging
+import os as _os
 import threading
+import time as _time
 from typing import TYPE_CHECKING, Any, override
 
 from obscura.memory import MemoryStore
@@ -138,8 +140,6 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def _record_failure(self, ip: str) -> None:
         if not ip:
             return
-        import time as _time
-
         now = _time.time()
         cutoff = now - _AUTH_FAILURE_WINDOW_SECONDS
         with self._failures_lock:
@@ -151,8 +151,6 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def _is_throttled(self, ip: str) -> bool:
         if not ip:
             return False
-        import time as _time
-
         cutoff = _time.time() - _AUTH_FAILURE_WINDOW_SECONDS
         with self._failures_lock:
             bucket = self._failures.get(ip, [])
@@ -185,8 +183,6 @@ def _client_ip(request: Request) -> str:
     """Best-effort client IP. Trust ``X-Forwarded-For`` only when a proxy is
     in front — configure via ``OBSCURA_TRUST_PROXY_HEADERS=true`` to opt in.
     """
-    import os as _os
-
     if _os.environ.get("OBSCURA_TRUST_PROXY_HEADERS", "").strip().lower() in (
         "1",
         "true",

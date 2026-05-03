@@ -4,6 +4,9 @@ Provides view, edit, grep, glob functionality using Obscura's existing tools.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from typing import TYPE_CHECKING
 
 from obscura.core.types import ToolSpec
@@ -14,8 +17,6 @@ if TYPE_CHECKING:
 
 def view_file_impl(path: str, start_line: int = 1, end_line: int = -1) -> str:
     """View file with line numbers (Copilot CLI 'view' equivalent)."""
-    import os
-
     # Defensive coercion — Copilot SDK may pass strings for numeric params
     start_line = int(start_line) if start_line else 1
     end_line = int(end_line) if end_line else -1
@@ -25,8 +26,6 @@ def view_file_impl(path: str, start_line: int = 1, end_line: int = -1) -> str:
 
     if os.path.isdir(path):
         # Directory listing
-        import subprocess
-
         result = subprocess.run(
             ["ls", "-la", path],
             capture_output=True,
@@ -50,8 +49,6 @@ def view_file_impl(path: str, start_line: int = 1, end_line: int = -1) -> str:
 
 def edit_file_impl(path: str, old_str: str, new_str: str) -> str:
     """Surgical string replacement in file (Copilot CLI 'edit' equivalent)."""
-    import os
-
     if not os.path.exists(path):
         return f"Error: File does not exist: {path}"
 
@@ -82,8 +79,6 @@ def grep_impl(
     show_line_numbers: bool = True,
 ) -> str:
     """Search for pattern in files (Copilot CLI 'grep' equivalent using ripgrep)."""
-    import subprocess
-
     cmd = ["rg"]
 
     if case_insensitive:
@@ -105,8 +100,6 @@ def grep_impl(
 
 def glob_impl(pattern: str, path: str = ".") -> str:
     """Find files matching pattern (Copilot CLI 'glob' equivalent)."""
-    import subprocess
-
     # Use fd or find
     result = subprocess.run(
         ["fd", pattern, path],
@@ -127,8 +120,6 @@ def glob_impl(pattern: str, path: str = ".") -> str:
 
 def report_intent_impl(intent: str) -> str:
     """Record the agent's current intent. No-op acknowledgement."""
-    import json
-
     return json.dumps({"ok": True, "intent": intent})
 
 

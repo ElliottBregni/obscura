@@ -16,6 +16,7 @@ import numpy as np
 
 from obscura.memory import MemoryKey
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
+from obscura.vector_memory.decay import compute_decay as _compute_decay
 from obscura.vector_memory.vector_memory_filters import (
     MetadataFilter,
     match_metadata_filters,
@@ -239,8 +240,6 @@ class SQLiteBackend:
             )
 
             # Per-type decay via centralized compute_decay
-            from obscura.vector_memory.decay import compute_decay as _compute_decay
-
             if self._decay_config is not None:
                 decay = _compute_decay(
                     row["memory_type"],

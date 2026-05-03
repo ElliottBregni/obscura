@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from obscura.core.hooks import HookRegistry
+from obscura.tools.policy.models import ToolPolicy
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -127,8 +130,6 @@ class LazyManifestProxy:
 
     def _build_tool_policy(self) -> Any:
         """Build ToolPolicy from manifest permissions."""
-        from obscura.tools.policy.models import ToolPolicy
-
         perms = self._manifest.permissions
         return ToolPolicy(
             name=self._manifest.name,
@@ -138,8 +139,6 @@ class LazyManifestProxy:
 
     def _build_hook_registry(self) -> Any:
         """Build HookRegistry from manifest hook definitions."""
-        from obscura.core.hooks import HookRegistry
-
         if not self._manifest.hooks:
             return HookRegistry()
 

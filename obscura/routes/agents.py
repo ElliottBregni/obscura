@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from obscura.agent.agents import AgentStatus, MCPConfig
+from obscura.agent.aper import APERProfile, ServerAPERAgent
 from obscura.approvals import (
     create_tool_approval_request,
     wait_for_tool_approval,
@@ -94,8 +96,6 @@ def _string_key_dict(value: Any) -> dict[str, Any] | None:
 
 
 def _normalize_spawn_request(body: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    from obscura.agent.agents import MCPConfig
-
     raw_builder = body.get("builder", {})
     builder: dict[str, Any] = (
         cast("dict[str, Any]", raw_builder) if isinstance(raw_builder, dict) else {}
@@ -464,8 +464,6 @@ async def agent_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all agents for the user."""
-    from obscura.agent.agents import AgentStatus
-
     runtime = await get_runtime(user)
 
     status_filter = None
@@ -828,8 +826,6 @@ def _compose_system_prompt(template: dict[str, Any]) -> str:
 
 def _build_mcp_config(template: dict[str, Any]) -> Any:
     """Build MCPConfig from template fields."""
-    from obscura.agent.agents import MCPConfig
-
     mcp_servers_raw: list[dict[str, Any]] = template.get("mcp_servers", [])
     explicit_servers: list[dict[str, Any]] = []
     for spec in mcp_servers_raw:
@@ -915,8 +911,6 @@ async def agent_spawn_from_template(
     aper_profile_data = template.get("aper_profile")
     aper_result: str | None = None
     if body.mode == "aper" and aper_profile_data is not None and body.prompt:
-        from obscura.agent.aper import APERProfile, ServerAPERAgent
-
         profile = APERProfile(
             analyze_template=aper_profile_data.get(
                 "analyze_template",

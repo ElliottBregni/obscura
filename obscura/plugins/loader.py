@@ -25,6 +25,7 @@ import contextlib
 import importlib
 import logging
 import os
+import sys
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_global_home
@@ -178,8 +179,6 @@ def _resolve_handler_from_plugin_module(
 
     Returns the callable handler or ``None`` on failure.
     """
-    import sys
-
     bootstrap = getattr(plugin_spec, "bootstrap", None)
     if not bootstrap:
         return None
