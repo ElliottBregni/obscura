@@ -19,7 +19,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel
 
@@ -78,7 +78,7 @@ def _read_settings_runtime(cwd: Path | None = None) -> dict[str, Any]:
         return {}
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         _log.warning("Could not parse %s: %s", path, exc)
         return {}
@@ -86,9 +86,10 @@ def _read_settings_runtime(cwd: Path | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
 
-    runtime = raw.get("runtime")
-    if not isinstance(runtime, dict):
+    runtime_raw = cast(dict[str, Any], raw).get("runtime")
+    if not isinstance(runtime_raw, dict):
         return {}
+    runtime = cast(dict[str, Any], runtime_raw)
 
     cleaned: dict[str, Any] = {}
     for key, value in runtime.items():

@@ -592,7 +592,6 @@ class Kairos:
         recipient = self._config.notification_recipient
         if not recipient:
             return
-        short_id = exc.intervention_id[:8] if exc.intervention_id else "?"
         msg = (
             f"⚠ Kairos needs input\n"
             f"Goal: {goal.title}\n"
