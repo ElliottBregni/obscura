@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from rich.table import Table
 
@@ -166,7 +166,7 @@ def cmd_mcp_list(args: list[str]) -> None:
         table.add_column("Status", style="white", width=20)
 
         for server in servers:
-            status_parts = []
+            status_parts: list[str] = []
             if server.missing_env:
                 status_parts.append(
                     f"\u26a0\ufe0f  Missing: {', '.join(server.missing_env)}",
@@ -238,7 +238,9 @@ def cmd_mcp_select(args: list[str]) -> None:
             table.add_column("Matched Keywords", style="yellow")
             table.add_column("Status", style="white")
 
-            from obscura.integrations.mcp.config_loader import _SERVER_KEYWORDS
+            from obscura.integrations.mcp.config_loader import (
+                _SERVER_KEYWORDS,  # pyright: ignore[reportPrivateUsage]
+            )
 
             for name in selected:
                 server = next((s for s in servers if s.name == name), None)
@@ -349,9 +351,10 @@ def cmd_mcp_install(args: list[str]) -> None:
         mcp_dir = resolve_obscura_mcp_dir()
         config_file = mcp_dir / "config.json"
 
+        config: dict[str, Any]
         if config_file.exists():
             with open(config_file) as f:
-                config = json.load(f)
+                config = cast(dict[str, Any], json.load(f))
         else:
             config = {"mcpServers": {}}
 

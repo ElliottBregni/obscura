@@ -31,7 +31,9 @@ import urllib.parse
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from typing_extensions import override
 
 import click
 import httpx
@@ -140,7 +142,6 @@ _KEYRING_USERNAME = "supabase-session"
 def _keyring_available() -> bool:
     try:
         import keyring  # noqa: F401
-        import keyring.errors  # noqa: F401
 
         backend = keyring.get_keyring()
         # NullKeyring / FailKeyring don't actually persist — treat as absent.
@@ -249,7 +250,7 @@ def _build_provider_secrets_metadata(
     existing_secrets = metadata.get(_PROVIDER_SECRET_METADATA_KEY)
     provider_secrets: dict[str, Any]
     if isinstance(existing_secrets, dict):
-        provider_secrets = dict(existing_secrets)
+        provider_secrets = dict(cast(dict[str, Any], existing_secrets))
     else:
         provider_secrets = {}
 
@@ -289,11 +290,13 @@ def _sync_provider_secrets_to_supabase(
             f"Failed to fetch Supabase user metadata ({user_resp.status_code}): {user_resp.text}",
         )
 
-    user_body = user_resp.json()
+    user_body: dict[str, Any] = cast(dict[str, Any], user_resp.json())
     existing_user_metadata = user_body.get("user_metadata")
     metadata = _build_provider_secrets_metadata(
         existing_user_metadata=(
-            existing_user_metadata if isinstance(existing_user_metadata, dict) else None
+            cast(dict[str, Any], existing_user_metadata)
+            if isinstance(existing_user_metadata, dict)
+            else None
         ),
         provider=provider,
         session=session,
@@ -324,8 +327,11 @@ def _refresh_session(cfg: SupabaseCliConfig, refresh_token: str) -> StoredSessio
     )
     if resp.status_code != 200:
         raise RuntimeError(f"refresh failed ({resp.status_code}): {resp.text}")
-    body = resp.json()
-    user = body.get("user") or {}
+    body: dict[str, Any] = cast(dict[str, Any], resp.json())
+    user_raw = body.get("user") or {}
+    user: dict[str, Any] = (
+        cast(dict[str, Any], user_raw) if isinstance(user_raw, dict) else {}
+    )
     provider_token = body.get("provider_token")
     provider_refresh_token = body.get("provider_refresh_token")
     return StoredSession(
@@ -456,6 +462,7 @@ def _build_callback_handler(
     done: threading.Event,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
+        @override
         def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
             return
 

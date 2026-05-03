@@ -14,7 +14,7 @@ import contextlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.cli.render import console, print_warning
 from obscura.core.client import ObscuraClient
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from obscura.cli.commands import REPLContext
 
 
-def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:
+def _discover_mcp() -> tuple[list[dict[str, Any]], list[str]]:  # pyright: ignore[reportUnusedFunction]
     """Auto-discover MCP servers from ~/.obscura/mcp/. Returns (configs, names)."""
     try:
         from obscura.integrations.mcp.config_loader import (
@@ -51,7 +51,7 @@ class AgentInfo:
     status: str = "configured"
 
 
-def _discover_agents() -> list[str]:
+def _discover_agents() -> list[str]:  # pyright: ignore[reportUnusedFunction]
     return [a.name for a in _discover_agent_infos()]
 
 
@@ -87,7 +87,9 @@ def _parse_inline_agent_mention(text: str) -> tuple[str, str] | None:
     return (agent_name, prompt) if agent_name and prompt else None
 
 
-async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | None:
+async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunction]
+    ctx: REPLContext, text: str
+) -> str | None:
     parsed = _parse_inline_agent_mention(text)
     if parsed is None:
         return None
@@ -114,32 +116,44 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
             raw_mcp = cfg.get("mcp_servers", [])
             parsed_mcp: list[dict[str, Any]] = []
             if isinstance(raw_mcp, list):
-                for server in raw_mcp:
+                for server in cast(list[Any], raw_mcp):
                     if isinstance(server, dict):
-                        parsed_mcp.append(server)
+                        parsed_mcp.append(cast(dict[str, Any], server))
                     elif isinstance(server, str) and server.strip():
                         parsed_mcp.append({"name": server.strip()})
-            manifest = AgentManifest(
-                name=str(cfg.get("name", agent_name)),
-                provider=str(cfg.get("provider") or cfg.get("model", ctx.backend)),
-                system_prompt=str(cfg.get("system_prompt", "")),
-                max_turns=int(cfg.get("max_turns", ctx.max_turns)),
-                tools=list(cfg.get("tools", []))
-                if isinstance(cfg.get("tools"), list)
-                else [],
-                tags=list(cfg.get("tags", []))
-                if isinstance(cfg.get("tags"), list)
-                else [],
-                mcp_servers=parsed_mcp,
-                skills_config=skills_cfg,
-                can_delegate=bool(cfg.get("can_delegate", False)),
-                delegate_allowlist=list(cfg.get("delegate_allowlist", []))
-                if isinstance(cfg.get("delegate_allowlist"), list)
-                else [],
-                max_delegation_depth=int(cfg.get("max_delegation_depth", 3)),
-                tool_allowlist=list(cfg.get("tool_allowlist", []))
-                if isinstance(cfg.get("tool_allowlist"), list)
-                else None,
+            # AgentManifest uses pydantic field aliases (``provider`` exposed as
+            # ``model``, ``mcp_servers`` exposed as ``mcp_server_refs``).
+            # ``populate_by_name=True`` makes both forms valid at runtime but
+            # pyright follows the alias — we use the python field names here.
+            manifest = AgentManifest.model_validate(
+                {
+                    "name": str(cfg.get("name", agent_name)),
+                    "provider": str(
+                        cfg.get("provider") or cfg.get("model", ctx.backend)
+                    ),
+                    "system_prompt": str(cfg.get("system_prompt", "")),
+                    "max_turns": int(cfg.get("max_turns", ctx.max_turns)),
+                    "tools": list(cast(list[Any], cfg.get("tools", [])))
+                    if isinstance(cfg.get("tools"), list)
+                    else [],
+                    "tags": list(cast(list[Any], cfg.get("tags", [])))
+                    if isinstance(cfg.get("tags"), list)
+                    else [],
+                    "mcp_servers": parsed_mcp,
+                    "skills_config": skills_cfg,
+                    "can_delegate": bool(cfg.get("can_delegate", False)),
+                    "delegate_allowlist": list(
+                        cast(list[Any], cfg.get("delegate_allowlist", []))
+                    )
+                    if isinstance(cfg.get("delegate_allowlist"), list)
+                    else [],
+                    "max_delegation_depth": int(cfg.get("max_delegation_depth", 3)),
+                    "tool_allowlist": list(
+                        cast(list[Any], cfg.get("tool_allowlist", []))
+                    )
+                    if isinstance(cfg.get("tool_allowlist"), list)
+                    else None,
+                }
             )
     except Exception as exc:
         print_warning(f"Failed loading @{agent_name} manifest: {exc}")
@@ -175,9 +189,11 @@ async def _run_inline_agent_from_mention(ctx: REPLContext, text: str) -> str | N
     return "".join(output_chunks).strip()
 
 
-async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
+async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
+    client: Any,
+) -> asyncio.Task[None] | None:
     from obscura.agent.daemon_agent import DaemonAgent
-    from obscura.agent.interaction import InteractionBus
+    from obscura.agent.interaction import AttentionPriority, InteractionBus
     from obscura.agent.supervisor import SupervisorConfig
     from obscura.cli.render import console as _console
 
@@ -201,12 +217,18 @@ async def _start_imessage_daemon(client: Any) -> asyncio.Task[None] | None:
                 for k, v in im_cfg.items()
                 if k not in {"contacts", "poll_interval"}
             }
+            priority_val = tdef.priority
+            priority = (
+                priority_val
+                if isinstance(priority_val, AttentionPriority)
+                else AttentionPriority.NORMAL
+            )
             triggers.append(
                 _IMT(
                     contacts=tuple(im_cfg.get("contacts", [])),
                     poll_interval=im_cfg.get("poll_interval", 30),
                     notify_user=tdef.notify_user,
-                    priority=tdef.priority,
+                    priority=priority,
                     data=im_data,
                 ),
             )

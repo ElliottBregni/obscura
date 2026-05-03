@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -59,7 +59,7 @@ def append_event(
     Fields: ts (ISO8601), kind, preview, tool_names, extra
     """
     logger = _get_logger()
-    payload = {
+    payload: dict[str, Any] = {
         "ts": datetime.now(UTC).isoformat(),
         "kind": kind,
         "preview": preview or "",
@@ -81,7 +81,7 @@ def tail_entries(n: int = 50) -> list[dict[str, Any]]:
         return []
     from collections import deque
 
-    dq = deque(maxlen=n)
+    dq: deque[dict[str, Any]] = deque(maxlen=n)
     try:
         with log_path.open("r", encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -89,7 +89,8 @@ def tail_entries(n: int = 50) -> list[dict[str, Any]]:
                 if not line:
                     continue
                 try:
-                    dq.append(json.loads(line))
+                    parsed = cast(dict[str, Any], json.loads(line))
+                    dq.append(parsed)
                 except Exception:
                     # keep raw line if JSON parse fails
                     dq.append({"raw": line})
@@ -100,11 +101,15 @@ def tail_entries(n: int = 50) -> list[dict[str, Any]]:
 
 def tail_pretty(n: int = 50) -> str:
     entries = tail_entries(n)
-    lines = []
+    lines: list[str] = []
     for e in entries:
         ts = e.get("ts", "?")
         kind = e.get("kind", "?")
         preview = e.get("preview", "")
-        tools = ",".join(e.get("tool_names", []))
+        tool_names_raw = e.get("tool_names", [])
+        tool_names = (
+            cast(list[Any], tool_names_raw) if isinstance(tool_names_raw, list) else []
+        )
+        tools = ",".join(str(t) for t in tool_names)
         lines.append(f"[{ts}] {kind} ({tools}) {preview}")
     return "\n".join(lines)

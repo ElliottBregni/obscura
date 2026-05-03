@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
+
+from typing_extensions import override
 
 from obscura.cli import render
 
@@ -12,7 +15,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
     the OutputManager.capture_internal buffer.
     Safe to call multiple times.
     """
-    out = output_manager or render.output
+    out: Any = output_manager or render.output
 
     logger = logging.getLogger("obscura")
     logger.setLevel(logging.DEBUG)
@@ -25,6 +28,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
     fmt = logging.Formatter("%(levelname)s: %(message)s")
 
     class InfoHandler(logging.Handler):
+        @override
         def emit(self, record: logging.LogRecord) -> None:
             if record.levelno < logging.INFO:
                 return
@@ -39,6 +43,7 @@ def configure_logger(output_manager: object | None = None) -> logging.Logger:
                 pass
 
     class DebugHandler(logging.Handler):
+        @override
         def emit(self, record: logging.LogRecord) -> None:
             if record.levelno != logging.DEBUG:
                 return

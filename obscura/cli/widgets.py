@@ -23,7 +23,7 @@ import json
 import shutil
 import sys
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import Application
@@ -45,8 +45,8 @@ from obscura.cli.render import (
     OK_COLOR,
     TOOL_COLOR,
     WARN_COLOR,
-    _detect_language,
-    _sanitize_text,
+    _detect_language,  # pyright: ignore[reportPrivateUsage]
+    _sanitize_text,  # pyright: ignore[reportPrivateUsage]
     console,
 )
 
@@ -157,9 +157,9 @@ def _format_arg_value(val: Any) -> str:
         try:
             formatted = json.dumps(val, indent=2, ensure_ascii=False)
         except (TypeError, ValueError):
-            formatted = str(val)
+            formatted = str(cast(object, val))
     else:
-        formatted = str(val)
+        formatted = str(cast(object, val))
 
     lines = formatted.split("\n")
     if len(lines) > _MAX_ARG_LINES:
@@ -631,7 +631,7 @@ async def ask_multi_select(request: MultiSelectRequest) -> WidgetResult:
         for i, c in enumerate(choices, 1):
             console.print(f"    {i}. {c}")
         answer = await _fallback_confirm("  > ")
-        selected = []
+        selected: list[str] = []
         for part in answer.split(","):
             part = part.strip()
             if part.isdigit():

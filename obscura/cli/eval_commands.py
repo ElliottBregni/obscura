@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
+
+if TYPE_CHECKING:
+    from obscura.core.tools import ToolRegistry
+    from obscura.core.types import BackendProtocol
 
 console = Console()
 
@@ -236,7 +241,7 @@ def report_cmd(run_id: str | None, suite_id: str | None, output_format: str) -> 
 # ---------------------------------------------------------------------------
 
 
-def _resolve_backend(backend_name: str, model_name: str) -> object:
+def _resolve_backend(backend_name: str, model_name: str) -> "BackendProtocol":
     """Resolve a BackendProtocol instance by name."""
     from obscura.core.auth import resolve_auth
     from obscura.core.types import Backend
@@ -303,7 +308,7 @@ def _resolve_backend(backend_name: str, model_name: str) -> object:
     raise click.ClickException(msg)
 
 
-def _resolve_tool_registry() -> object:
+def _resolve_tool_registry() -> "ToolRegistry":
     """Get a ToolRegistry with standard system tools registered."""
     from obscura.core.tools import ToolRegistry
 

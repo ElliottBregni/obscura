@@ -14,7 +14,7 @@ Commands::
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import click
 
@@ -34,12 +34,15 @@ def _get_db_path() -> str:
 def _get_kairos(agent_loop: Any = None) -> Kairos:
     """Instantiate Kairos with the default DB path."""
     from obscura.core.agent_loop import AgentLoop
-    from obscura.core.config import ObscuraConfig
+    from obscura.core.auth import resolve_auth
+    from obscura.core.tools import ToolRegistry
+    from obscura.core.types import Backend
     from obscura.providers import CopilotBackend
 
-    config = ObscuraConfig()
-    backend = CopilotBackend(config)
-    loop = agent_loop or AgentLoop(backend=backend)
+    auth = resolve_auth(Backend.COPILOT)
+    backend = CopilotBackend(auth)
+    registry = ToolRegistry()
+    loop = agent_loop or AgentLoop(backend=backend, tool_registry=registry)
     return Kairos(
         db_path=_get_db_path(),
         agent_loop=loop,
@@ -332,45 +335,59 @@ def _print_goal(goal: Any, *, verbose: bool, kairos: Kairos) -> None:
 
 from obscura.core.paths import resolve_obscura_settings
 
-def _read_settings() -> dict:
+
+def _read_settings() -> dict[str, Any]:
     p = resolve_obscura_settings()
     try:
         if p.exists():
             import json as _json
-            return _json.loads(p.read_text(encoding="utf-8"))
+
+            parsed: Any = _json.loads(p.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
     except Exception:
         return {}
     return {}
 
-def _write_settings(data: dict) -> None:
+
+def _write_settings(data: dict[str, Any]) -> None:
     p = resolve_obscura_settings()
     p.parent.mkdir(parents=True, exist_ok=True)
     import json as _json
+
     p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+
 
 @kairos_group.command("enable")
 def kairos_enable() -> None:
     """Enable Kairos background actions for this home (writes .obscura/settings.json)."""
     cfg = _read_settings()
-    cfg.setdefault("kairos", {})
-    cfg["kairos"]["enabled"] = True
+    kairos_section = cfg.setdefault("kairos", {})
+    if isinstance(kairos_section, dict):
+        cast(dict[str, Any], kairos_section)["enabled"] = True
     cfg["kairos_enabled"] = True
     _write_settings(cfg)
     click.echo("Kairos enabled for this home (~/.obscura/settings.json updated).")
+
 
 @kairos_group.command("disable")
 def kairos_disable() -> None:
     """Disable Kairos background actions for this home."""
     cfg = _read_settings()
-    cfg.setdefault("kairos", {})
-    cfg["kairos"]["enabled"] = False
+    kairos_section = cfg.setdefault("kairos", {})
+    if isinstance(kairos_section, dict):
+        cast(dict[str, Any], kairos_section)["enabled"] = False
     cfg["kairos_enabled"] = False
     _write_settings(cfg)
     click.echo("Kairos disabled for this home (~/.obscura/settings.json updated).")
+
 
 @kairos_group.command("enabled")
 def kairos_enabled_status() -> None:
     """Show whether Kairos is enabled for this home."""
     cfg = _read_settings()
-    enabled = bool(cfg.get("kairos_enabled") or cfg.get("kairos", {}).get("enabled"))
+    nested = cfg.get("kairos", {})
+    nested_enabled = (
+        cast(dict[str, Any], nested).get("enabled") if isinstance(nested, dict) else False
+    )
+    enabled = bool(cfg.get("kairos_enabled") or nested_enabled)
     click.echo(f"Kairos enabled: {enabled}")
