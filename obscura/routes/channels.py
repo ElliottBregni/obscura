@@ -167,8 +167,9 @@ async def whatsapp_webhook(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    tasks = []
     import asyncio
+
+    tasks: list[asyncio.Task[Any]] = []
 
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):

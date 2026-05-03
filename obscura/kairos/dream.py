@@ -23,6 +23,7 @@ import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +311,7 @@ class DreamConsolidator:
             from obscura.core.config import ObscuraConfig
 
             # Gather the tools the dream agent needs.
-            dream_tools = []
+            dream_tools: list[Any] = []
             try:
                 from obscura.tools.system import get_system_tool_specs
 
@@ -395,10 +396,11 @@ class DreamConsolidator:
         try:
             from obscura.core.config import ObscuraConfig
 
-            cfg = ObscuraConfig.load()
+            cfg: Any = ObscuraConfig.load()
+            data_dir = getattr(cfg, "data_dir", None)
             events_db = (
-                Path(cfg.data_dir) / "events.db"
-                if hasattr(cfg, "data_dir")
+                Path(data_dir) / "events.db"
+                if data_dir is not None
                 else Path.home() / ".obscura" / "events.db"
             )
         except Exception:

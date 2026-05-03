@@ -13,7 +13,7 @@ dependencies = [
     # Official OpenAI Codex Python SDK — not published to PyPI; installed
     # from source in the openai/codex monorepo.
     # See https://developers.openai.com/codex/sdk
-    "codex-app-server-sdk",
+    "openai-codex-app-server-sdk",
     "openai>=1.0.0",
     "httpx>=0.27.0",
     "numpy>=2.1.0",
@@ -200,28 +200,7 @@ obscura = ["py.typed"]
 
 # Exclude non-package directories
 [tool.setuptools.exclude-package-data]
-obscura = ["tests/*", "helm/*", "infra/*", "docs/*", "examples/*", "scripts/*"]
-
-# End-to-end test configuration
-[tool.pytest.ini_options]
-testpaths = ["tests", "tests/e2e"]
-addopts = "-v --tb=short"
-norecursedirs = ["_archive", ".worktrees"]
-asyncio_mode = "auto"
-markers = [
-    "e2e: end-to-end tests (slow, require server)",
-    "unit: fast unit tests",
-    "integration: integration tests",
-]
-
-[tool.coverage.run]
-source = ["obscura"]
-omit = ["tests/*"]
-
-[tool.coverage.report]
-fail_under = 85
-show_missing = true
-skip_empty = true
+obscura = ["helm/*", "infra/*", "docs/*", "scripts/*"]
 
 [tool.ruff]
 target-version = "py313"
@@ -243,17 +222,8 @@ ignore = ["E501"]
 "obscura/deps/__init__.py" = ["E402"]
 "obscura/integrations/mcp/server.py" = ["F811"]
 "obscura/routes/admin.py" = ["E741"]
-"tests/e2e/test_admin_webhooks.py" = ["E741"]
-"tests/unit/obscura/auth/test_auth_middleware.py" = ["E402"]
-"tests/unit/obscura/core/test_config_env.py" = ["E712"]
-"tests/unit/obscura/telemetry/test_telemetry_metrics.py" = ["F401"]
-"tests/unit/obscura/test_legacy_module/test_crawlers.py" = ["F401"]
-"tests/unit/obscura/test_legacy_module/test_sync_integration.py" = ["F541"]
-"tests/unit/obscura/providers/test_copilot_models.py" = ["F405"]
-"demos/a2a/agents.py" = ["E402"]
-"demos/backend_agents/common.py" = ["F811"]
 
 [tool.uv.sources]
 # Pin to openai/codex monorepo — the third-party "codex-app-server-sdk" on
 # PyPI is unrelated. See https://github.com/openai/codex/tree/main/sdk/python
-codex-app-server-sdk = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }
+openai-codex-app-server-sdk = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }

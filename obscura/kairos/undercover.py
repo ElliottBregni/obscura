@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -52,29 +51,6 @@ def is_undercover() -> bool:
     """
     env_val = os.environ.get("OBSCURA_UNDERCOVER", "1").strip().lower()
     return env_val not in ("0", "false", "no", "off")
-
-
-@lru_cache(maxsize=1)
-def _get_repo_class() -> str:
-    """Classify the current repo as 'internal' or 'public'."""
-    try:
-        import subprocess
-
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return "unknown"
-        remote_url = result.stdout.strip().lower()
-        for pattern in _INTERNAL_REPO_PATTERNS:
-            if pattern in remote_url:
-                return "internal"
-        return "public"
-    except Exception:
-        return "unknown"
 
 
 class UndercoverMode:

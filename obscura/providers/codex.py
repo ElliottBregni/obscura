@@ -1,6 +1,6 @@
 """obscura.providers.codex — BackendProtocol implementation for the official Codex SDK.
 
-This backend uses OpenAI's ``codex_app_server`` SDK (PyPI: ``codex-app-server-sdk``),
+This backend uses OpenAI's ``codex_app_server`` SDK (PyPI: ``openai-codex-app-server-sdk``),
 which drives the local ``codex`` binary via its ``app-server`` subcommand over
 JSON-RPC. Reference: https://developers.openai.com/codex/sdk
 """
@@ -975,7 +975,7 @@ class CodexBackend(BackendToolHostMixin):
             py_exe = sys.executable
             msg = (
                 "Official OpenAI Codex SDK not found. Install with: "
-                f"`{py_exe} -m pip install codex-app-server-sdk`. "
+                f"`{py_exe} -m pip install openai-codex-app-server-sdk`. "
                 "See https://developers.openai.com/codex/sdk for details. "
                 f"Import error: {exc}"
             )
@@ -985,7 +985,7 @@ class CodexBackend(BackendToolHostMixin):
         if not inspect.isclass(sdk_cls):
             msg = (
                 f"{_SDK_MODULE} is installed but exposes no AsyncCodex/Codex class. "
-                "Expected codex-app-server-sdk >= 0.2.0."
+                "Expected openai-codex-app-server-sdk >= 0.2.0."
             )
             raise RuntimeError(msg)
 

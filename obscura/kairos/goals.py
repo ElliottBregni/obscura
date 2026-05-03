@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -215,11 +215,11 @@ class GoalBoard:
 
         for key, val in fields.items():
             if key == "acceptance_criteria" and isinstance(val, list):
-                updates[key] = tuple(val)
+                updates[key] = tuple(cast(list[Any], val))
             elif key == "depends_on" and isinstance(val, list):
-                updates[key] = tuple(val)
+                updates[key] = tuple(cast(list[Any], val))
             elif key == "tasks" and isinstance(val, list):
-                updates[key] = tuple(val)
+                updates[key] = tuple(cast(list[Any], val))
             elif key in {
                 "title",
                 "status",
@@ -333,7 +333,7 @@ class GoalBoard:
         if goal is None or not goal.tasks:
             return goal
         try:
-            from obscura.tools.task_tools import _get_db
+            from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
 
             conn = _get_db()
             total = len(goal.tasks)
@@ -366,31 +366,38 @@ class GoalBoard:
             return None
 
         try:
-            data = yaml.safe_load(frontmatter)
+            raw_data: object = yaml.safe_load(frontmatter)
         except Exception:
             logger.debug("Invalid YAML in %s", path)
             return None
 
-        if not isinstance(data, dict):
+        if not isinstance(raw_data, dict):
             return None
+
+        data = cast(dict[str, Any], raw_data)
 
         def _as_tuple(val: Any) -> tuple[str, ...]:
             if isinstance(val, list):
-                return tuple(str(x) for x in val)
+                return tuple(str(x) for x in cast(list[Any], val))
             return ()
 
+        last_worked_raw = data.get("last_worked")
+        last_worked: str | None = (
+            str(last_worked_raw) if last_worked_raw is not None else None
+        )
+
         return Goal(
-            id=data.get("id", path.stem),
-            title=data.get("title", path.stem),
-            status=data.get("status", "draft"),
-            priority=data.get("priority", "medium"),
+            id=str(data.get("id", path.stem)),
+            title=str(data.get("title", path.stem)),
+            status=str(data.get("status", "draft")),
+            priority=str(data.get("priority", "medium")),
             created=str(data.get("created", "")),
             updated=str(data.get("updated", "")),
             acceptance_criteria=_as_tuple(data.get("acceptance_criteria")),
             depends_on=_as_tuple(data.get("depends_on")),
             tasks=_as_tuple(data.get("tasks")),
-            progress=int(data.get("progress", 0)),
-            last_worked=data.get("last_worked"),
+            progress=int(data.get("progress", 0) or 0),
+            last_worked=last_worked,
             body=body.strip(),
             path=path,
             project_root=str(data.get("project_root", "")),

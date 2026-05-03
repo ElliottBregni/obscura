@@ -41,7 +41,7 @@ def view_file_impl(path: str, start_line: int = 1, end_line: int = -1) -> str:
     if end_line == -1:
         end_line = len(lines)
 
-    numbered_lines = []
+    numbered_lines: list[str] = []
     for i, line in enumerate(lines[start_line - 1 : end_line], start=start_line):
         numbered_lines.append(f"{i}. {line.rstrip()}")
 
@@ -132,6 +132,16 @@ def report_intent_impl(intent: str) -> str:
     return json.dumps({"ok": True, "intent": intent})
 
 
+def _grep_handler(
+    pattern: str,
+    path: str = ".",
+    case_insensitive: bool = False,
+    show_line_numbers: bool = True,
+) -> str:
+    """Recursive grep wrapper for Copilot bridge (recursive always True)."""
+    return grep_impl(pattern, path, True, case_insensitive, show_line_numbers)
+
+
 def make_copilot_bridge_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
     """Create Copilot CLI bridge tool specs."""
     return [
@@ -158,11 +168,7 @@ def make_copilot_bridge_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                 },
                 "required": ["path"],
             },
-            handler=lambda path, start_line=1, end_line=-1: view_file_impl(
-                path,
-                start_line,
-                end_line,
-            ),
+            handler=view_file_impl,
         ),
         ToolSpec(
             name="edit",
@@ -215,9 +221,7 @@ def make_copilot_bridge_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                 },
                 "required": ["pattern"],
             },
-            handler=lambda pattern, path=".", case_insensitive=False, show_line_numbers=True: (
-                grep_impl(pattern, path, True, case_insensitive, show_line_numbers)
-            ),
+            handler=_grep_handler,
         ),
         ToolSpec(
             name="glob",
@@ -237,6 +241,6 @@ def make_copilot_bridge_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                 },
                 "required": ["pattern"],
             },
-            handler=lambda pattern, path=".": glob_impl(pattern, path),
+            handler=glob_impl,
         ),
     ]

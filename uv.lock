@@ -256,9 +256,9 @@ wheels = [
 ]
 
 [[package]]
-name = "codex-app-server-sdk"
-version = "0.2.0"
-source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#789f387982c51e8032766f91d4b026f4c50b0ff8" }
+name = "openai-codex-app-server-sdk"
+version = "0.116.0a1"
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#67849d950d843c954102adb0db0e11f993aefdb7" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -1733,7 +1733,7 @@ source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
     { name = "click" },
-    { name = "codex-app-server-sdk" },
+    { name = "openai-codex-app-server-sdk" },
     { name = "fastmcp" },
     { name = "github-copilot-sdk" },
     { name = "httpx" },
@@ -1918,7 +1918,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0" },
     { name = "claude-agent-sdk", specifier = ">=0.1.0" },
     { name = "click", specifier = ">=8.3.1" },
-    { name = "codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
+    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42.0" },
     { name = "datadog-api-client", marker = "extra == 'datadog'", specifier = ">=2.0.0" },
     { name = "datafusion", marker = "extra == 'datafusion'", specifier = ">=40.0" },

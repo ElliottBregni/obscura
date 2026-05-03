@@ -803,8 +803,12 @@ def _compose_system_prompt(template: dict[str, Any]) -> str:
         from obscura.agent import AGENT_TYPE_REGISTRY
         from obscura.plugins.builtins import list_builtin_plugin_ids
 
-        raw_caps = template.get("capabilities", {})
-        cap_grants = raw_caps.get("grant", []) if isinstance(raw_caps, dict) else []
+        raw_caps: Any = template.get("capabilities", {})
+        cap_grants: list[Any] = []
+        if isinstance(raw_caps, dict):
+            grants_val: Any = cast(dict[str, Any], raw_caps).get("grant", [])
+            if isinstance(grants_val, list):
+                cap_grants = cast(list[Any], grants_val)
         env_section = compose_environment_context(
             plugin_ids=list_builtin_plugin_ids(),
             capabilities=cap_grants,

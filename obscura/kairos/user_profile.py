@@ -29,6 +29,7 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -184,9 +185,10 @@ class UserProfile:
 
         synced = 0
         try:
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore()
+            store = VectorMemoryStore(user=cast(Any, current_user()))
 
             sections = self._parse_sections(text)
             for section_name, section_text in sections.items():
@@ -221,9 +223,10 @@ class UserProfile:
     def semantic_recall(self, query: str, top_k: int = 5) -> list[str]:
         """Semantically search the profile vector store."""
         try:
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore()
+            store = VectorMemoryStore(user=cast(Any, current_user()))
             results = store.search_reranked(
                 query=query,
                 namespace=_VECTOR_NAMESPACE,
@@ -241,9 +244,10 @@ class UserProfile:
     def _sync_fact_to_vector(self, fact: str, *, memory_type: str = "fact") -> None:
         """Sync a single fact string to the vector store."""
         try:
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore()
+            store = VectorMemoryStore(user=cast(Any, current_user()))
             key = f"profile:learned:{_slugify(fact[:40])}:{int(time.time()) % 100000}"
             store.set(key, fact, namespace=_VECTOR_NAMESPACE, memory_type=memory_type)
         except Exception:

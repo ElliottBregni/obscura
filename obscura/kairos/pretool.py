@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +57,12 @@ def register_pretool_guard(hooks_manager: object, guard_func: _GuardFn) -> None:
             pass
 
     # Attach to events dict
-    if hasattr(hm, "events") and isinstance(hm.events, dict):
-        hm.events.setdefault("PRE_TOOL_USE", []).append(_handler)
-        return
+    if hasattr(hm, "events"):
+        raw_events: Any = hm.events
+        if isinstance(raw_events, dict):
+            events = cast(dict[str, list[Any]], raw_events)
+            events.setdefault("PRE_TOOL_USE", []).append(_handler)
+            return
 
     raise RuntimeError(
         "Unable to register PRE_TOOL_USE handler on provided hooks_manager"

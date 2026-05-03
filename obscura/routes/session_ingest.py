@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
 
@@ -84,11 +84,12 @@ def _load_index_entries(agent: str | None = None) -> list[dict[str, Any]]:
         if not line:
             continue
         try:
-            payload = json.loads(line)
+            payload_raw: object = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(payload, dict):
+        if not isinstance(payload_raw, dict):
             continue
+        payload = cast(dict[str, Any], payload_raw)
         if agent and payload.get("agent") != agent:
             continue
         entries.append(payload)
@@ -116,7 +117,7 @@ def _ingest_entries(
             continue
 
         # Check if already ingested (sync call — this runs in a thread)
-        existing = store._get_session_sync(session_id)
+        existing = store._get_session_sync(session_id)  # pyright: ignore[reportPrivateUsage]
         if existing is not None and not force:
             skipped += 1
             continue
@@ -143,7 +144,7 @@ def _ingest_entries(
 
         if existing is not None and force:
             # Update existing session
-            store._update_session_sync(
+            store._update_session_sync(  # pyright: ignore[reportPrivateUsage]
                 session_id,
                 summary=summary,
                 message_count=message_count,
@@ -151,7 +152,7 @@ def _ingest_entries(
             )
         else:
             # Create new session as 'ingested' + 'completed'
-            store._create_session_sync(
+            store._create_session_sync(  # pyright: ignore[reportPrivateUsage]
                 session_id,
                 agent,
                 backend=agent,
@@ -163,7 +164,7 @@ def _ingest_entries(
             )
             # Mark completed (ingested sessions aren't running)
             with contextlib.suppress(ValueError):
-                store._update_status_sync(session_id, SessionStatus.COMPLETED)
+                store._update_status_sync(session_id, SessionStatus.COMPLETED)  # pyright: ignore[reportPrivateUsage]
 
         # Index into VectorMemoryStore for semantic search
         if user is not None:
@@ -203,12 +204,14 @@ def _index_to_vector_memory(
                 },
             )
 
-        turns = entry.get("turns", [])
-        if isinstance(turns, list) and turns:
+        turns_raw = entry.get("turns", [])
+        if isinstance(turns_raw, list) and turns_raw:
+            turns = cast(list[Any], turns_raw)
             lines: list[str] = []
-            for turn in turns:
-                if not isinstance(turn, dict):
+            for turn_raw in turns:
+                if not isinstance(turn_raw, dict):
                     continue
+                turn = cast(dict[str, Any], turn_raw)
                 role = str(turn.get("role", "")).strip()
                 preview = str(turn.get("preview", "")).strip()
                 if role and preview:

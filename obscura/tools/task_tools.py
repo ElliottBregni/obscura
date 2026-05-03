@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 def _get_db() -> sqlite3.Connection:
     """Open (or create) the tasks database, applying queue schema."""
-    from obscura.core.task_queue import _open  # noqa: PLC2701
+    from obscura.core.task_queue import _open  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
 
     return _open()
 
@@ -655,15 +655,15 @@ def _sync_goal_progress(task_id: str) -> None:
 def get_task_tool_specs() -> list[ToolSpec]:
     """Return task management tool specs for registration."""
     return [
-        cast("ToolSpec", task_create.spec),
-        cast("ToolSpec", task_get.spec),
-        cast("ToolSpec", task_list.spec),
-        cast("ToolSpec", task_update.spec),
-        cast("ToolSpec", task_output.spec),
-        cast("ToolSpec", task_stop.spec),
-        cast("ToolSpec", queue_next.spec),
-        cast("ToolSpec", queue_complete.spec),
-        cast("ToolSpec", queue_fail.spec),
-        cast("ToolSpec", queue_heartbeat.spec),
-        cast("ToolSpec", queue_depth.spec),
+        cast("ToolSpec", cast("Any", task_create).spec),
+        cast("ToolSpec", cast("Any", task_get).spec),
+        cast("ToolSpec", cast("Any", task_list).spec),
+        cast("ToolSpec", cast("Any", task_update).spec),
+        cast("ToolSpec", cast("Any", task_output).spec),
+        cast("ToolSpec", cast("Any", task_stop).spec),
+        cast("ToolSpec", cast("Any", queue_next).spec),
+        cast("ToolSpec", cast("Any", queue_complete).spec),
+        cast("ToolSpec", cast("Any", queue_fail).spec),
+        cast("ToolSpec", cast("Any", queue_heartbeat).spec),
+        cast("ToolSpec", cast("Any", queue_depth).spec),
     ]

@@ -13,6 +13,8 @@ import contextlib
 import logging
 import os
 import time
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +75,10 @@ class ProactiveMode:
 
     def __init__(
         self,
-        on_tick: object | None = None,
+        on_tick: Callable[[int], Any] | None = None,
         tick_interval: float = TICK_INTERVAL_S,
     ) -> None:
-        self._on_tick = on_tick
+        self._on_tick: Callable[[int], Any] | None = on_tick
         self._tick_interval = tick_interval
         self._task: asyncio.Task[None] | None = None
         self._stopped = False

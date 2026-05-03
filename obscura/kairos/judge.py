@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, cast
 
 
-def score_sync_report(report: Dict) -> Dict:
+def score_sync_report(report: dict[str, Any]) -> dict[str, Any]:
     """Produce a lightweight score and decision for a VaultSync report.
 
     Heuristic: fewer changed files -> higher score. Score in [0.0, 1.0].
@@ -23,5 +23,5 @@ def score_sync_report(report: Dict) -> Dict:
     return {"score": score, "decision": decision, "counts": {"added": added, "modified": modified, "removed": removed}}
 
 
-def auto_accept(report: Dict, threshold: float = 0.8) -> bool:
-    return score_sync_report(report)["score"] >= float(threshold)
+def auto_accept(report: dict[str, Any], threshold: float = 0.8) -> bool:
+    return cast(float, score_sync_report(report)["score"]) >= float(threshold)

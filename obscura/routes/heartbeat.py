@@ -144,14 +144,15 @@ async def health_websocket(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
-    if not hasattr(websocket.app.state, "health_ws_clients"):
-        websocket.app.state.health_ws_clients = []
-    ws_clients_any = websocket.app.state.health_ws_clients
+    app_state = websocket.app.state
+    if not hasattr(app_state, "health_ws_clients"):
+        app_state.health_ws_clients = cast("list[WebSocket]", [])
+    ws_clients_any: Any = app_state.health_ws_clients
     if isinstance(ws_clients_any, list):
         ws_clients = cast("list[WebSocket]", ws_clients_any)
     else:
-        ws_clients: list[WebSocket] = []
-        websocket.app.state.health_ws_clients = ws_clients
+        ws_clients = cast("list[WebSocket]", [])
+        app_state.health_ws_clients = ws_clients
     ws_clients.append(websocket)
 
     try:

@@ -28,8 +28,9 @@ from typing import Any, cast
 import click
 
 from obscura.core.client import ObscuraClient
+from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir
 from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
-from obscura.core.event_store import SessionStatus
 
 _log = logging.getLogger("obscura.cli")
 
@@ -167,12 +168,44 @@ def _swallow(label: str, exc: Exception) -> None:
 import contextlib  # noqa: E402
 
 from obscura.cli import trace as trace_mod  # noqa: E402
+from obscura.cli.bootstrap import (  # noqa: E402
+    _discover_agent_infos,
+    _discover_mcp,
+    _run_inline_agent_from_mention,
+)
+from obscura.cli.commands import (  # noqa: E402
+    COMPLETIONS,
+    _FILE_WRITE_TOOLS,
+    REPLContext,
+    handle_command,
+)
+from obscura.cli.prompt import (  # noqa: E402
+    PromptStatus,
+    StreamingStatus,
+    _get_git_branch,
+    animate_spinner,
+    bordered_prompt,
+    create_prompt_session,
+)
+from obscura.cli.render import (  # noqa: E402
+    console,
+    print_banner,
+    print_ok,
+    print_warning,
+    render_plan,
+)
+from obscura.cli.vector_memory_bridge import (  # noqa: E402
+    auto_save_turn,
+    init_vector_store,
+    load_startup_memories,
+    run_startup_maintenance,
+    search_relevant_context,
+    search_with_router,
+)
 
 # ---------------------------------------------------------------------------
 # MCP / agent discovery — canonical implementations live in bootstrap.py
 # ---------------------------------------------------------------------------
-# Heavy imports deferred to avoid circular import when importing submodules (e.g. obscura.cli.render).
-# Import these lazily inside functions that need them.
 
 # ---------------------------------------------------------------------------
 # Tool confirmation callback

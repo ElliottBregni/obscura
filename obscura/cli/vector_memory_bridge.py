@@ -210,11 +210,14 @@ def auto_save_turn(
 
         # Auto-learn profile facts from user messages (best-effort, silent).
         try:
-            from obscura.auth.cli_user import local_cli_user
             from obscura.profile.learner import ProfileLearner
             from obscura.profile.store import ProfileStore
 
-            profile_store = ProfileStore.for_user(local_cli_user(), vector_store=store)
+            auth_ctx: Any = __import__(
+                "obscura.auth.context", fromlist=["current_user"]
+            )
+            user: Any = auth_ctx.current_user()
+            profile_store = ProfileStore.for_user(user, vector_store=store)
             learner = ProfileLearner(profile_store)
             new_facts = learner.process_turn(user_text)
             if new_facts:

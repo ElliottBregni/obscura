@@ -134,12 +134,18 @@ async def lsp_tool(
                 if isinstance(contents, str):
                     content = contents
                 elif isinstance(contents, dict):
-                    content = contents.get("value", str(contents))
+                    contents_dict = cast(dict[str, Any], contents)
+                    content = contents_dict.get("value", str(contents_dict))
                 elif isinstance(contents, list):
-                    content = "\n".join(
-                        c.get("value", str(c)) if isinstance(c, dict) else str(c)
-                        for c in contents
-                    )
+                    contents_list = cast(list[Any], contents)
+                    parts: list[str] = []
+                    for c in contents_list:
+                        if isinstance(c, dict):
+                            c_dict = cast(dict[str, Any], c)
+                            parts.append(str(c_dict.get("value", c_dict)))
+                        else:
+                            parts.append(str(c))
+                    content = "\n".join(parts)
             return json.dumps(
                 {
                     "ok": True,
@@ -151,14 +157,18 @@ async def lsp_tool(
 
         if operation == "documentSymbol":
             result = await client.document_symbols(file_path)
-            symbols = []
+            symbols: list[dict[str, Any]] = []
             if result:
                 for sym in result:
+                    sym_dict = cast(dict[str, Any], sym)
+                    range_dict = cast(dict[str, Any], sym_dict.get("range", {}))
+                    start_dict = cast(dict[str, Any], range_dict.get("start", {}))
+                    line_no = cast(int, start_dict.get("line", 0)) + 1
                     symbols.append(
                         {
-                            "name": sym.get("name", ""),
-                            "kind": sym.get("kind", 0),
-                            "range": f"{sym.get('range', {}).get('start', {}).get('line', 0) + 1}",
+                            "name": sym_dict.get("name", ""),
+                            "kind": sym_dict.get("kind", 0),
+                            "range": f"{line_no}",
                         },
                     )
             return json.dumps(
@@ -181,4 +191,4 @@ async def lsp_tool(
 
 def get_lsp_tool_specs() -> list[ToolSpec]:
     """Return LSP tool specs for registration."""
-    return [cast("ToolSpec", lsp_tool.spec)]
+    return [cast("ToolSpec", cast("Any", lsp_tool).spec)]

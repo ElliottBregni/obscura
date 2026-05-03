@@ -13,6 +13,7 @@ import os
 import time
 import uuid
 from pathlib import Path
+from typing import Any, cast
 
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
@@ -45,8 +46,8 @@ def _settings_flag(key: str, default: bool = True) -> bool:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
         cur: object = data
         for part in key.split("."):
-            if isinstance(cur, dict) and part in cur:  # type: ignore[redundant-cast]
-                cur = cur[part]  # type: ignore[index]
+            if isinstance(cur, dict) and part in cur:
+                cur = cast(dict[str, Any], cur)[part]
             else:
                 return default
         if isinstance(cur, bool):
@@ -308,7 +309,9 @@ class KairosEngine:
                         f'task_update(task_id="{task["task_id"]}", '
                         f'status="completed").'
                     )
-                    logger.info("[kairos] \u2192 Working: %s", task["subject"])
+                    logger.info(
+                        "[kairos] \u2192 Working: %s", task["subject"]
+                    )
                     self.log(
                         f"tick #{tick_count}: claimed task {task['task_id']} "
                         f"— {task['subject']}",
@@ -387,11 +390,12 @@ class KairosEngine:
         # Inject user profile summary (prefer vector-backed, fall back to markdown).
         profile_injected = False
         try:
-            from obscura.auth.cli_user import local_cli_user
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            profile_store = ProfileStore.for_user(local_cli_user())
+            user = cast(Any, current_user())
+            profile_store = ProfileStore.for_user(user)
             builder = ProfileBuilder()
             profile_summary = builder.build_summary(profile_store, max_tokens=400)
             if profile_summary:

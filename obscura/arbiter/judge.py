@@ -118,26 +118,23 @@ async def maybe_judge(
 def _get_judge_backend() -> Any:
     """Best-effort: get a backend for judge calls.
 
-    Prefers the cheapest available backend (haiku > sonnet > whatever).
-    Returns ``None`` if no backend is available.
+    Returns a minimal Anthropic-API backend pinned to Haiku for cost.
+    ``None`` if no Anthropic credentials are available.
     """
+    import os
+
     try:
-        # NOTE: ``get_provider`` is referenced dynamically — the symbol is
-        # resolved at runtime via the providers registry module, but pyright
-        # cannot statically verify it exists in every code path. The outer
-        # try/except handles ImportError / AttributeError as "no backend".
-        from obscura.providers import registry as _registry
+        from obscura.core.auth import resolve_auth
+        from obscura.core.types import Backend
+        from obscura.eval.eval_backend import AnthropicEvalBackend
 
-        get_provider: Any = getattr(_registry, "get_provider", None)
-        if get_provider is None:
+        auth = resolve_auth(Backend.CLAUDE)
+        api_key = auth.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
             return None
-
-        # Try cheap models first.
-        for model_hint in ("haiku", "sonnet", "claude"):
-            try:
-                return get_provider(model_hint)
-            except Exception:
-                continue
-        return None
+        return AnthropicEvalBackend(
+            api_key=api_key,
+            model="claude-haiku-4-5-20251001",
+        )
     except Exception:
         return None

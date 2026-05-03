@@ -25,16 +25,16 @@ class NativeAdapter:
     async def load(self, spec: PluginSpec, config: dict[str, Any]) -> dict[str, Any]:
         handlers: dict[str, Any] = {}
         for tool in spec.tools:
-            if not tool.handler:
+            if not tool.handler_ref:
                 continue
             try:
-                handler = _resolve_handler(tool.handler)
+                handler = _resolve_handler(tool.handler_ref)
                 handlers[tool.name] = handler
-                logger.debug("Resolved handler %s → %s", tool.name, tool.handler)
+                logger.debug("Resolved handler %s → %s", tool.name, tool.handler_ref)
             except Exception as exc:
                 logger.warning(
                     "Cannot resolve handler %s for tool %s: %s",
-                    tool.handler,
+                    tool.handler_ref,
                     tool.name,
                     exc,
                 )

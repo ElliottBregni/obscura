@@ -315,7 +315,9 @@ class REPLContext:
 
     # Right-side menu UI state (cmd_menu)
     ui_right_menu_enabled: bool = field(default=True, repr=False)
-    ui_menu_items: dict[str, bool] = field(default_factory=_empty_bool_dict, repr=False)
+    ui_menu_items: dict[str, bool] = field(
+        default_factory=_empty_bool_dict, repr=False
+    )
 
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
@@ -2184,9 +2186,7 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
     finally:
         with contextlib.suppress(Exception):
             await agent.stop()
-    _inject_context = (
-        getattr(ctx.client, "inject_context", None) if ctx.client else None
-    )
+    _inject_context = getattr(ctx.client, "inject_context", None) if ctx.client else None
     if collected_output and callable(_inject_context):
         summary = "\n".join(collected_output)
         _inject_context("[Delegated to " + model + "]\n" + summary)
@@ -6696,8 +6696,6 @@ async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
     result = kill_session(sid)
     print_info(result)
     return None
-
-
 async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
     """Show context-aware file suggestions based on recent activity."""
     from obscura.core.context_suggestions import suggest_files
@@ -7208,7 +7206,9 @@ async def _oneshot_stream(client: Any, prompt: str, idle_timeout: float = 60.0) 
     try:
         while True:
             try:
-                chunk = await asyncio.wait_for(stream.__anext__(), timeout=idle_timeout)
+                chunk = await asyncio.wait_for(
+                    stream.__anext__(), timeout=idle_timeout
+                )
             except StopAsyncIteration:
                 break
             except asyncio.TimeoutError:
@@ -7313,7 +7313,9 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
         else:
-            print_error(f"Summary stalled — no output for {stalled.idle_timeout:.0f}s.")
+            print_error(
+                f"Summary stalled — no output for {stalled.idle_timeout:.0f}s."
+            )
     except Exception as exc:
         print_error(f"Summary failed: {exc}")
     return None
@@ -9151,7 +9153,9 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
         else:
-            print_error(f"Recap stalled — no output for {stalled.idle_timeout:.0f}s.")
+            print_error(
+                f"Recap stalled — no output for {stalled.idle_timeout:.0f}s."
+            )
     except Exception as exc:
         print_error(f"Recap failed: {exc}")
     return None
@@ -9328,12 +9332,20 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
 
     # Vector-backed profile.
     try:
-        from obscura.auth.cli_user import local_cli_user
+        import importlib
+
         from obscura.profile.builder import ProfileBuilder
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        store = ProfileStore.for_user(local_cli_user())
+        # NOTE: `obscura.auth.context` may not exist on all branches; fail
+        # silently into the `except Exception` below. See spawned task.
+        _auth_context = importlib.import_module("obscura.auth.context")
+        _current_user_fn: Any = getattr(_auth_context, "current_user", None)
+        if _current_user_fn is None:
+            raise ImportError("current_user not available")
+        user: Any = _current_user_fn()
+        store = ProfileStore.for_user(user)
         builder = ProfileBuilder()
         summary = builder.build_summary(store, max_tokens=600)
         if summary:

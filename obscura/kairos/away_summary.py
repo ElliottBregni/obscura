@@ -111,9 +111,10 @@ async def _generate_llm_summary(context: str) -> str:
 
         cfg = ObscuraConfig.load()
         prompt = f"{AWAY_SUMMARY_PROMPT}\n\nRecent conversation:\n{context[:3000]}"
+        default_model: str | None = getattr(cfg, "default_model", None)
         async with ObscuraClient(
             cfg.default_backend,
-            model=cfg.default_model or None,
+            model=default_model or None,
             system_prompt="You are a concise assistant summarizing recent work context.",
         ) as client:
             result = await client.run_loop_to_completion(prompt, max_turns=1)

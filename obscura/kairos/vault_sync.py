@@ -34,18 +34,35 @@ import hashlib
 import json
 import logging
 import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 
+def _empty_str_list() -> list[str]:
+    return []
+
+
+def _empty_file_meta_list() -> list["FileMeta"]:
+    return []
+
+
+def _empty_any_dict() -> dict[str, Any]:
+    return {}
+
+
 def _retry(
-    fn: Any, *, attempts: int = 3, base_delay: float = 0.5, label: str = ""
+    fn: Callable[[], Any],
+    *,
+    attempts: int = 3,
+    base_delay: float = 0.5,
+    label: str = "",
 ) -> Any:
     """Call fn() up to `attempts` times with exponential backoff on exception."""
     last_exc: Exception | None = None
@@ -55,17 +72,14 @@ def _retry(
         except Exception as exc:
             last_exc = exc
             if i < attempts - 1:
-                delay = base_delay * (2**i)
+                delay = base_delay * (2 ** i)
                 logger.debug(
-                    "Retry %d/%d for %s after %.1fs: %s",
-                    i + 1,
-                    attempts,
-                    label,
-                    delay,
-                    exc,
+                    "Retry %d/%d for %s after %.1fs: %s", i + 1, attempts, label, delay, exc
                 )
                 _time.sleep(delay)
     logger.warning("All %d attempts failed for %s: %s", attempts, label, last_exc)
+    if last_exc is None:
+        raise RuntimeError(f"_retry failed but no exception captured for {label}")
     raise last_exc  # Re-raise so callers can decide to continue or abort
 
 
@@ -97,7 +111,7 @@ class FileMeta:
     path: Path
     owner: str  # "user", "agent", "shared"
     hash: str
-    frontmatter: dict[str, Any] = field(default_factory=dict)
+    frontmatter: dict[str, Any] = field(default_factory=_empty_any_dict)
     body: str = ""
 
 
@@ -105,9 +119,9 @@ class FileMeta:
 class ChangeSet:
     """Delta between two vault scans."""
 
-    added: list[FileMeta] = field(default_factory=list)
-    modified: list[FileMeta] = field(default_factory=list)
-    removed: list[FileMeta] = field(default_factory=list)
+    added: list[FileMeta] = field(default_factory=_empty_file_meta_list)
+    modified: list[FileMeta] = field(default_factory=_empty_file_meta_list)
+    removed: list[FileMeta] = field(default_factory=_empty_file_meta_list)
 
 
 @dataclass
@@ -117,8 +131,8 @@ class SyncReport:
     ingested: int = 0
     exported: int = 0
     conflicts: int = 0
-    errors: list[str] = field(default_factory=list)
-    details: dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=_empty_str_list)
+    details: dict[str, Any] = field(default_factory=_empty_any_dict)
 
     def summary(self) -> str:
         parts = [f"ingested={self.ingested}", f"exported={self.exported}"]
@@ -224,11 +238,7 @@ class VaultSync:
                     )
                     # Project file shadows global file with the same relative path.
                     if rel in global_rels:
-                        metas = [
-                            m
-                            for m in metas
-                            if m.path.relative_to(self.vault_dir) != rel
-                        ]
+                        metas = [m for m in metas if m.path.relative_to(self.vault_dir) != rel]
                     metas.append(proj_meta)
 
         return metas
@@ -426,9 +436,7 @@ class VaultSync:
             logger.debug("[vault] Conflict archive written: %s", out_path.name)
         except Exception:
             logger.warning(
-                "[vault] Could not write conflict archive for %s",
-                goal.id,
-                exc_info=True,
+                "[vault] Could not write conflict archive for %s", goal.id, exc_info=True
             )
 
     def _ingest_task(self, meta: FileMeta) -> None:
@@ -454,10 +462,11 @@ class VaultSync:
     def _ingest_profile(self, meta: FileMeta) -> None:
         """Update user profile from a vault file."""
         try:
-            from obscura.auth.cli_user import local_cli_user
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.profile.store import ProfileStore
 
-            store = ProfileStore.for_user(local_cli_user())
+            user = cast(Any, current_user())
+            store: Any = ProfileStore.for_user(user)
             # Parse simple key: value pairs from the body.
             for line in meta.body.splitlines():
                 line = line.strip()
@@ -477,10 +486,10 @@ class VaultSync:
     def _ingest_to_vector(self, meta: FileMeta, memory_type: str) -> None:
         """Ingest a note/reference file into vector memory."""
         try:
-            from obscura.auth.cli_user import local_cli_user
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore.for_user(local_cli_user())
+            store = VectorMemoryStore.for_user(cast(Any, current_user()))
             key = f"vault:{meta.owner}:{meta.path.stem}"
             store.set(
                 key=key,
@@ -734,11 +743,12 @@ class VaultSync:
     def _export_profile_summary(self) -> int:
         """Export a profile summary to vault/agent/profile-summary.md."""
         try:
-            from obscura.auth.cli_user import local_cli_user
+            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            store = ProfileStore.for_user(local_cli_user())
+            user = cast(Any, current_user())
+            store = ProfileStore.for_user(user)
             builder = ProfileBuilder()
             summary = builder.build_summary(store, max_tokens=600)
 
@@ -811,10 +821,11 @@ class VaultSync:
         parts = raw.split("---", 2)
         if len(parts) < 3:  # noqa: PLR2004
             return {}, raw
+        fm: dict[str, Any] = {}
         try:
-            fm = yaml.safe_load(parts[1])
-            if not isinstance(fm, dict):
-                fm = {}
+            loaded: object = yaml.safe_load(parts[1])
+            if isinstance(loaded, dict):
+                fm = cast(dict[str, Any], loaded)
         except Exception:
             fm = {}
         return fm, parts[2].strip()
@@ -874,7 +885,7 @@ def notify_goal_changed(goal_id: str) -> None:
         if not vs.vault_dir.exists():
             return
         # Quick re-export just the goal.
-        vs._export_goals()
+        vs._export_goals()  # pyright: ignore[reportPrivateUsage]
     except Exception:
         pass
 
@@ -885,6 +896,6 @@ def notify_profile_changed() -> None:
         vs = _get_instance()
         if not vs.vault_dir.exists():
             return
-        vs._export_profile_summary()
+        vs._export_profile_summary()  # pyright: ignore[reportPrivateUsage]
     except Exception:
         pass

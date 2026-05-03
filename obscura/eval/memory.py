@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +60,11 @@ class EvalMemory:
 
             user = AuthenticatedUser(
                 user_id="system:eval",
-                username="eval-system",
-                roles=["system"],
+                email="eval-system@obscura.local",
+                roles=("system",),
+                org_id=None,
+                token_type="service",
+                raw_token="",
             )
             self._store = VectorMemoryStore.for_user(user)
             self._available = True
@@ -368,15 +371,16 @@ class EvalMemory:
             for r in results:
                 if r.score < _RECALL_THRESHOLD:
                     continue
-                meta = r.metadata if hasattr(r, "metadata") else {}
+                raw_meta: Any = r.metadata if hasattr(r, "metadata") else {}
+                meta: dict[str, Any] = cast(dict[str, Any], raw_meta) if isinstance(raw_meta, dict) else {}
                 # Freshness check
                 if not self._is_fresh(meta):
                     continue
                 # Resolution check
                 if meta.get("resolved"):
                     continue
-                r_tool = meta.get("tool_name", "")
-                r_file = meta.get("file_path", "")
+                r_tool = str(meta.get("tool_name", ""))
+                r_file = str(meta.get("file_path", ""))
                 if r_file and self._is_resolved(r_tool, r_file):
                     continue
                 filtered.append(r.text)
@@ -407,11 +411,12 @@ class EvalMemory:
             for r in results:
                 if r.score < _RECALL_THRESHOLD:
                     continue
-                meta = r.metadata if hasattr(r, "metadata") else {}
+                raw_meta: Any = r.metadata if hasattr(r, "metadata") else {}
+                meta: dict[str, Any] = cast(dict[str, Any], raw_meta) if isinstance(raw_meta, dict) else {}
                 if not self._is_fresh(meta):
                     continue
-                r_tool = meta.get("tool_name", "")
-                r_file = meta.get("file_path", "")
+                r_tool = str(meta.get("tool_name", ""))
+                r_file = str(meta.get("file_path", ""))
                 if r_file and self._is_resolved(r_tool, r_file):
                     continue
                 filtered.append(r.text)

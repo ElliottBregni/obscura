@@ -11,11 +11,19 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = Path.home() / ".obscura" / "kairos_state.json"
+
+
+def _empty_str_int_dict() -> dict[str, int]:
+    return {}
+
+
+def _empty_str_list() -> list[str]:
+    return []
 
 
 @dataclass
@@ -41,8 +49,8 @@ class KairosState:
     last_proactive_tick: str = ""
 
     # Cross-session learning
-    common_errors: dict[str, int] = field(default_factory=dict)
-    project_roots_seen: list[str] = field(default_factory=list)
+    common_errors: dict[str, int] = field(default_factory=_empty_str_int_dict)
+    project_roots_seen: list[str] = field(default_factory=_empty_str_list)
 
     # Daily log stats
     total_log_entries: int = 0
@@ -55,10 +63,13 @@ class KairosState:
         if not state_path.is_file():
             return cls()
         try:
-            raw = json.loads(state_path.read_text(encoding="utf-8"))
+            raw_obj: object = json.loads(state_path.read_text(encoding="utf-8"))
+            if not isinstance(raw_obj, dict):
+                return cls()
+            raw = cast(dict[str, Any], raw_obj)
             # Only use known fields to avoid breakage on schema changes
             known = {f.name for f in cls.__dataclass_fields__.values()}
-            filtered = {k: v for k, v in raw.items() if k in known}
+            filtered: dict[str, Any] = {k: v for k, v in raw.items() if k in known}
             state = cls(**filtered)
             # Enforce caps on load so old bloated state files are cleaned up
             state.project_roots_seen = list(dict.fromkeys(state.project_roots_seen))[-100:]

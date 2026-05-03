@@ -114,9 +114,9 @@ def _emit_goal_event(
 
 def _get_current_user() -> Any:
     """Best-effort retrieval of the current authenticated user."""
-    from obscura.auth.cli_user import local_cli_user
+    from obscura.auth.context import current_user
 
-    return local_cli_user()
+    return current_user()
 
 
 def _json_ok(**data: object) -> str:
