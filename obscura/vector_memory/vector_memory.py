@@ -279,10 +279,7 @@ class VectorMemoryStore:
                     PostgreSQLVectorBackend,
                 )
 
-                # PostgreSQL backend implements the protocol with a different
-                # call signature (see backend file); cast at the boundary
-                # since the runtime is structurally compatible for our usage.
-                return cast(VectorBackend, PostgreSQLVectorBackend(config=config))
+                return PostgreSQLVectorBackend(config=config)
             except Exception as e:
                 logger.warning(
                     "PostgreSQL vector backend failed, falling back to SQLite: %s",

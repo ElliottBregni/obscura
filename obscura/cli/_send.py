@@ -11,8 +11,9 @@ send_message(ctx, text, loop_kwargs, streaming_status=None) -> str
 
 from __future__ import annotations
 
-import time
+import contextlib
 import logging
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.types import AgentEventKind
@@ -190,8 +191,6 @@ async def send_message(
         context_retry_used: bool = False,
         dead_session_retry_used: bool = False,
     ) -> list[str]:
-        import contextlib
-
         from obscura.cli._tool_confirm import track_file_event
 
         nonlocal _stream_output_chars
@@ -373,8 +372,6 @@ async def send_message(
                 )
             raise
         return _buf
-
-    import contextlib
 
     try:
         accumulated = await _stream_with_retry()

@@ -1042,18 +1042,9 @@ class ObscuraSession:
 
     def _init_vector_memory(self) -> None:
         """Initialize vector store and memory channels."""
-        import os
+        from obscura.auth.cli_user import local_cli_user
 
-        from obscura.auth.models import AuthenticatedUser
-
-        cli_user = AuthenticatedUser(
-            user_id=os.environ.get("USER", "local"),
-            email="cli@obscura.local",
-            roles=("operator",),
-            org_id="local",
-            token_type="user",
-            raw_token="",
-        )
+        cli_user = local_cli_user()
         self._cli_user = cli_user
 
         self._vector_store = init_vector_store(cli_user)

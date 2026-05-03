@@ -32,25 +32,34 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
-from pathlib import Path
 from typing import Any
 
 import click
 
-from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir
 from obscura.core.types import Backend
 
 # ---------------------------------------------------------------------------
 # Sub-module public re-exports (keep for backwards compat + single import point)
+# `as` aliases mark these explicit re-exports per PEP 484.
 # ---------------------------------------------------------------------------
-from obscura.cli._env_loader import bootstrap_env, load_dotenvs, materialize_secrets  # noqa: F401
-from obscura.cli._guide_sync import sync_guide_files, sync_provider_settings  # noqa: F401
-from obscura.cli._tool_confirm import cli_confirm, maybe_parse_plan, track_file_event  # noqa: F401
-from obscura.cli._daemon import start_imessage_daemon  # noqa: F401
-from obscura.cli._send import send_message  # noqa: F401
-from obscura.cli._repl_loop import repl  # noqa: F401
+from obscura.cli._daemon import start_imessage_daemon as start_imessage_daemon
+from obscura.cli._env_loader import (
+    bootstrap_env as bootstrap_env,
+    load_dotenvs as load_dotenvs,
+    materialize_secrets as materialize_secrets,
+)
+from obscura.cli._guide_sync import (
+    sync_guide_files as sync_guide_files,
+    sync_provider_settings as sync_provider_settings,
+)
+from obscura.cli._repl_loop import repl as repl
+from obscura.cli._send import send_message as send_message
+from obscura.cli._tool_confirm import (
+    cli_confirm as cli_confirm,
+    maybe_parse_plan as maybe_parse_plan,
+    track_file_event as track_file_event,
+)
 
 # ---------------------------------------------------------------------------
 # Internal aliases kept for callers that used the private names
@@ -64,11 +73,6 @@ _start_imessage_daemon = start_imessage_daemon
 _repl = repl
 
 _log = logging.getLogger("obscura.cli")
-
-
-def _swallow(label: str, exc: Exception) -> None:
-    """Log a swallowed exception at DEBUG level instead of silently ignoring."""
-    _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
 
 def _is_interactive_repl(prompt: str | None) -> bool:

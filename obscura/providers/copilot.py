@@ -674,18 +674,16 @@ class CopilotBackend(BackendToolHostMixin):
 
     def build_session_config(self, **overrides: Any) -> dict[str, Any]:
         """Build a SessionConfig dict for the Copilot SDK."""
-        import logging
+        from copilot.session import PermissionRequestResult
 
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
-
-        from copilot.session import PermissionRequestResult
 
         def _approve_all(
             request: PermissionRequest,
             _context: dict[str, str],
         ) -> PermissionRequestResult:
-            return PermissionRequestResult(kind="approved")  # pyright: ignore[reportArgumentType]
+            return PermissionRequestResult(kind="approved")
 
         config["on_permission_request"] = _approve_all
 

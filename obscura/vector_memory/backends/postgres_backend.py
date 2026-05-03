@@ -166,11 +166,10 @@ class PostgreSQLVectorBackend:
     def search_vectors(
         self,
         query_embedding: list[float],
-        *,
-        namespace: str | None = None,
-        limit: int = 10,
-        min_score: float = 0.0,
-        memory_type: str | None = None,
+        namespace: str | None,
+        top_k: int,
+        threshold: float | None,
+        filters: list[MetadataFilter] | None,
     ) -> list[VectorEntry]:
         """Search vectors by cosine similarity (computed in Python)."""
         conn = self._get_conn()
@@ -185,9 +184,6 @@ class PostgreSQLVectorBackend:
                 if namespace:
                     sql += " AND namespace = %s"
                     params.append(namespace)
-                if memory_type:
-                    sql += " AND memory_type = %s"
-                    params.append(memory_type)
 
                 # Exclude expired entries
                 sql += " AND (expires_at IS NULL OR expires_at > NOW())"
@@ -197,24 +193,33 @@ class PostgreSQLVectorBackend:
         finally:
             self._put_conn(conn)
 
-        # Compute cosine similarity in Python
+        # Compute cosine similarity in Python; apply threshold + metadata filters.
         results: list[VectorEntry] = []
         for row in rows:
             emb = row["embedding"]
             if isinstance(emb, str):
                 emb = json.loads(emb)
             score = _cosine_similarity(query_embedding, emb)
-            if score >= min_score:
-                entry = self._row_to_entry(row)
-                entry.score = score
-                entry.final_score = score
-                results.append(entry)
+            if threshold is not None and score < threshold:
+                continue
+
+            meta_raw = row["metadata"]
+            metadata: dict[str, Any] = (
+                json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+            )
+            if filters and not match_metadata_filters(filters, metadata):
+                continue
+
+            entry = self._row_to_entry(row)
+            entry.score = score
+            entry.final_score = score
+            results.append(entry)
 
         # Sort by score descending, limit
         results.sort(key=lambda e: e.score, reverse=True)
-        return results[:limit]
+        return results[:top_k]
 
-    def delete_vector(self, key: Any) -> bool:
+    def delete_vector(self, key: MemoryKey) -> bool:
         """Delete a vector. Returns True if deleted."""
         conn = self._get_conn()
         try:
@@ -229,7 +234,7 @@ class PostgreSQLVectorBackend:
         finally:
             self._put_conn(conn)
 
-    def list_keys(self, namespace: str | None = None) -> list[Any]:
+    def list_keys(self, namespace: str | None = None) -> list[MemoryKey]:
         """List all keys."""
         from obscura.memory import MemoryKey
 
@@ -290,7 +295,7 @@ class PostgreSQLVectorBackend:
         finally:
             self._put_conn(conn)
 
-    def touch_vector(self, key: Any) -> None:
+    def touch_vector(self, key: MemoryKey) -> None:
         """Update the accessed_at timestamp."""
         conn = self._get_conn()
         try:
@@ -307,9 +312,10 @@ class PostgreSQLVectorBackend:
     def list_by_type(
         self,
         memory_type: str,
-        namespace: str | None = None,
+        older_than: datetime | None = None,
+        limit: int = 100,
     ) -> list[VectorEntry]:
-        """List vectors by type."""
+        """List entries of a given type, optionally filtered by age."""
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -318,10 +324,11 @@ class PostgreSQLVectorBackend:
                     "WHERE user_id = %s AND memory_type = %s"
                 )
                 params: list[Any] = [self._user_id, memory_type]
-                if namespace:
-                    sql += " AND namespace = %s"
-                    params.append(namespace)
-                sql += " ORDER BY created_at DESC"
+                if older_than is not None:
+                    sql += " AND created_at < %s"
+                    params.append(older_than)
+                sql += " ORDER BY created_at ASC LIMIT %s"
+                params.append(limit)
                 cur.execute(sql, params)
                 return [self._row_to_entry(r) for r in cur.fetchall()]
         finally:

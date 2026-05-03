@@ -23,7 +23,6 @@ import contextlib
 import logging
 import time
 import uuid
-from pathlib import Path
 from typing import Any
 
 from obscura.core.client import ObscuraClient
@@ -55,7 +54,7 @@ async def repl(
 ) -> None:
     """Core async loop -- runs the interactive REPL or single-shot."""
     from obscura.cli._env_loader import bootstrap_env
-    from obscura.cli._send import _session_state, send_message
+    from obscura.cli._send import _session_state, send_message  # pyright: ignore[reportPrivateUsage]
     from obscura.cli.bootstrap import (
         _discover_agent_infos,  # pyright: ignore[reportPrivateUsage]
         _discover_mcp,  # pyright: ignore[reportPrivateUsage]
@@ -107,16 +106,9 @@ async def repl(
         mcp_configs, mcp_names = _discover_mcp()
 
     # Create authenticated user for vector memory + memory tools
-    from obscura.auth.models import AuthenticatedUser
+    from obscura.auth.cli_user import local_cli_user
 
-    cli_user = AuthenticatedUser(
-        user_id=os.environ.get("USER", "local"),
-        email="cli@obscura.local",
-        roles=("operator",),
-        org_id="local",
-        token_type="user",
-        raw_token="",
-    )
+    cli_user = local_cli_user()
 
     # Initialize vector memory store
     vector_store = init_vector_store(cli_user)
@@ -509,7 +501,6 @@ async def repl(
     _tool_router_ref = None
     if context_router is not None:
         from obscura.core.hooks import HookRegistry
-        from obscura.core.types import AgentEventKind as _AEK
 
         if project_hooks is None:
             project_hooks = HookRegistry()
@@ -521,7 +512,7 @@ async def repl(
                     list(context_router.signals.file_paths),
                 )
 
-        project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
+        project_hooks.add_after(_channel_tool_signal, AgentEventKind.TOOL_CALL)
 
     # Wire Kairos tool-call hooks
     _kairos_engine: Any = None
@@ -530,7 +521,6 @@ async def repl(
 
         if _kie2():
             from obscura.core.hooks import HookRegistry
-            from obscura.core.types import AgentEventKind as _AEK2
 
             if project_hooks is None:
                 project_hooks = HookRegistry()
@@ -545,8 +535,8 @@ async def repl(
                 if _kairos_engine is not None and _kairos_engine.is_running:
                     _kairos_engine.log_agent_event("turn_complete")
 
-            project_hooks.add_after(_kairos_tool_hook, _AEK2.TOOL_CALL)
-            project_hooks.add_after(_kairos_turn_hook, _AEK2.TURN_COMPLETE)
+            project_hooks.add_after(_kairos_tool_hook, AgentEventKind.TOOL_CALL)
+            project_hooks.add_after(_kairos_turn_hook, AgentEventKind.TURN_COMPLETE)
     except Exception:
         pass
 
@@ -690,16 +680,9 @@ async def repl(
         if supervise and agent_infos:
             try:
                 from obscura.agent.supervisor import AgentSupervisor
-                from obscura.auth.models import AuthenticatedUser
+                from obscura.auth.cli_user import local_cli_user
 
-                sup_user = AuthenticatedUser(
-                    user_id=os.environ.get("USER", "local"),
-                    email="cli@obscura.local",
-                    roles=("operator",),
-                    org_id="local",
-                    token_type="user",
-                    raw_token="",
-                )
+                sup_user = local_cli_user()
                 agents_yaml = resolve_obscura_home() / "agents.yaml"
                 supervisor = AgentSupervisor(
                     config_path=agents_yaml,
