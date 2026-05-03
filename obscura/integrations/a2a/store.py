@@ -424,8 +424,6 @@ class RedisTaskStore:
             raise TaskNotFoundError(task_id)
         current = task.status.state
         if current in TERMINAL_STATES:
-            from obscura.integrations.a2a.types import TaskNotCancelableError
-
             raise TaskNotCancelableError(task_id, current.value)
         return await self.transition(task_id, TaskState.CANCELED)
 

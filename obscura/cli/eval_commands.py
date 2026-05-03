@@ -76,11 +76,6 @@ def run_cmd(
     output_format: str,
 ) -> None:
     """Run eval suites and report results."""
-    from obscura.eval.compiler import compile_suite
-    from obscura.eval.loader import load_all_eval_suites, load_eval_suite
-    from obscura.eval.models import CompiledEvalCase
-    from obscura.eval.report import render_json, render_markdown, render_table
-
     # Load suites
     if suite_paths:
         specs = [load_eval_suite(p) for p in suite_paths]

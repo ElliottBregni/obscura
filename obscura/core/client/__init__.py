@@ -330,15 +330,11 @@ class ObscuraClient:
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send prompt, wait for full response."""
-        from obscura.core.retry import with_retry
-
         # Apply prompt injection filter and memory enrichment
         prompt = self._enrich_prompt(self._filter_prompt(prompt))
 
         # Check cache (opt-in)
         if self._cache is not None:
-            from obscura.core.llm_cache import LLMCache
-
             cache: LLMCache = self._cache
             cache_key = LLMCache.make_key(
                 self._backend_type.value,
@@ -349,8 +345,6 @@ class ObscuraClient:
             cached = cache.get(cache_key)
             if cached is not None:
                 _record_cache_hit(self._backend_type.value)
-                from obscura.core.types import ContentBlock, Role
-
                 return Message(
                     role=Role.ASSISTANT,
                     content=[ContentBlock(kind="text", text=cached.response_text)],
