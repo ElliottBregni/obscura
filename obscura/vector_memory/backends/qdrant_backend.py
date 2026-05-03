@@ -9,11 +9,10 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
-    Condition,
     Distance,
     FieldCondition,
     Filter,
@@ -28,19 +27,6 @@ from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
 
 if TYPE_CHECKING:
     from obscura.vector_memory.vector_memory_filters import MetadataFilter
-
-
-def _payload_dict(payload: Any) -> dict[str, Any]:
-    """Coerce a qdrant Payload-or-None into a typed ``dict[str, Any]``.
-
-    The qdrant client types ``point.payload`` as ``Payload | None`` where
-    ``Payload = Dict[str, Any]``. Subscripting it without first checking for
-    None trips pyright's strict-mode reportOptionalSubscript.  This helper
-    centralises the None handling and gives downstream code a typed dict.
-    """
-    if payload is None:
-        return {}
-    return cast(dict[str, Any], payload)
 
 logger = logging.getLogger(__name__)
 
@@ -115,12 +101,12 @@ class QdrantBackend:
             self.client.create_payload_index(
                 self.collection_name,
                 "namespace",
-                KeywordIndexParams(type=cast(Any, "keyword")),
+                KeywordIndexParams(type="keyword"),
             )
             self.client.create_payload_index(
                 self.collection_name,
                 "memory_type",
-                KeywordIndexParams(type=cast(Any, "keyword")),
+                KeywordIndexParams(type="keyword"),
             )
 
     def store_vector(
@@ -136,7 +122,7 @@ class QdrantBackend:
         now_iso = datetime.now(UTC).isoformat()
 
         # Preserve created_at on upsert — only set if this is a new point.
-        existing_created_at: str = now_iso
+        existing_created_at = now_iso
         try:
             existing = self.client.retrieve(
                 self.collection_name,
@@ -144,14 +130,12 @@ class QdrantBackend:
                 with_payload=True,
                 with_vectors=False,
             )
-            if existing:
-                existing_payload = _payload_dict(existing[0].payload)
-                if "created_at" in existing_payload:
-                    existing_created_at = str(existing_payload["created_at"])
+            if existing and "created_at" in existing[0].payload:
+                existing_created_at = existing[0].payload["created_at"]
         except Exception:
             pass  # new point — use now
 
-        payload: dict[str, Any] = {
+        payload = {
             "namespace": key.namespace,
             "key": key.key,
             "text": text,
@@ -197,13 +181,12 @@ class QdrantBackend:
             )
             if not points:
                 return 0
-            to_delete: list[Any] = []
+            to_delete = []
             for p in points:
                 try:
-                    payload = _payload_dict(p.payload)
-                    if "expires_at" in payload and datetime.now(
+                    if "expires_at" in p.payload and datetime.now(
                         UTC,
-                    ) > datetime.fromisoformat(str(payload["expires_at"])):
+                    ) > datetime.fromisoformat(p.payload["expires_at"]):
                         to_delete.append(p.id)
                 except Exception:
                     # Ignore malformed payloads
@@ -257,26 +240,20 @@ class QdrantBackend:
             if not points:
                 return None
             p = points[0]
-            payload = _payload_dict(p.payload)
-            if "expires_at" in payload and datetime.now(UTC) > datetime.fromisoformat(
-                str(payload["expires_at"]),
+            if "expires_at" in p.payload and datetime.now(UTC) > datetime.fromisoformat(
+                p.payload["expires_at"],
             ):
                 self.delete_vector(key)
                 return None
-            accessed_at_str = payload.get("accessed_at")
-            embedding_raw = p.vector
-            embedding: list[float] = (
-                cast(list[float], embedding_raw) if embedding_raw is not None else []
-            )
-            metadata = cast(dict[str, Any], payload.get("metadata", {}))
+            accessed_at_str = p.payload.get("accessed_at")
             return VectorEntry(
-                key=MemoryKey(namespace=str(payload["namespace"]), key=str(payload["key"])),
-                text=str(payload["text"]),
-                embedding=embedding,
-                metadata=metadata,
-                memory_type=str(payload.get("memory_type", "general")),
-                created_at=datetime.fromisoformat(str(payload["created_at"])),
-                accessed_at=datetime.fromisoformat(str(accessed_at_str))
+                key=MemoryKey(namespace=p.payload["namespace"], key=p.payload["key"]),
+                text=p.payload["text"],
+                embedding=p.vector,
+                metadata=p.payload.get("metadata", {}),
+                memory_type=p.payload.get("memory_type", "general"),
+                created_at=datetime.fromisoformat(p.payload["created_at"]),
+                accessed_at=datetime.fromisoformat(accessed_at_str)
                 if accessed_at_str
                 else None,
             )
@@ -296,7 +273,7 @@ class QdrantBackend:
         Decay is applied as an exponential half-life: final_score = raw_score * (0.5 ** (age_seconds / half_life_seconds)).
         Configure half-life via OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS (default: 30 days).
         """
-        must: list[Condition] = (
+        must = (
             [FieldCondition(key="namespace", match=MatchValue(value=namespace))]
             if namespace
             else []
@@ -310,63 +287,55 @@ class QdrantBackend:
             with_payload=True,
             with_vectors=False,
         )
-        entries: list[VectorEntry] = []
+        entries = []
         now = datetime.now(UTC)
         for hit in response.points:
-            payload = _payload_dict(hit.payload)
             # Skip expired
-            if "expires_at" in payload and now > datetime.fromisoformat(
-                str(payload["expires_at"]),
+            if "expires_at" in hit.payload and now > datetime.fromisoformat(
+                hit.payload["expires_at"],
             ):
                 continue
             try:
-                created = datetime.fromisoformat(str(payload["created_at"]))
+                created = datetime.fromisoformat(hit.payload["created_at"])
             except Exception:
                 created = now
-            accessed_at_str = payload.get("accessed_at")
+            accessed_at_str = hit.payload.get("accessed_at")
             accessed_at = (
-                datetime.fromisoformat(str(accessed_at_str))
-                if accessed_at_str
-                else None
+                datetime.fromisoformat(accessed_at_str) if accessed_at_str else None
             )
-            memory_type = str(payload.get("memory_type", "general"))
+            memory_type = hit.payload.get("memory_type", "general")
 
             # Per-type decay via centralized compute_decay
-            decay: float
             if self._decay_config is not None:
                 from obscura.vector_memory.decay import compute_decay as _compute_decay
 
-                decay = float(
-                    _compute_decay(
-                        memory_type,
-                        created,
-                        accessed_at,
-                        self._decay_config,
-                        now=now,
-                    )
+                decay = _compute_decay(
+                    memory_type,
+                    created,
+                    accessed_at,
+                    self._decay_config,
+                    now=now,
                 )
             else:
                 # Legacy single half-life fallback
-                half_life_raw: float | int | None = (
+                half_life = (
                     self.config.decay_half_life_seconds
                     if getattr(self.config, "decay_half_life_seconds", None) is not None
                     else 30 * 24 * 3600
                 )
-                half_life = float(half_life_raw) if half_life_raw is not None else 0.0
                 age_seconds = (now - created).total_seconds()
                 decay = 0.5 ** (age_seconds / half_life) if half_life > 0 else 1.0
 
             raw_score = hit.score or 0.0
-            metadata = cast(dict[str, Any], payload.get("metadata", {}))
             entries.append(
                 VectorEntry(
                     key=MemoryKey(
-                        namespace=str(payload["namespace"]),
-                        key=str(payload["key"]),
+                        namespace=hit.payload["namespace"],
+                        key=hit.payload["key"],
                     ),
-                    text=str(payload["text"]),
+                    text=hit.payload["text"],
                     embedding=[],
-                    metadata=metadata,
+                    metadata=hit.payload.get("metadata", {}),
                     memory_type=memory_type,
                     created_at=created,
                     accessed_at=accessed_at,
@@ -384,12 +353,15 @@ class QdrantBackend:
         )
 
     def list_keys(self, namespace: str | None = None) -> list[MemoryKey]:
-        ns_must: list[Condition] = (
-            [FieldCondition(key="namespace", match=MatchValue(value=namespace))]
+        filt = (
+            Filter(
+                must=[
+                    FieldCondition(key="namespace", match=MatchValue(value=namespace)),
+                ],
+            )
             if namespace
-            else []
+            else None
         )
-        filt = Filter(must=ns_must) if ns_must else None
         points, _ = self.client.scroll(
             self.collection_name,
             scroll_filter=filt,
@@ -397,21 +369,19 @@ class QdrantBackend:
             with_payload=True,
             with_vectors=False,
         )
-        keys: list[MemoryKey] = []
-        for p in points:
-            payload = _payload_dict(p.payload)
-            keys.append(
-                MemoryKey(namespace=str(payload["namespace"]), key=str(payload["key"]))
-            )
-        return keys
+        return [
+            MemoryKey(namespace=p.payload["namespace"], key=p.payload["key"])
+            for p in points
+        ]
 
     def clear_namespace(self, namespace: str) -> int:
-        ns_must: list[Condition] = [
-            FieldCondition(key="namespace", match=MatchValue(value=namespace)),
-        ]
         points, _ = self.client.scroll(
             self.collection_name,
-            scroll_filter=Filter(must=ns_must),
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(key="namespace", match=MatchValue(value=namespace)),
+                ],
+            ),
             limit=10000,
             with_payload=False,
             with_vectors=False,
@@ -449,10 +419,11 @@ class QdrantBackend:
         limit: int = 100,
     ) -> list[VectorEntry]:
         """List entries of a given type, optionally filtered by age."""
-        type_must: list[Condition] = [
-            FieldCondition(key="memory_type", match=MatchValue(value=memory_type)),
-        ]
-        filt = Filter(must=type_must)
+        filt = Filter(
+            must=[
+                FieldCondition(key="memory_type", match=MatchValue(value=memory_type)),
+            ],
+        )
         points, _ = self.client.scroll(
             self.collection_name,
             scroll_filter=filt,
@@ -462,27 +433,25 @@ class QdrantBackend:
         )
         entries: list[VectorEntry] = []
         for p in points:
-            payload = _payload_dict(p.payload)
             try:
-                created = datetime.fromisoformat(str(payload["created_at"]))
+                created = datetime.fromisoformat(p.payload["created_at"])
             except Exception:
                 continue
             if older_than is not None and created >= older_than:
                 continue
-            accessed_at_str = payload.get("accessed_at")
-            metadata = cast(dict[str, Any], payload.get("metadata", {}))
+            accessed_at_str = p.payload.get("accessed_at")
             entries.append(
                 VectorEntry(
                     key=MemoryKey(
-                        namespace=str(payload["namespace"]),
-                        key=str(payload["key"]),
+                        namespace=p.payload["namespace"],
+                        key=p.payload["key"],
                     ),
-                    text=str(payload["text"]),
+                    text=p.payload["text"],
                     embedding=[],
-                    metadata=metadata,
-                    memory_type=str(payload.get("memory_type", "general")),
+                    metadata=p.payload.get("metadata", {}),
+                    memory_type=p.payload.get("memory_type", "general"),
                     created_at=created,
-                    accessed_at=datetime.fromisoformat(str(accessed_at_str))
+                    accessed_at=datetime.fromisoformat(accessed_at_str)
                     if accessed_at_str
                     else None,
                 ),
