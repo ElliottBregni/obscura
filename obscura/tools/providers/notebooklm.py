@@ -15,11 +15,34 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "_handler_add_source",
+    "_handler_create_note",
+    "_handler_create_notebook",
+    "_handler_delete_note",
+    "_handler_delete_notebook",
+    "_handler_delete_source",
+    "_handler_generate_audio_overview",
+    "_handler_get_audio_overview",
+    "_handler_get_note",
+    "_handler_get_notebook",
+    "_handler_get_source",
+    "_handler_list_notebooks",
+    "_handler_list_notes",
+    "_handler_list_sources",
+]
+
 _client: Any = None
+
+
+def _coerce_dict(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return {"data": value}
 
 
 def _ensure_venv_path() -> None:
@@ -49,24 +72,27 @@ def _get_client() -> Any:
     _ensure_venv_path()
 
     try:
-        from notebooklm_mcp.api_client import (
-            NotebookLMClient,
-            extract_cookies_from_chrome_export,
-        )
-        from notebooklm_mcp.auth import load_cached_tokens
+        # notebooklm_mcp is an untyped third-party package; treat as Any.
+        import notebooklm_mcp.api_client as _api_client  # pyright: ignore[reportMissingImports]
+        import notebooklm_mcp.auth as _auth_mod  # pyright: ignore[reportMissingImports]
+
+        _client_cls = cast(Any, _api_client).NotebookLMClient
+        _extract_cookies = cast(Any, _api_client).extract_cookies_from_chrome_export
+        _load_cached = cast(Any, _auth_mod).load_cached_tokens
 
         cookie_header = os.environ.get("NOTEBOOKLM_COOKIES", "")
         csrf_token = os.environ.get("NOTEBOOKLM_CSRF_TOKEN", "")
         session_id = os.environ.get("NOTEBOOKLM_SESSION_ID", "")
 
+        cookies: Any
         if cookie_header:
-            cookies = extract_cookies_from_chrome_export(cookie_header)
+            cookies = _extract_cookies(cookie_header)
         else:
-            cached = load_cached_tokens()
+            cached: Any = _load_cached()
             if cached:
                 cookies = cached.cookies
-                csrf_token = csrf_token or cached.csrf_token
-                session_id = session_id or cached.session_id
+                csrf_token = csrf_token or cast(str, cached.csrf_token)
+                session_id = session_id or cast(str, cached.session_id)
             else:
                 msg = (
                     "No NotebookLM auth found. Run notebooklm-mcp-auth "
@@ -76,7 +102,7 @@ def _get_client() -> Any:
                     msg,
                 )
 
-        _client = NotebookLMClient(
+        _client = _client_cls(
             cookies=cookies,
             csrf_token=csrf_token,
             session_id=session_id,
@@ -131,7 +157,7 @@ async def _handler_get_notebook(**kwargs: Any) -> dict[str, Any]:
         result = client.get_notebook(notebook_id)
         if result is None:
             return {"error": f"Notebook {notebook_id} not found"}
-        return result if isinstance(result, dict) else {"data": result}
+        return _coerce_dict(result)
     except Exception as e:
         return {"error": str(e)}
 
@@ -170,7 +196,7 @@ async def _handler_add_source(**kwargs: Any) -> dict[str, Any]:
             return {"error": "Either url or text is required"}
         if result is None:
             return {"error": "Failed to add source"}
-        return result if isinstance(result, dict) else {"data": result}
+        return _coerce_dict(result)
     except Exception as e:
         return {"error": str(e)}
 
@@ -194,7 +220,7 @@ async def _handler_get_source(**kwargs: Any) -> dict[str, Any]:
     try:
         client = _get_client()
         result = client.get_source_fulltext(source_id)
-        return result if isinstance(result, dict) else {"data": result}
+        return _coerce_dict(result)
     except Exception as e:
         return {"error": str(e)}
 
@@ -233,7 +259,7 @@ async def _handler_create_note(**kwargs: Any) -> dict[str, Any]:
         )
         if result is None:
             return {"error": "Failed to create note"}
-        return result if isinstance(result, dict) else {"data": result}
+        return _coerce_dict(result)
     except Exception as e:
         return {"error": str(e)}
 
@@ -245,7 +271,7 @@ async def _handler_list_notes(**kwargs: Any) -> dict[str, Any]:
     try:
         client = _get_client()
         summary = client.get_notebook_summary(notebook_id)
-        return summary if isinstance(summary, dict) else {"data": summary}
+        return _coerce_dict(summary)
     except Exception as e:
         return {"error": str(e)}
 
@@ -288,7 +314,7 @@ async def _handler_generate_audio_overview(**kwargs: Any) -> dict[str, Any]:
     try:
         client = _get_client()
         result = client.generate_audio_overview(notebook_id)
-        return result if isinstance(result, dict) else {"data": result}
+        return _coerce_dict(result)
     except Exception as e:
         return {"error": str(e)}
 
@@ -300,6 +326,6 @@ async def _handler_get_audio_overview(**kwargs: Any) -> dict[str, Any]:
     try:
         client = _get_client()
         result = client.get_audio_overview(notebook_id)
-        return result if isinstance(result, dict) else {"data": result}
+        return _coerce_dict(result)
     except Exception as e:
         return {"error": str(e)}
