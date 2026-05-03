@@ -430,14 +430,16 @@ def _bridge_run_shell_input(inputs: dict[str, Any]) -> dict[str, Any]:
 
 def _bridge_todo_write_input(inputs: dict[str, Any]) -> dict[str, Any]:
     """Map Codex update_plan payloads to todo_write items."""
-    todos = inputs.get("todos")
-    if not isinstance(todos, list):
+    todos_raw = inputs.get("todos")
+    if not isinstance(todos_raw, list):
         return inputs
+    todos = cast(list[Any], todos_raw)
 
     normalized: list[dict[str, str]] = []
-    for raw in todos:
-        if not isinstance(raw, dict):
+    for raw_item in todos:
+        if not isinstance(raw_item, dict):
             continue
+        raw = cast(dict[str, Any], raw_item)
         content = raw.get("content") or raw.get("step") or raw.get("task") or ""
         status = raw.get("status") or "pending"
         active = raw.get("activeForm") or raw.get("active_form") or content
