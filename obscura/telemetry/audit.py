@@ -154,8 +154,8 @@ def _emit_to_structlog(event: AuditEvent) -> None:
     try:
         from obscura.telemetry.logging import get_logger
 
-        logger = get_logger("obscura.audit")
-        logger.info(
+        structlog_logger = get_logger("obscura.audit")
+        structlog_logger.info(
             "audit.event",
             event_type=event.event_type,
             user_id=event.user_id,

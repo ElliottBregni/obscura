@@ -124,7 +124,7 @@ async def sync_provider_secrets(
         provider_token=body.provider_token,
         provider_refresh_token=body.provider_refresh_token,
     )
-    _sync_provider_secrets_to_supabase(cfg, provider=body.provider, session=session)
+    sync_provider_secrets_to_supabase(cfg, provider=body.provider, session=session)
 
     return JSONResponse(
         content={
