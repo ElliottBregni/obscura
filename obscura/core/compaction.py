@@ -53,6 +53,15 @@ MAX_HISTORY_SHARE = 0.5  # Max 50% of context window for history
 FALLBACK_KEEP_LAST = 20  # Messages to keep if summarization fails
 LARGE_MSG_THRESHOLD = 0.10  # Reduce chunk ratio if avg msg > 10% of context
 
+# Serializes ``compact_history`` against concurrent history mutations from
+# in-flight tool results (Stage C+ — once tool results stream in mid-turn,
+# compaction must not race with them). Compaction is rare and brief, so
+# the lock is uncontended in the common case. Module-level (per-process)
+# is sufficient for now: the agent loop already serializes turn boundaries
+# in a single session, and concurrent sessions in the same process are
+# rare enough that the small extra serialization cost is acceptable.
+_compaction_lock = asyncio.Lock()
+
 
 def repair_tool_pairs(messages: list[Any]) -> list[Any]:
     """Remove orphaned tool_result blocks after history pruning.
@@ -463,140 +472,148 @@ async def compact_history(
     Phase 3 -- Final repair pass.
     Fallback -- Keep last N messages if all LLM summarization fails.
 
+    Concurrency: the body runs under :data:`_compaction_lock`. This serializes
+    compaction against concurrent history mutations from in-flight tool results
+    (Stage C+) and against other concurrent compaction calls. The lock is
+    uncontended in the common case — compaction is rare and brief.
+
     Returns:
         (compacted_messages, was_compacted, extracted_memories) tuple.
 
     """
-    if not messages:
-        return messages, False, []
+    # Serializes compaction against concurrent history mutations from
+    # in-flight tool results (Stage C+).
+    async with _compaction_lock:
+        if not messages:
+            return messages, False, []
 
-    context_window = get_context_window(model_id)
-    sys_tokens = estimate_tokens(system_prompt) if system_prompt else 0
-    history_budget = (
-        int(context_window * max_history_share) - sys_tokens - reserve_tokens
-    )
-
-    if history_budget <= 0:
-        logger.warning(
-            "compact_history: history budget is %d, keeping last %d messages",
-            history_budget,
-            fallback_keep_last,
-        )
-        return repair_tool_pairs(messages[-fallback_keep_last:]), True, []
-
-    current = list(messages)
-    was_compacted = False
-
-    # -- Phase 1: Prune oldest messages ------------------------------------
-    max_prune_iters = len(current) * 2
-    prune_count = 0
-
-    while prune_count < max_prune_iters:
-        if estimate_messages_tokens(current) <= history_budget:
-            break
-        if len(current) <= 2:
-            break
-        current.pop(0)
-        was_compacted = True
-        current = repair_tool_pairs(current)  # CRITICAL after every drop
-        prune_count += 1
-
-    logger.debug(
-        "compact_history: pruned %d messages, %d remain",
-        prune_count,
-        len(current),
-    )
-
-    # -- Phase 2: LLM summarization if still over budget -------------------
-    if estimate_messages_tokens(current) > history_budget and len(current) > 2:
-        chunk_ratio = _compute_adaptive_chunk_ratio(
-            current,
-            context_window,
-            base_chunk_ratio,
-            min_chunk_ratio,
-        )
-        chunk_budget = int(context_window * chunk_ratio)
-
-        chunks: list[list[Any]] = []
-        cur_chunk: list[Any] = []
-        cur_tokens = 0
-
-        for msg in current:
-            mt = estimate_message_tokens(msg)
-            if cur_tokens + mt > chunk_budget and cur_chunk:
-                chunks.append(cur_chunk)
-                cur_chunk = [msg]
-                cur_tokens = mt
-            else:
-                cur_chunk.append(msg)
-                cur_tokens += mt
-        if cur_chunk:
-            chunks.append(cur_chunk)
-
-        logger.debug(
-            "compact_history: summarizing %d chunks (ratio=%.2f, budget=%d tokens)",
-            len(chunks),
-            chunk_ratio,
-            chunk_budget,
+        context_window = get_context_window(model_id)
+        sys_tokens = estimate_tokens(system_prompt) if system_prompt else 0
+        history_budget = (
+            int(context_window * max_history_share) - sys_tokens - reserve_tokens
         )
 
-        summaries = await asyncio.gather(
-            *[summarize_messages(chunk, model_id, backend) for chunk in chunks],
-            return_exceptions=True,
-        )
-
-        parts: list[str] = []
-        for i, s in enumerate(summaries):
-            if isinstance(s, Exception):
-                logger.warning("compact_history: chunk %d failed: %s", i, s)
-            elif isinstance(s, str) and s:
-                parts.append(s)
-
-        if parts:
-            merged = "\n\n".join(parts)
-            current = [_make_summary_message(merged)]
-            current = repair_tool_pairs(current)
-            was_compacted = True
-            logger.info(
-                "compact_history: summarized %d chunks -> %d-token summary",
-                len(chunks),
-                estimate_tokens(merged),
-            )
-        else:
+        if history_budget <= 0:
             logger.warning(
-                "compact_history: all summarization failed, keeping last %d",
+                "compact_history: history budget is %d, keeping last %d messages",
+                history_budget,
                 fallback_keep_last,
             )
-            current = repair_tool_pairs(messages[-fallback_keep_last:])
+            return repair_tool_pairs(messages[-fallback_keep_last:]), True, []
+
+        current = list(messages)
+        was_compacted = False
+
+        # -- Phase 1: Prune oldest messages ------------------------------------
+        max_prune_iters = len(current) * 2
+        prune_count = 0
+
+        while prune_count < max_prune_iters:
+            if estimate_messages_tokens(current) <= history_budget:
+                break
+            if len(current) <= 2:
+                break
+            current.pop(0)
             was_compacted = True
+            current = repair_tool_pairs(current)  # CRITICAL after every drop
+            prune_count += 1
 
-    # -- Final repair pass -------------------------------------------------
-    current = repair_tool_pairs(current)
+        logger.debug(
+            "compact_history: pruned %d messages, %d remain",
+            prune_count,
+            len(current),
+        )
 
-    logger.info(
-        "compact_history: %d -> %d messages, %d tokens (budget: %d)",
-        len(messages),
-        len(current),
-        estimate_messages_tokens(current),
-        history_budget,
-    )
+        # -- Phase 2: LLM summarization if still over budget -------------------
+        if estimate_messages_tokens(current) > history_budget and len(current) > 2:
+            chunk_ratio = _compute_adaptive_chunk_ratio(
+                current,
+                context_window,
+                base_chunk_ratio,
+                min_chunk_ratio,
+            )
+            chunk_budget = int(context_window * chunk_ratio)
 
-    # -- Memory extraction from pruned messages ----------------------------
-    extracted_memories: list[dict[str, str]] = []
-    if was_compacted and prune_count > 0:
-        dropped = messages[:prune_count]
-        try:
-            extracted_memories = await extract_memories(dropped, model_id, backend)
-            if extracted_memories:
+            chunks: list[list[Any]] = []
+            cur_chunk: list[Any] = []
+            cur_tokens = 0
+
+            for msg in current:
+                mt = estimate_message_tokens(msg)
+                if cur_tokens + mt > chunk_budget and cur_chunk:
+                    chunks.append(cur_chunk)
+                    cur_chunk = [msg]
+                    cur_tokens = mt
+                else:
+                    cur_chunk.append(msg)
+                    cur_tokens += mt
+            if cur_chunk:
+                chunks.append(cur_chunk)
+
+            logger.debug(
+                "compact_history: summarizing %d chunks (ratio=%.2f, budget=%d tokens)",
+                len(chunks),
+                chunk_ratio,
+                chunk_budget,
+            )
+
+            summaries = await asyncio.gather(
+                *[summarize_messages(chunk, model_id, backend) for chunk in chunks],
+                return_exceptions=True,
+            )
+
+            parts: list[str] = []
+            for i, s in enumerate(summaries):
+                if isinstance(s, Exception):
+                    logger.warning("compact_history: chunk %d failed: %s", i, s)
+                elif isinstance(s, str) and s:
+                    parts.append(s)
+
+            if parts:
+                merged = "\n\n".join(parts)
+                current = [_make_summary_message(merged)]
+                current = repair_tool_pairs(current)
+                was_compacted = True
                 logger.info(
-                    "compact_history: extracted %d memories from %d pruned messages",
-                    len(extracted_memories),
-                    len(dropped),
+                    "compact_history: summarized %d chunks -> %d-token summary",
+                    len(chunks),
+                    estimate_tokens(merged),
                 )
-        except Exception:
-            logger.debug("compact_history: memory extraction failed", exc_info=True)
+            else:
+                logger.warning(
+                    "compact_history: all summarization failed, keeping last %d",
+                    fallback_keep_last,
+                )
+                current = repair_tool_pairs(messages[-fallback_keep_last:])
+                was_compacted = True
 
-    return current, was_compacted, extracted_memories
+        # -- Final repair pass -------------------------------------------------
+        current = repair_tool_pairs(current)
+
+        logger.info(
+            "compact_history: %d -> %d messages, %d tokens (budget: %d)",
+            len(messages),
+            len(current),
+            estimate_messages_tokens(current),
+            history_budget,
+        )
+
+        # -- Memory extraction from pruned messages ----------------------------
+        extracted_memories: list[dict[str, str]] = []
+        if was_compacted and prune_count > 0:
+            dropped = messages[:prune_count]
+            try:
+                extracted_memories = await extract_memories(dropped, model_id, backend)
+                if extracted_memories:
+                    logger.info(
+                        "compact_history: extracted %d memories from %d pruned messages",
+                        len(extracted_memories),
+                        len(dropped),
+                    )
+            except Exception:
+                logger.debug("compact_history: memory extraction failed", exc_info=True)
+
+        return current, was_compacted, extracted_memories
 
 
 async def extract_memories(

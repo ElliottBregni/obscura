@@ -29,6 +29,7 @@ global.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -54,7 +55,24 @@ class ToolContext:
     """The active ToolRegistry. Used by tool_search and similar discovery tools."""
 
     history: list[Any] | None = None
-    """Reference to the live conversation history list (mutable)."""
+    """Reference to the live conversation history list (mutable).
+
+    Tools that mutate this list should serialize through :meth:`append_history`
+    (or otherwise acquire :attr:`history_lock`) so that two parallel tool
+    calls executing under a future DAG executor don't race on the underlying
+    list.
+    """
+
+    history_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    """Cross-task lock for serializing :attr:`history` mutations.
+
+    Uncontended in the common case (sequential tool execution today). Held
+    only across the actual list mutation, never across ``await`` boundaries
+    that could deadlock. Required once the agent loop runs tools in parallel
+    under a DAG executor — without it, two tools that both append to
+    ``history`` (e.g. via ``history_snip`` or follow-on patterns) would race
+    on Python's list internals.
+    """
 
     user: Any = None
     """The authenticated user (AuthenticatedUser or None)."""
@@ -86,6 +104,21 @@ class ToolContext:
 
     extras: dict[str, Any] = field(default_factory=lambda: {})
     """Backend-specific or future extension fields."""
+
+    async def append_history(self, message: Any) -> None:
+        """Append *message* to :attr:`history` under :attr:`history_lock`.
+
+        Cross-task safe: two parallel tools that both call this won't race
+        on the underlying list. Lock is uncontended in the common case
+        (sequential tool execution); contention only arises once the agent
+        loop runs tools in parallel under a DAG executor.
+
+        No-op when :attr:`history` is ``None`` (no message list bound).
+        """
+        if self.history is None:
+            return
+        async with self.history_lock:
+            self.history.append(message)
 
 
 _current: ContextVar[ToolContext | None] = ContextVar(

@@ -110,6 +110,15 @@ ESCALATED_MAX_TOKENS: int = 65536  # 64k max escalation
 class StreamingToolExecutor:
     """Executes tools as they stream in from the model, not after the full response.
 
+    .. warning::
+       :attr:`seen_calls` is a cross-retry dedup map keyed by tool_use_id. It
+       is **load-bearing for correctness**, not just performance: it prevents
+       double-execution of side-effecting tools (e.g. ``git commit``) when an
+       SDK stream is interrupted and the turn is retried. Any rewrite of this
+       executor (Stage B DAG scheduler) MUST preserve the same semantic —
+       check tool_use_id against a same-turn cache at dispatch time before
+       invoking the handler.
+
     When a tool_use block finishes streaming, it is immediately handed to the
     executor via :meth:`add_tool`.  Concurrency-safe tools run in parallel;
     tools with side effects run alone.  Results are always returned in
@@ -137,9 +146,13 @@ class StreamingToolExecutor:
         self._safe_in_flight_count: int = (
             0  # how many concurrency-safe tools are running
         )
-        self.seen_calls: dict[
-            str, ToolResultEnvelope
-        ] = {}  # dedup cache shared across turn
+        # Cross-retry dedup keyed by tool_use_id. LOAD-BEARING FOR CORRECTNESS:
+        # if a stream is interrupted mid-turn and the turn retries, this
+        # prevents executing side-effecting tools (git commit, write_file, …)
+        # twice for the same tool_use_id. Any executor rewrite must preserve
+        # this — check tool_use_id at dispatch time, return cached result on
+        # hit. Cleared per turn (see _seen_calls_for_retry around line 1063).
+        self.seen_calls: dict[str, ToolResultEnvelope] = {}
         self.abort_event = asyncio.Event()  # sibling abort signal
         self._closed = False  # set when stream errors; reject further adds
 

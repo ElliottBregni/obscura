@@ -336,25 +336,44 @@ class Session:
             logger.debug("suppressed exception in history_snip", exc_info=True)
             end_turn = 0
 
-        total = len(history)
-        if start_turn < 0 or end_turn >= total or start_turn > end_turn:
-            return json.dumps(
-                {
-                    "ok": False,
-                    "error": "invalid_range",
-                    "detail": f"Range {start_turn}-{end_turn} invalid (history has {total} entries)",
-                },
-            )
-
-        # Remove the specified range.
-        removed_count = end_turn - start_turn + 1
-        del history[start_turn : end_turn + 1]
+        # Serialize bounds-check + mutation under ctx.history_lock so that
+        # parallel tool calls (Stage B DAG executor) can't race on the
+        # underlying list. Lock is uncontended in the common case; falls
+        # back to lockless mutation when no ToolContext is bound (legacy
+        # path via Session.snip_message_history).
+        if ctx is not None and history is ctx.history:
+            async with ctx.history_lock:
+                total = len(history)
+                if start_turn < 0 or end_turn >= total or start_turn > end_turn:
+                    return json.dumps(
+                        {
+                            "ok": False,
+                            "error": "invalid_range",
+                            "detail": f"Range {start_turn}-{end_turn} invalid (history has {total} entries)",
+                        },
+                    )
+                removed_count = end_turn - start_turn + 1
+                del history[start_turn : end_turn + 1]
+                remaining = len(history)
+        else:
+            total = len(history)
+            if start_turn < 0 or end_turn >= total or start_turn > end_turn:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": "invalid_range",
+                        "detail": f"Range {start_turn}-{end_turn} invalid (history has {total} entries)",
+                    },
+                )
+            removed_count = end_turn - start_turn + 1
+            del history[start_turn : end_turn + 1]
+            remaining = len(history)
 
         return json.dumps(
             {
                 "ok": True,
                 "removed_turns": removed_count,
-                "remaining_turns": len(history),
+                "remaining_turns": remaining,
                 "reason": reason,
             },
         )
