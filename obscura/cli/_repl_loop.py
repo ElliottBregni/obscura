@@ -79,12 +79,10 @@ from obscura.cli.widgets import (
     MultiSelectRequest,
     NotifyWidgetRequest,
     PermissionWidgetRequest,
-    ToolConfirmRequest,
     ask_model_question,
     ask_multi_select,
     confirm_attention,
     confirm_permission,
-    confirm_tool,
     render_notification_banner,
 )
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
@@ -99,7 +97,6 @@ from obscura.core.paths import resolve_obscura_home
 from obscura.core.prompt_cache import PromptCacheManager
 from obscura.core.session_utils import (
     check_concurrent_sessions,
-    generate_session_title,
     install_signal_handlers,
     register_session,
     register_shutdown_handler,
@@ -498,7 +495,7 @@ async def repl(
                 )
                 return {"selected": result.text}
 
-            _UI_for_interact.set_user_interact_callback(_user_interact_handler)
+            UI.set_user_interact_callback(_user_interact_handler)
         except Exception:
             pass
 
@@ -1010,8 +1007,8 @@ async def repl(
 
                 # *eval -- benchmark a command/skill chain
                 if user_input.startswith("*"):
-                    from obscura.cli.render import print_error as _pe
-                    from obscura.cli.render import print_info as _pi
+                    _pe = print_error
+                    _pi = print_info
 
                     def _snapshot_git() -> str | None:
                         try:
@@ -1176,9 +1173,6 @@ async def repl(
                     ss.reset()
 
                     try:
-                        from obscura.eval.models import EvalRunSummary
-                        from obscura.eval.store import EvalResultStore
-
                         _pass_ct = grade_response.upper().count("| PASS")
                         _fail_ct = len(criteria) - _pass_ct
                         summary = EvalRunSummary(
@@ -1218,8 +1212,8 @@ async def repl(
 
                 # $skill / @command / chained input
                 if user_input.startswith(("$", "@")):
-                    from obscura.cli.render import print_error as _pe
-                    from obscura.cli.render import print_info as _pi
+                    _pe = print_error
+                    _pi = print_info
 
                     skill_names, cmd_name, remaining = ctx.parse_chained_input(user_input)
                     blocks = []
@@ -1313,8 +1307,6 @@ async def repl(
                 with contextlib.suppress(Exception):
                     await _uds_inbox.stop()
             try:
-                from obscura.core.deep_log import dlog
-
                 dlog.session_event("end", session_id=ctx.session_id)
                 dlog.flush()
                 dlog.close()
@@ -1324,14 +1316,10 @@ async def repl(
                 with contextlib.suppress(Exception):
                     await _kairos_engine.stop()
             try:
-                from obscura.core.cleanup import run_cleanup
-
                 await run_cleanup()
             except Exception:
                 pass
             try:
-                from obscura.core.commit_attribution import get_attribution_tracker
-
                 get_attribution_tracker().save()
             except Exception:
                 pass

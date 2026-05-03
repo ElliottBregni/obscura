@@ -23,22 +23,49 @@ from typing import TYPE_CHECKING, Any, cast
 
 from rich.table import Table
 
+from obscura.agent.definitions import resolve_all_definitions
+from obscura.arbiter.hooks import get_engine as _get_arbiter_engine
+from obscura.arbiter.store import ArbiterStore
+from obscura.arbiter.watchdog import ArbiterWatchdog
+from obscura.auth import secrets as _secrets
+from obscura.auth.cli_user import current_cli_user
+from obscura.cli.app.diff_engine import DiffEngine, DiffHunk
+from obscura.cli.app.modes import MODE_TOOL_GROUPS, ModeManager, Plan, TUIMode
+from obscura.cli.auth_commands import CREDENTIALS_PATH, load_session
 from obscura.cli.control_commands import (
     cmd_policies,
     cmd_replay,
     cmd_status,
 )
+from obscura.cli.mcp_commands import handle_mcp_command
+from obscura.cli.vector_memory_bridge import auto_save_turn
+from obscura.cli.widgets import (
+    AttentionWidgetRequest,
+    ModelQuestionRequest,
+    ToolConfirmRequest,
+    ask_model_question,
+    confirm_attention,
+    confirm_tool,
+)
 from obscura.cli.render import (
+    TOOL_COLOR,
+    LabeledStreamRenderer,
     console,
+    get_active_text,
     print_error,
     print_info,
     print_ok,
     print_warning,
     render_agent_output,
     render_diff_summary,
+    render_event,
     render_plan,
 )
+from obscura.cli.trace import tail_entries, tail_pretty
+from obscura.cli.tui_effects import context_bar, effort_badge, ultrathink_banner
+from obscura.core._default_skills import DEFAULT_SKILLS
 from obscura.core.client import ObscuraClient
+from obscura.core.compaction import compact_history
 from obscura.core.context_lazy import (
     EVAL_GRADING_PROMPT,
     EvalSuite,
@@ -48,9 +75,70 @@ from obscura.core.context_lazy import (
     SkillMetadata,
     load_eval_for_command,
 )
-from obscura.core.context_window import estimate_tokens as _cw_estimate_tokens
+from obscura.core.commit_attribution import get_attribution_tracker
+from obscura.core.compiler import compile_workspace
+from obscura.core.compiler.loader import load_specs_dirs
+from obscura.core.context_suggestions import suggest_files
+from obscura.core.context_window import (
+    estimate_tokens as _cw_estimate_tokens,
+    get_context_window,
+)
+from obscura.core.cost_tracker import get_cost_tracker
+from obscura.core.deep_log import dlog
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
-from obscura.core.paths import resolve_obscura_skills_dir
+from obscura.core.migrate_external import (
+    clear_decisions as _migrate_clear_decisions,
+    migrate_all as _migrate_all,
+    scan as _migrate_scan,
+)
+from obscura.core.paths import (
+    resolve_all_commands_dirs,
+    resolve_all_skills_dirs,
+    resolve_obscura_global_home,
+    resolve_obscura_skills_dir,
+)
+from obscura.core.paths import (
+    resolve_all_specs_dirs,
+)
+from obscura.core.permission_modes import PermissionMode
+from obscura.core.templates import list_templates, load_template
+from obscura.core.tool_policy import ToolPolicy
+from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
+from obscura.core.workflows import list_workflows, load_workflow, run_workflow
+from obscura.core.workspace import (
+    WorkspaceExistsError,
+    bootstrap_all_builtins,
+    init_workspace,
+)
+from obscura.integrations.a2a.client import A2AClient
+from obscura.kairos.background_sessions import (
+    kill_session as _kill_session,
+    logs as _bg_logs,
+    ps as _bg_ps,
+)
+from obscura.kairos.engine import (
+    is_kairos_enabled as _is_kairos_enabled_cmd,
+    set_kairos_mode,
+)
+from obscura.kairos.goals import GoalBoard
+from obscura.kairos.uds_messaging import (
+    discover_peers as _uds_discover_peers,
+    send_message as uds_send,
+)
+from obscura.kairos.undercover import UndercoverMode
+from obscura.kairos.user_profile import UserProfile
+from obscura.kairos.vault_sync import VaultSync
+from obscura.manifest.models import AgentManifest
+from obscura.plugins.capabilities import resolve_allowed_tools_from_config
+from obscura.plugins.loader import PluginLoader
+from obscura.plugins.registry import PluginEntry, PluginRegistryService
+from obscura.profile.builder import ProfileBuilder
+from obscura.profile.models import ProfileCategory
+from obscura.profile.store import ProfileStore
+from obscura.tools import worktree_observer, worktree_registry
+from obscura.tools.dynamic_discovery import DynamicToolDiscovery
+from obscura.tools.system import Policy, get_system_tool_specs
+from obscura.tools.system.file_state import record_file_access
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import (
@@ -327,7 +415,6 @@ class REPLContext:
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self.mode_manager is None:
-            from obscura.cli.app.modes import ModeManager, TUIMode
 
             self.mode_manager = ModeManager(TUIMode.CODE)
         return self.mode_manager
@@ -398,7 +485,6 @@ class REPLContext:
         )
         await new_client.start()
         if self.tools_enabled:
-            from obscura.cli.app.modes import MODE_TOOL_GROUPS
             from obscura.tools.system import get_system_tool_specs
 
             all_specs = get_system_tool_specs()
@@ -503,7 +589,6 @@ class REPLContext:
     def _get_all_skill_loaders(self) -> list[LazySkillLoader]:
         """Get or create skill loaders for all skill directories."""
         if self._dollar_skill_loaders is None:
-            from obscura.core.paths import resolve_all_skills_dirs
 
             self._dollar_skill_loaders = [
                 LazySkillLoader(d) for d in resolve_all_skills_dirs()
@@ -513,7 +598,6 @@ class REPLContext:
     def _get_builtin_skills(self) -> dict[str, str]:
         """Return built-in default skills as {name: content}."""
         try:
-            from obscura.core._default_skills import DEFAULT_SKILLS
 
             return DEFAULT_SKILLS
         except ImportError:
@@ -566,7 +650,6 @@ class REPLContext:
     def _get_command_loader(self) -> LazyCommandLoader:
         """Get or create the lazy @command loader."""
         if self._lazy_command_loader is None:
-            from obscura.core.paths import resolve_all_commands_dirs
 
             self._lazy_command_loader = LazyCommandLoader(resolve_all_commands_dirs())
         return self._lazy_command_loader
@@ -836,7 +919,6 @@ async def cmd_tail_trace(args: str, _ctx: REPLContext) -> str | None:
     except Exception:
         n = 50
     try:
-        from obscura.cli.trace import tail_pretty
 
         out = tail_pretty(n)
         if not out:
@@ -922,7 +1004,6 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
             if not tools:
                 print_info("No tools registered.")
                 return None
-            from obscura.cli.render import TOOL_COLOR
 
             table = Table(title="Registered Tools", expand=False)
             table.add_column("#", justify="right", style="dim", width=4)
@@ -991,7 +1072,6 @@ async def cmd_confirm(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
     """Switch interaction mode."""
-    from obscura.cli.app.modes import TUIMode
 
     mm = ctx.get_mode_manager()
     val = args.strip().lower()
@@ -1014,7 +1094,6 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
     mm.switch(mode)
 
     # Enable tools for any mode that has a non-empty capability group
-    from obscura.cli.app.modes import MODE_TOOL_GROUPS
 
     allowed = MODE_TOOL_GROUPS.get(mode)
     ctx.tools_enabled = allowed is None or len(allowed) > 0
@@ -1027,7 +1106,6 @@ async def cmd_mode(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_plan(args: str, ctx: REPLContext) -> str | None:
     """Structured planning. Usage: /plan [show|save|execute|clear] or /plan <description>."""
-    from obscura.cli.app.modes import Plan, TUIMode
 
     mm = ctx.get_mode_manager()
     val = args.strip()
@@ -1100,7 +1178,6 @@ async def cmd_plan(args: str, ctx: REPLContext) -> str | None:
         "it touches and any risks."
     )
 
-    from obscura.cli.render import render_event
 
     collected: list[str] = []
     try:
@@ -1227,13 +1304,11 @@ async def _diff_accept_reject(
     accept: bool,
 ) -> str | None:
     """Accept or reject hunks."""
-    from obscura.cli.app.diff_engine import DiffEngine
 
     if not ctx.file_changes:
         print_info("No file changes.")
         return None
 
-    from obscura.cli.app.diff_engine import DiffHunk
 
     engine = DiffEngine()
     # Build flat hunk list
@@ -1271,7 +1346,6 @@ async def _diff_side_by_side(ctx: REPLContext) -> str | None:
     from rich.syntax import Syntax
     from rich.text import Text
 
-    from obscura.cli.app.diff_engine import DiffEngine
 
     if not ctx.file_changes:
         print_info("No file changes to display.")
@@ -1324,7 +1398,6 @@ async def _diff_side_by_side(ctx: REPLContext) -> str | None:
 
 async def _diff_apply(ctx: REPLContext) -> str | None:
     """Apply accepted hunks to disk."""
-    from obscura.cli.app.diff_engine import DiffEngine
 
     if not ctx.file_changes:
         print_info("No file changes.")
@@ -1382,11 +1455,9 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
     console.print(f"Mode: {mm.current.value}")
     # Visual context usage bar.
     try:
-        from obscura.core.context_window import get_context_window
 
         cw = get_context_window(ctx.model or "default")
         usage_pct = tokens / cw if cw > 0 else 0.0
-        from obscura.cli.tui_effects import context_bar
 
         console.print(f"  Context: {context_bar(usage_pct)}")
     except Exception:
@@ -1454,7 +1525,6 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
     summary = ""
     extracted_memories: list[dict[str, str]] = []
     try:
-        from obscura.core.compaction import compact_history
 
         # Convert message_history tuples to dicts for compact_history.
         msg_dicts: list[Any] = [{"role": r, "content": t} for r, t in old]
@@ -2004,7 +2074,6 @@ async def _agent_run(args: str, ctx: REPLContext) -> str | None:
         print_error(f"Agent not found: {target}")
         return None
 
-    from obscura.cli.render import render_event
 
     try:
         async for event in agent.stream_loop(prompt):
@@ -2132,7 +2201,6 @@ async def cmd_delegate(args: str, ctx: REPLContext) -> str | None:
     )
     await agent.start()
     print_info("=> Delegating to [" + model + "] in " + mode + " mode...")
-    from obscura.cli.render import render_event
 
     collected_output: list[str] = []
     try:
@@ -2385,7 +2453,6 @@ async def _fleet_run(args: str, ctx: REPLContext) -> str | None:
         print_error("No running agents. Use /fleet spawn first.")
         return None
 
-    from obscura.cli.render import LabeledStreamRenderer
 
     # Color rotation for agents
     colors = ["cyan", "magenta", "yellow", "green", "blue", "red"]
@@ -2484,7 +2551,6 @@ async def _fleet_delegate(args: str, ctx: REPLContext) -> str | None:
         print_error(f"Agent not found: {target}")
         return None
 
-    from obscura.cli.render import LabeledStreamRenderer
 
     renderer = LabeledStreamRenderer(agent.config.name, "cyan")
     try:
@@ -3107,7 +3173,6 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_discover(args: str, ctx: REPLContext) -> str | None:
     """Discover popular MCP tools dynamically."""
-    from obscura.tools.dynamic_discovery import DynamicToolDiscovery
 
     parts = args.strip().split()
     category = parts[0] if parts and not parts[0].isdigit() else None
@@ -3159,7 +3224,6 @@ async def cmd_discover(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_mcp(args: str, ctx: REPLContext) -> str | None:
     """MCP server management commands."""
-    from obscura.cli.mcp_commands import handle_mcp_command
 
     try:
         args_list = shlex.split(args) if args.strip() else []
@@ -4416,7 +4480,6 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
         print_info("Generating OBSCURA.md for this repository...")
         try:
             onboarding_prompt = _build_onboarding_prompt()
-            from obscura.cli.render import render_event
 
             async for event in _ctx.client.run_loop(onboarding_prompt, max_turns=10):
                 render_event(event)
@@ -4519,7 +4582,6 @@ async def _running_detail(
 
     # ── Current thinking delta / active text ──
     try:
-        from obscura.cli.render import get_active_text
 
         active_text = get_active_text()
         if active_text:
@@ -4538,7 +4600,6 @@ async def _running_detail(
 
     # ── Recent trace events ──
     try:
-        from obscura.cli.trace import tail_entries
 
         entries = tail_entries(30)
         if entries:
@@ -5188,7 +5249,6 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
         print_info(f"No tools matching '{query}'.")
         return None
 
-    from obscura.cli.render import TOOL_COLOR
 
     table = Table(
         title=f"Tools matching '{query}' ({len(results)} found)",
@@ -5217,7 +5277,6 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
     """Switch permission mode: default, plan, accept_edits, bypass."""
-    from obscura.core.permission_modes import PermissionMode
 
     mode_str = args.strip().lower()
     if not mode_str:
@@ -5314,7 +5373,6 @@ async def cmd_resume(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_cost(_args: str, ctx: REPLContext) -> str | None:
     """Display session cost breakdown."""
-    from obscura.core.cost_tracker import get_cost_tracker
 
     tracker = get_cost_tracker()
     if tracker.turn_count() == 0:
@@ -5366,7 +5424,6 @@ async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
             checks.append((binary, "[yellow]MISS[/]", "not found in PATH"))
 
     # Obscura home
-    from obscura.core.paths import resolve_obscura_global_home
 
     home = resolve_obscura_global_home()
     checks.append(
@@ -5424,7 +5481,6 @@ async def cmd_vim(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     """Set thinking effort level: low, medium, high, max."""
-    from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
     level_str = args.strip().lower()
     if not level_str:
@@ -5443,14 +5499,12 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     # Show ultrathink banner for max effort.
     if level == EffortLevel.MAX:
         try:
-            from obscura.cli.tui_effects import ultrathink_banner
 
             ultrathink_banner()
         except Exception:
             print_ok(f"⚡ ULTRATHINK activated (budget: {budget:,} tokens)")
     else:
         try:
-            from obscura.cli.tui_effects import effort_badge
 
             console.print(f"  {effort_badge(level.value)}  (budget: {budget:,} tokens)")
         except Exception:
@@ -5597,7 +5651,6 @@ EOF
 Do NOT use --amend, --no-verify, or -i flags. Do NOT commit .env or credential files."""
 
     # Send to agent loop
-    from obscura.cli.render import render_event
 
     try:
         async for event in ctx.client.run_loop(prompt):
@@ -5640,7 +5693,6 @@ Provide a thorough review covering:
 
 Be concise. Focus on real issues, not style preferences."""
 
-    from obscura.cli.render import render_event
 
     try:
         async for event in ctx.client.run_loop(prompt):
@@ -5730,7 +5782,6 @@ EOF
 
 Do NOT use --force. Do NOT push to {base} directly."""
 
-    from obscura.cli.render import render_event
 
     try:
         async for event in ctx.client.run_loop(prompt):
@@ -5788,7 +5839,6 @@ async def cmd_security_review(args: str, ctx: REPLContext) -> str | None:
 
 Only report HIGH and MEDIUM severity findings with 80%+ confidence."""
 
-    from obscura.cli.render import render_event
 
     try:
         async for event in ctx.client.run_loop(prompt):
@@ -6047,7 +6097,6 @@ One paragraph overall assessment. Mention total files reviewed: {total_files}.
 {all_findings[:20000]}
 """
 
-    from obscura.cli.render import render_event
 
     console.print(Rule("[bold white]UNIFIED REPORT[/]", style="white"))
     try:
@@ -6171,7 +6220,6 @@ async def cmd_template(args: str, ctx: REPLContext) -> str | None:
             print_error(f"Template not found: {name}")
             return None
         prompt = tmpl.render()
-        from obscura.cli.render import render_event
 
         try:
             async for event in ctx.client.run_loop(prompt):
@@ -6200,7 +6248,6 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
         return None
     # Show a summary of all tool calls from the session.
     if hasattr(collapser, "_group") or True:
-        from obscura.core.cost_tracker import get_cost_tracker
 
         tracker = get_cost_tracker()
         print_info(
@@ -6938,7 +6985,6 @@ async def cmd_version(_args: str, _ctx: REPLContext) -> str | None:
 
 async def cmd_usage(_args: str, ctx: REPLContext) -> str | None:
     """Show API usage summary for the current session."""
-    from obscura.core.cost_tracker import get_cost_tracker
 
     tracker = get_cost_tracker()
     if tracker.turn_count() == 0:
@@ -7002,7 +7048,6 @@ async def cmd_brief(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
     """Show session statistics."""
-    from obscura.core.cost_tracker import get_cost_tracker
     from obscura.tools.system.file_state import (
         get_recently_modified_files,
         get_recently_read_files,
@@ -7413,7 +7458,6 @@ async def cmd_loop(args: str, ctx: REPLContext) -> str | None:
                 if prompt_or_cmd.startswith("/"):
                     await handle_command(prompt_or_cmd, ctx)
                 else:
-                    from obscura.cli.render import render_event
 
                     try:
                         async for event in ctx.client.run_loop(prompt_or_cmd):
@@ -7567,7 +7611,6 @@ async def cmd_schedule(args: str, ctx: REPLContext) -> str | None:
         if prompt.startswith("/"):
             await handle_command(prompt, ctx)
         else:
-            from obscura.cli.render import render_event
 
             try:
                 async for event in ctx.client.run_loop(prompt):
@@ -8490,7 +8533,6 @@ async def cmd_goal(args: str, ctx: REPLContext) -> str | None:
             "(2) what remains to be done, (3) any blockers or risks. "
             "Be direct and specific — reference actual files/changes."
         )
-        from obscura.cli.render import render_event
 
         try:
             async for event in ctx.client.run_loop(check_prompt):
@@ -8857,7 +8899,6 @@ async def cmd_token_budget(args: str, ctx: REPLContext) -> str | None:
         /token-budget $<amount>          — set cost budget (e.g. $0.50, $5)
         /token-budget off                — remove budget
     """
-    from obscura.core.cost_tracker import get_cost_tracker
 
     tracker = get_cost_tracker()
     text = args.strip()
@@ -9688,7 +9729,6 @@ async def cmd_interview(args: str, ctx: REPLContext) -> str | None:
         /interview goals        — goal board only
         /interview update       — refresh stale facts and add new ones
     """
-    from obscura.cli.render import render_event
 
     sub = args.strip().lower()
 
