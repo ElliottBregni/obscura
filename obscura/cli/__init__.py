@@ -23,7 +23,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 
