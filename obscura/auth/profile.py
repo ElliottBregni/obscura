@@ -115,7 +115,7 @@ class ObscuraProfile(BaseModel):
     last_cwd: str | None = None
 
     # Machines currently signed in
-    devices: list[DeviceInfo] = Field(default_factory=list)
+    devices: list[DeviceInfo] = Field(default_factory=list[DeviceInfo])
 
 
 def _utc_now_iso() -> str:

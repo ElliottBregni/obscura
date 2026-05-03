@@ -278,7 +278,7 @@ def _emit_auth_audit(
             ),
         )
     except Exception:
-        _DROPPED_AUDIT_EVENTS += 1
+        _DROPPED_AUDIT_EVENTS += 1  # pyright: ignore[reportConstantRedefinition]
         logger.exception(
             "Auth audit event dropped (total dropped: %d) path=%s outcome=%s",
             _DROPPED_AUDIT_EVENTS,

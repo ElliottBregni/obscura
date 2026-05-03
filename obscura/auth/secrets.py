@@ -39,6 +39,7 @@ import threading
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +271,10 @@ def resolve(name: str, *, default: str | None = None) -> str | None:
     """
     cached = _resolve_cache.get(name, _RESOLVE_MISS)
     if cached is not _RESOLVE_MISS:
-        return cached if cached is not None else default
+        # cached is either str or None at this point; _RESOLVE_MISS sentinel
+        # is the only object() instance and we just excluded it.
+        cached_str = cast("str | None", cached)
+        return cached_str if cached_str is not None else default
 
     value: str | None = None
 

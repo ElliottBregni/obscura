@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import jwt
 from jwt import PyJWKClient
@@ -83,7 +83,7 @@ class SupabaseVerifier:
         # values when we pass them in, but only complains about *missing*
         # claims when listed under `options.require`. Listing them here
         # prevents a token without an issuer claim from slipping through.
-        options = {"require": ["exp", "sub", "iat", "aud", "iss"]}
+        options: dict[str, Any] = {"require": ["exp", "sub", "iat", "aud", "iss"]}
         issuer = self._settings.issuer
         if not issuer:
             raise SupabaseAuthError(
@@ -93,22 +93,22 @@ class SupabaseVerifier:
 
         if self._settings.jwks_url:
             signing_key = self._signing_key_for(token)
-            return jwt.decode(  # type: ignore[no-any-return]
+            return jwt.decode(
                 token,
                 signing_key,
                 algorithms=["RS256", "ES256"],
                 audience=self._settings.audience,
                 issuer=issuer,
-                options=options,
+                options=options,  # pyright: ignore[reportArgumentType]
             )
 
-        return jwt.decode(  # type: ignore[no-any-return]
+        return jwt.decode(
             token,
             self._settings.jwt_secret,
             algorithms=["HS256"],
             audience=self._settings.audience,
             issuer=issuer,
-            options=options,
+            options=options,  # pyright: ignore[reportArgumentType]
         )
 
     def _signing_key_for(self, token: str) -> Any:
@@ -129,14 +129,15 @@ class SupabaseVerifier:
             raise SupabaseAuthError("token missing `sub` claim")
 
         email = str(claims.get("email") or f"{user_id}@supabase.local")
-        app_metadata = claims.get("app_metadata") or {}
-        if not isinstance(app_metadata, dict):
-            app_metadata = {}
+        app_metadata_any: Any = claims.get("app_metadata")
+        if not isinstance(app_metadata_any, dict):
+            app_metadata: dict[str, Any] = {}
+        else:
+            app_metadata = cast(dict[str, Any], app_metadata_any)
 
         roles = _extract_roles(app_metadata, claims)
-        org_id = app_metadata.get("org_id")
-        if org_id is not None:
-            org_id = str(org_id)
+        org_id_raw = app_metadata.get("org_id")
+        org_id = str(org_id_raw) if org_id_raw is not None else None
 
         aal = claims.get("aal")
         session_id = claims.get("session_id")
@@ -169,7 +170,8 @@ def _extract_roles(
         raw = claims.get("role")
 
     if isinstance(raw, (list, tuple)):
-        candidates = tuple(str(r) for r in raw if isinstance(r, str))
+        seq = cast(list[Any] | tuple[Any, ...], raw)
+        candidates = tuple(str(r) for r in seq if isinstance(r, str))
     elif isinstance(raw, str):
         candidates = (
             _DEFAULT_AUTHENTICATED_ROLES if raw == "authenticated" else (raw,)

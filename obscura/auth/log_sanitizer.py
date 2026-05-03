@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast, override
 
 _SENSITIVE_HEADER_NAMES: frozenset[str] = frozenset(
     {
@@ -76,6 +76,7 @@ class SensitiveHeaderFilter(logging.Filter):
     authoritative fix is to not log secrets in the first place.
     """
 
+    @override
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.msg, str):
             record.msg = sanitize_text(record.msg)
@@ -86,9 +87,11 @@ class SensitiveHeaderFilter(logging.Filter):
 
 def _sanitize_args(args: Any) -> Any:
     if isinstance(args, tuple):
-        return tuple(_sanitize_one(a) for a in args)
+        tup = cast(tuple[Any, ...], args)
+        return tuple(_sanitize_one(a) for a in tup)
     if isinstance(args, dict):
-        return {k: _sanitize_one(v) for k, v in args.items()}
+        d = cast(dict[Any, Any], args)
+        return {k: _sanitize_one(v) for k, v in d.items()}
     return _sanitize_one(args)
 
 
@@ -96,7 +99,8 @@ def _sanitize_one(value: Any) -> Any:
     if isinstance(value, str):
         return sanitize_text(value)
     if isinstance(value, Mapping):
-        return {k: _sanitize_one(v) for k, v in value.items()}
+        m = cast(Mapping[Any, Any], value)
+        return {k: _sanitize_one(v) for k, v in m.items()}
     return value
 
 
