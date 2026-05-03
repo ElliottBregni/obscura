@@ -20,9 +20,25 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_str_list() -> list[str]:
+    return []
+
+
+def _as_str(value: Any, default: str = "") -> str:
+    """Coerce *value* to ``str`` (returning *default* when not a string)."""
+    return value if isinstance(value, str) else default
+
+
+def _as_str_list(value: Any) -> list[str]:
+    """Coerce *value* to ``list[str]`` (filtering non-strings)."""
+    if not isinstance(value, list):
+        return []
+    return [v for v in cast(list[Any], value) if isinstance(v, str)]
 
 _MARKETPLACES_DIR = Path.home() / ".obscura" / "plugins" / "claude_marketplaces"
 _CACHE_DIR = Path.home() / ".obscura" / "plugins" / "claude_cache"
@@ -52,7 +68,7 @@ class MarketplaceEntry:
     version: str = ""
     source: str = ""  # how to fetch this plugin
     category: str = ""
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=_empty_str_list)
     author: str = ""
 
 
@@ -159,29 +175,39 @@ class MarketplaceResolver:
             return []
 
         try:
-            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data_raw = json.loads(manifest.read_text(encoding="utf-8"))
         except Exception:
             logger.debug(
                 "Could not parse marketplace manifest %s", manifest, exc_info=True
             )
             return []
 
-        plugins_raw = data.get("plugins", [])
-        if isinstance(plugins_raw, dict):
-            plugins_raw = list(plugins_raw.values())
+        if not isinstance(data_raw, dict):
+            return []
+        data: dict[str, Any] = cast(dict[str, Any], data_raw)
+
+        plugins_obj = data.get("plugins", [])
+        plugins_raw: list[Any]
+        if isinstance(plugins_obj, dict):
+            plugins_raw = list(cast(dict[Any, Any], plugins_obj).values())
+        elif isinstance(plugins_obj, list):
+            plugins_raw = cast(list[Any], plugins_obj)
+        else:
+            plugins_raw = []
 
         entries: list[MarketplaceEntry] = []
-        for p in plugins_raw:
-            if not isinstance(p, dict):
+        for p_obj in plugins_raw:
+            if not isinstance(p_obj, dict):
                 continue
+            p: dict[str, Any] = cast(dict[str, Any], p_obj)
             entries.append(
                 MarketplaceEntry(
-                    name=p.get("name", ""),
-                    description=p.get("description", ""),
-                    version=p.get("version", ""),
-                    source=p.get("source", ""),
-                    category=p.get("category", ""),
-                    tags=p.get("tags", []),
+                    name=_as_str(p.get("name", "")),
+                    description=_as_str(p.get("description", "")),
+                    version=_as_str(p.get("version", "")),
+                    source=_as_str(p.get("source", "")),
+                    category=_as_str(p.get("category", "")),
+                    tags=_as_str_list(p.get("tags", [])),
                     author=_extract_author_str(p.get("author")),
                 )
             )
@@ -368,17 +394,30 @@ class MarketplaceResolver:
         if not _KNOWN_MARKETPLACES_FILE.exists():
             return {}
         try:
-            data = json.loads(_KNOWN_MARKETPLACES_FILE.read_text(encoding="utf-8"))
+            data_raw = json.loads(
+                _KNOWN_MARKETPLACES_FILE.read_text(encoding="utf-8")
+            )
+            if not isinstance(data_raw, dict):
+                return {}
+            data: dict[str, Any] = cast(dict[str, Any], data_raw)
+            marketplaces_obj = data.get("marketplaces", {})
+            if not isinstance(marketplaces_obj, dict):
+                return {}
+            marketplaces: dict[Any, Any] = cast(dict[Any, Any], marketplaces_obj)
             result: dict[str, MarketplaceSource] = {}
-            for name, spec in data.get("marketplaces", {}).items():
-                if isinstance(spec, dict):
-                    result[name] = MarketplaceSource(
-                        **{
-                            k: v
-                            for k, v in spec.items()
-                            if k in MarketplaceSource.__dataclass_fields__
-                        }
-                    )
+            for name, spec_obj in marketplaces.items():
+                if not isinstance(name, str):
+                    continue
+                if not isinstance(spec_obj, dict):
+                    continue
+                spec: dict[str, Any] = cast(dict[str, Any], spec_obj)
+                result[name] = MarketplaceSource(
+                    source=_as_str(spec.get("source", "")),
+                    repo=_as_str(spec.get("repo", "")),
+                    url=_as_str(spec.get("url", "")),
+                    path=_as_str(spec.get("path", "")),
+                    ref=_as_str(spec.get("ref", "")),
+                )
             return result
         except Exception:
             return {}
@@ -406,7 +445,8 @@ class MarketplaceResolver:
 
 def _extract_author_str(author: Any) -> str:
     if isinstance(author, dict):
-        return author.get("name", "")
+        author_dict: dict[str, Any] = cast(dict[str, Any], author)
+        return _as_str(author_dict.get("name", ""))
     if isinstance(author, str):
         return author
     return ""
