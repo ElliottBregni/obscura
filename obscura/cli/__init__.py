@@ -169,20 +169,20 @@ import contextlib  # noqa: E402
 
 from obscura.cli import trace as trace_mod  # noqa: E402
 from obscura.cli.bootstrap import (  # noqa: E402
-    _discover_agent_infos,
-    _discover_mcp,
-    _run_inline_agent_from_mention,
+    _discover_agent_infos,  # pyright: ignore[reportPrivateUsage]
+    _discover_mcp,  # pyright: ignore[reportPrivateUsage]
+    _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]
 )
 from obscura.cli.commands import (  # noqa: E402
     COMPLETIONS,
-    _FILE_WRITE_TOOLS,
+    _FILE_WRITE_TOOLS,  # pyright: ignore[reportPrivateUsage]
     REPLContext,
     handle_command,
 )
 from obscura.cli.prompt import (  # noqa: E402
     PromptStatus,
     StreamingStatus,
-    _get_git_branch,
+    _get_git_branch,  # pyright: ignore[reportPrivateUsage]
     animate_spinner,
     bordered_prompt,
     create_prompt_session,
