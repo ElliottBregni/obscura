@@ -10,6 +10,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["_handler_scan_repo"]
+
 
 async def _handler_scan_repo(**kwargs: Any) -> dict[str, Any]:
     path = kwargs.get("path", ".")
