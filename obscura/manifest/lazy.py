@@ -109,6 +109,20 @@ class LazyManifestProxy:
         self._resolved_instructions.invalidate()
         self._system_prompt.invalidate()
 
+
+    @property
+    def resolution_state(self) -> dict[str, bool]:
+        """Return a snapshot of which lazy fields are currently resolved."""
+        return {
+            "system_prompt": self._system_prompt.is_resolved,
+            "tool_policy": self._tool_policy.is_resolved,
+            "hook_registry": self._hook_registry.is_resolved,
+            "mcp_configs": self._mcp_configs.is_resolved,
+            "skills": self._resolved_skills.is_resolved,
+            "instructions": self._resolved_instructions.is_resolved,
+        }
+
+
     # ----- Factory methods -----
 
     def _build_tool_policy(self) -> Any:

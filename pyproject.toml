@@ -181,7 +181,6 @@ packages = [
     "obscura.parity",
     "obscura.heartbeat",
     "obscura.skills",
-    "obscura.demo",
     "obscura.schemas",
     "obscura.mcp_server",
     "obscura.vault_gen",

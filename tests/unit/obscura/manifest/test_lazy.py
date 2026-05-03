@@ -110,11 +110,13 @@ class TestLazyManifestProxy:
         # Access to trigger resolution
         _ = proxy.system_prompt
         _ = proxy.tool_policy
-        assert proxy._system_prompt.is_resolved
-        assert proxy._tool_policy.is_resolved
+        state = proxy.resolution_state
+        assert state["system_prompt"]
+        assert state["tool_policy"]
         proxy.invalidate_all()
-        assert not proxy._system_prompt.is_resolved
-        assert not proxy._tool_policy.is_resolved
+        state = proxy.resolution_state
+        assert not state["system_prompt"]
+        assert not state["tool_policy"]
 
     def test_hook_registry_empty(self) -> None:
         manifest = AgentManifest(name="dev")

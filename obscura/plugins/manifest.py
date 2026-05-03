@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, cast, cast
+from typing import Any, cast
 
 from obscura.plugins.models import (
     BootstrapDep,
@@ -83,9 +83,9 @@ def parse_config_requirements(
                 )
             else:
                 items.append(ConfigRequirement(key=key))
-    elif isinstance(raw, list):
+    else:
         for _entry in raw:
-            entry: dict[str, Any] = cast("dict[str, Any]", _entry)
+            entry: dict[str, Any] = _entry
             items.append(
                 ConfigRequirement(
                     key=entry.get("key", entry.get("name", "")),
@@ -378,7 +378,7 @@ def parse_manifest_file(path: Path) -> PluginSpec:
             stacklevel=2,
         )
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
         except ImportError:
             import json
 
