@@ -30,6 +30,7 @@ from obscura.core.task_queue import (
     TaskQueue,
     _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
 )
+from obscura.kairos.goals import GoalBoard
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +163,6 @@ class ArbiterWatchdog:
     def _check_orphan_tasks(self) -> list[WatchdogAction]:
         actions: list[WatchdogAction] = []
         try:
-            # lazy: avoid circular dep with obscura.kairos.engine
-            from obscura.kairos.goals import GoalBoard
-
             board = GoalBoard()
             conn = _open()
             try:

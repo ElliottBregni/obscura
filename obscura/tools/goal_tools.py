@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.arbiter.notify import fire_goal_transition
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
+from obscura.kairos.goals import GoalBoard
+from obscura.kairos.vault_sync import notify_goal_changed
 from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
 from obscura.vector_memory.vector_memory import VectorMemoryStore
 
@@ -29,18 +31,12 @@ _logger = logging.getLogger(__name__)
 
 
 def _board() -> Any:
-    # lazy: avoid circular dep with obscura.kairos (kairos.dream imports get_goal_tool_specs from here)
-    from obscura.kairos.goals import GoalBoard
-
     return GoalBoard()
 
 
 def _notify_vault(goal_id: str) -> None:
     """Best-effort vault sync on goal mutation."""
     try:
-        # lazy: avoid circular dep with obscura.kairos (kairos.dream imports get_goal_tool_specs from here)
-        from obscura.kairos.vault_sync import notify_goal_changed
-
         notify_goal_changed(goal_id)
     except Exception:
         _logger.debug("suppressed exception in _notify_vault", exc_info=True)
