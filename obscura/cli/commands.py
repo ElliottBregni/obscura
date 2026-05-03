@@ -312,15 +312,7 @@ class REPLContext:
             from obscura.agent.agents import AgentRuntime
             from obscura.auth.models import AuthenticatedUser
 
-            user = AuthenticatedUser(
-                user_id=os.environ.get("USER", "local"),
-                email="cli@obscura.local",
-                roles=("operator",),
-                org_id="local",
-                token_type="user",
-                raw_token="",
-            )
-            self.runtime = AgentRuntime(user)
+            self.runtime = AgentRuntime(AuthenticatedUser.local_cli())
             await self.runtime.start()
 
             # Wire InteractionBus → CLI
@@ -6644,6 +6636,8 @@ async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
     result = kill_session(sid)
     print_info(result)
     return None
+
+
 async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
     """Show context-aware file suggestions based on recent activity."""
     from obscura.core.context_suggestions import suggest_files
@@ -7153,9 +7147,7 @@ async def _oneshot_stream(client: Any, prompt: str, idle_timeout: float = 60.0) 
     try:
         while True:
             try:
-                chunk = await asyncio.wait_for(
-                    stream.__anext__(), timeout=idle_timeout
-                )
+                chunk = await asyncio.wait_for(stream.__anext__(), timeout=idle_timeout)
             except StopAsyncIteration:
                 break
             except asyncio.TimeoutError:
@@ -7260,9 +7252,7 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
         else:
-            print_error(
-                f"Summary stalled — no output for {stalled.idle_timeout:.0f}s."
-            )
+            print_error(f"Summary stalled — no output for {stalled.idle_timeout:.0f}s.")
     except Exception as exc:
         print_error(f"Summary failed: {exc}")
     return None
@@ -9102,9 +9092,7 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
         else:
-            print_error(
-                f"Recap stalled — no output for {stalled.idle_timeout:.0f}s."
-            )
+            print_error(f"Recap stalled — no output for {stalled.idle_timeout:.0f}s.")
     except Exception as exc:
         print_error(f"Recap failed: {exc}")
     return None
@@ -9281,12 +9269,12 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
 
     # Vector-backed profile.
     try:
-        from obscura.auth.context import current_user
+        from obscura.auth.models import AuthenticatedUser
         from obscura.profile.builder import ProfileBuilder
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        user = current_user()
+        user = AuthenticatedUser.local_cli()
         store = ProfileStore.for_user(user)
         builder = ProfileBuilder()
         summary = builder.build_summary(store, max_tokens=600)

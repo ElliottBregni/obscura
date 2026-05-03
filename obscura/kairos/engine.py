@@ -308,9 +308,7 @@ class KairosEngine:
                         f'task_update(task_id="{task["task_id"]}", '
                         f'status="completed").'
                     )
-                    logger.info(
-                        "[kairos] \u2192 Working: %s", task["subject"]
-                    )
+                    logger.info("[kairos] \u2192 Working: %s", task["subject"])
                     self.log(
                         f"tick #{tick_count}: claimed task {task['task_id']} "
                         f"— {task['subject']}",
@@ -389,12 +387,11 @@ class KairosEngine:
         # Inject user profile summary (prefer vector-backed, fall back to markdown).
         profile_injected = False
         try:
-            from obscura.auth.context import current_user
+            from obscura.auth.models import AuthenticatedUser
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            user = current_user()
-            profile_store = ProfileStore.for_user(user)
+            profile_store = ProfileStore.for_user(AuthenticatedUser.local_cli())
             builder = ProfileBuilder()
             profile_summary = builder.build_summary(profile_store, max_tokens=400)
             if profile_summary:

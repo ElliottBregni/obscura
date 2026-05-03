@@ -921,18 +921,9 @@ async def _repl(
         mcp_configs, mcp_names = _discover_mcp()
 
     # Create authenticated user for vector memory + memory tools
-    import os
-
     from obscura.auth.models import AuthenticatedUser
 
-    cli_user = AuthenticatedUser(
-        user_id=os.environ.get("USER", "local"),
-        email="cli@obscura.local",
-        roles=("operator",),
-        org_id="local",
-        token_type="user",
-        raw_token="",
-    )
+    cli_user = AuthenticatedUser.local_cli()
 
     # Initialize vector memory store
     vector_store = init_vector_store(cli_user)
@@ -1571,23 +1562,13 @@ async def _repl(
         supervisor: Any = None
         if supervise and agent_infos:
             try:
-                import os as _os
-
                 from obscura.agent.supervisor import AgentSupervisor
                 from obscura.auth.models import AuthenticatedUser
 
-                sup_user = AuthenticatedUser(
-                    user_id=_os.environ.get("USER", "local"),
-                    email="cli@obscura.local",
-                    roles=("operator",),
-                    org_id="local",
-                    token_type="user",
-                    raw_token="",
-                )
                 agents_yaml = resolve_obscura_home() / "agents.yaml"
                 supervisor = AgentSupervisor(
                     config_path=agents_yaml,
-                    user=sup_user,
+                    user=AuthenticatedUser.local_cli(),
                 )
                 supervisor_task = asyncio.create_task(
                     supervisor.run_forever(),
