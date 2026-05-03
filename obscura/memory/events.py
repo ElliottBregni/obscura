@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from queue import Empty, Full, Queue
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
-from obscura.memory import MemoryKey
+from obscura.memory.types import MemoryKey
 
 if TYPE_CHECKING:
     from collections.abc import Callable

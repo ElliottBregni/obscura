@@ -21,16 +21,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: '3.13.5'
-          cache: 'pip'
+          enable-cache: true
+          cache-dependency-glob: 'uv.lock'
 
+      - name: Set up Python
+        run: uv python install 3.13.5
+
+      # `uv sync` honors `[tool.uv.sources]` (openai/codex SDK from GitHub).
       - name: Install Obscura
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,server]"
+        run: uv sync --extra dev --extra server
 
       - name: Fetch PR diff
         id: diff
@@ -55,7 +57,7 @@ jobs:
           OBSCURA_DEFAULT_BACKEND: ${{ vars.ULTRAREVIEW_BACKEND || 'copilot' }}
         run: |
           # Run ultrareview in single-shot mode and capture output
-          obscura -b "${OBSCURA_DEFAULT_BACKEND}" \
+          uv run obscura -b "${OBSCURA_DEFAULT_BACKEND}" \
             -p "/ultrareview ${{ github.event.pull_request.number }}" \
             2>/dev/null | tee /tmp/review.md
 

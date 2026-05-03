@@ -370,6 +370,42 @@ ignore = [
 "tests/**/*.py" = ["PLC0415"]
 "scripts/**/*.py" = ["PLC0415"]
 
+[tool.vulture]
+# Dead-code scanner. Run from repo root: `vulture` (no args, reads this config).
+# Whitelist additions go in .vulture_whitelist.py — vulture treats it as
+# regular Python and the references silence false positives for plugin
+# entrypoints, framework callbacks, Pydantic fields, etc.
+paths = ["obscura", "packages", "scripts", "tools", ".vulture_whitelist.py"]
+exclude = [
+    "*/node_modules/*",
+    "*/venv*/*",
+    "*/.git/*",
+    "*/__pycache__/*",
+    "*/.egg-info/*",
+    "*/dist/*",
+    "*/build/*",
+]
+min_confidence = 80
+ignore_decorators = [
+    "@app.*",
+    "@router.*",
+    "@server.*",
+    "@*.route",
+    "@*.get",
+    "@*.post",
+    "@*.put",
+    "@*.delete",
+    "@*.fixture",
+    "@validator",
+    "@field_validator",
+    "@root_validator",
+    "@model_validator",
+    "@tool",
+    "@cli.command",
+    "@click.*",
+    "@property",
+]
+
 [tool.uv.sources]
 # Pin to openai/codex monorepo — the third-party "codex-app-server-sdk" on
 # PyPI is unrelated. See https://github.com/openai/codex/tree/main/sdk/python

@@ -1,0 +1,213 @@
+name: CI
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Path-gated CI for the Python codebase.
+#
+#   changes  ── computes which area(s) of the repo were touched
+#       │
+#       ├──► ruff       (only if Python or CI-config changed)
+#       ├──► pyright    (only if Python or CI-config changed)
+#       └──► test-core  (only if Python or CI-config changed)
+#                │
+#                └──► ci-success  (always runs; single required status check)
+#
+# Skipped jobs report `success` to `ci-success`, so branch protection just
+# needs to require `CI / CI success` — it stays green when nothing relevant
+# changed (docs-only PRs, browser-extension-only PRs, etc.).
+#
+# All Python work runs through `uv sync` so `[tool.uv.sources]` (which pins
+# the official openai/codex SDK from GitHub) is honored. Plain `pip install`
+# can't resolve that mapping.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  # Allow other workflows (e.g. release.yml) to reuse this pipeline.
+  workflow_call:
+
+# Cancel stale runs on PR pushes; let push/tag runs complete.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PYTHON_VERSION: '3.13.5'
+
+jobs:
+  # ── 1. Path-filter gate ───────────────────────────────────────────────────
+  # Computes booleans for which area(s) of the repo changed. Downstream jobs
+  # consume these via `if:` to skip work that isn't relevant to the diff.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      ci_config: ${{ steps.filter.outputs.ci_config }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute path filters
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # On push events, paths-filter compares against the previous commit
+          # on the same branch. On PRs, it compares against the merge base.
+          filters: |
+            python:
+              - 'obscura/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'pyrightconfig.json'
+              - 'packages/vault-gen/**'
+            ci_config:
+              - '.github/workflows/**'
+
+  # ── 2. Lint ───────────────────────────────────────────────────────────────
+  ruff:
+    name: Ruff (lint + format)
+    needs: changes
+    # Run if Python changed, CI itself changed, or this is a push/tag/release
+    # (always validate main + tags regardless of diff).
+    if: |
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.ci_config == 'true' ||
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'uv.lock'
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      # `uv sync` honors `[tool.uv.sources]`, which pins
+      # `openai-codex-app-server-sdk` to the official openai/codex monorepo.
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  # ── 3. Type check ─────────────────────────────────────────────────────────
+  pyright:
+    name: Pyright (strict)
+    needs: changes
+    if: |
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.ci_config == 'true' ||
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'uv.lock'
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra server --extra telemetry
+
+      - name: Run Pyright (strict mode)
+        run: uv run pyright
+
+  # ── 4. Core tests ─────────────────────────────────────────────────────────
+  # Only fast in-process tests. Integration / e2e / browser-host tests run
+  # in their own workflows (browser-extension.yml) or via opt-in markers.
+  test-core:
+    name: Core tests (unit)
+    needs: changes
+    if: |
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.ci_config == 'true' ||
+      github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'uv.lock'
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra server --extra telemetry
+
+      # Run only the `unit` directory and explicitly exclude slow/external
+      # markers. `browser` tests live under tests/browser_extension/ and
+      # are covered by browser-extension.yml.
+      - name: Run core tests
+        run: |
+          uv run pytest tests/unit \
+            --tb=short \
+            -m "not integration and not e2e and not browser" \
+            --maxfail=5
+
+  # ── 5. Required-check aggregator ──────────────────────────────────────────
+  # A single status check that branch protection can require. It passes when
+  # every gated job either succeeded or was legitimately skipped (path filter
+  # said nothing relevant changed). Anything else fails the PR.
+  ci-success:
+    name: CI success
+    if: always()
+    needs: [changes, ruff, pyright, test-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify gated jobs
+        env:
+          RUFF_RESULT: ${{ needs.ruff.result }}
+          PYRIGHT_RESULT: ${{ needs.pyright.result }}
+          TEST_CORE_RESULT: ${{ needs.test-core.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "changes:    $CHANGES_RESULT"
+          echo "ruff:       $RUFF_RESULT"
+          echo "pyright:    $PYRIGHT_RESULT"
+          echo "test-core:  $TEST_CORE_RESULT"
+
+          # `changes` must always succeed; the others may be `skipped` if the
+          # path filter excluded them, which counts as a pass.
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "::error::Path-filter job failed."
+            exit 1
+          fi
+
+          fail=0
+          for job in "ruff:$RUFF_RESULT" "pyright:$PYRIGHT_RESULT" "test-core:$TEST_CORE_RESULT"; do
+            name="${job%%:*}"
+            result="${job##*:}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::Required job '$name' did not pass: $result"
+              fail=1
+            fi
+          done
+
+          if [[ "$fail" == "1" ]]; then
+            exit 1
+          fi
+          echo "All required jobs passed or were skipped (no relevant changes)."

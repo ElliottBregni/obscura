@@ -56,10 +56,22 @@ from obscura.core.client import ObscuraClient
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.core.types import AgentEvent, AgentEventKind, ToolSpec
+from obscura.integrations.mcp.config_loader import (
+    build_runtime_server_configs,
+    discover_mcp_servers,
+)
+from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
 from obscura.manifest.lazy import LazyManifestProxy
 from obscura.memory import MemoryStore
 from obscura.plugins.broker import ToolBroker
 from obscura.plugins.policy import PluginPolicyEngine
+from obscura.tools.providers import (
+    A2ARemoteToolProvider,
+    BrokerContext,
+    MCPToolProvider,
+    MemoryToolProvider,
+    SystemToolProvider,
+)
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import InteractionBus
@@ -67,7 +79,6 @@ if TYPE_CHECKING:
     from obscura.heartbeat.client import AgentHeartbeatClient
     from obscura.manifest.models import AgentManifest
     from obscura.providers.mcp_backend import MCPBackend
-    from obscura.tools.providers import BrokerContext
     from obscura.vector_memory import VectorMemoryEntry
 
 
@@ -419,16 +430,6 @@ class Agent:
 
     async def start(self) -> None:
         """Initialize the agent and connect to backend."""
-        # lazy: obscura.tools.providers transitively imports obscura.providers.*
-        # which loops back through obscura.integrations.mcp → obscura.agent.agents.
-        from obscura.tools.providers import (
-            A2ARemoteToolProvider,
-            BrokerContext,
-            MCPToolProvider,
-            MemoryToolProvider,
-            SystemToolProvider,
-        )
-
         await self.runtime.emit_lifecycle_event(
             kind="agent.starting",
             agent=self,
@@ -545,12 +546,6 @@ class Agent:
             and not server_configs
             and self.config.mcp.auto_discover
         ):
-            # lazy: obscura.integrations.mcp package init imports obscura.agent.agents.
-            from obscura.integrations.mcp.config_loader import (
-                build_runtime_server_configs,
-                discover_mcp_servers,
-            )
-
             discovered = discover_mcp_servers(
                 self.config.mcp.config_path,
                 resolve_env=self.config.mcp.resolve_env,
@@ -591,12 +586,6 @@ class Agent:
                 logger.debug("Plugin-based MCP filtering failed: %s", exc)
 
         if self.config.mcp.enabled and server_configs:
-            # lazy: obscura.integrations.mcp package init imports obscura.agent.agents.
-            from obscura.integrations.mcp.types import (
-                MCPConnectionConfig,
-                MCPTransportType,
-            )
-
             mcp_configs: list[MCPConnectionConfig] = []
             for server_config in server_configs:
                 transport = MCPTransportType(server_config.get("transport", "stdio"))

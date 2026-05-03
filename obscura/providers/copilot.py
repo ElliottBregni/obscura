@@ -666,7 +666,7 @@ class CopilotBackend(BackendToolHostMixin):
 
     def build_session_config(self, **overrides: Any) -> dict[str, Any]:
         """Build a SessionConfig dict for the Copilot SDK."""
-        from copilot.session import PermissionRequestResult
+        from copilot.session import PermissionRequestResult, PermissionRequestResultKind
 
         _log = logging.getLogger(__name__)
         config: dict[str, Any] = {}
@@ -675,7 +675,7 @@ class CopilotBackend(BackendToolHostMixin):
             request: PermissionRequest,
             _context: dict[str, str],
         ) -> PermissionRequestResult:
-            return PermissionRequestResult(kind="approved")
+            return PermissionRequestResult(kind=cast("PermissionRequestResultKind", "approved"))
 
         config["on_permission_request"] = _approve_all
 

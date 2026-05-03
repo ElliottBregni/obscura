@@ -42,6 +42,14 @@ from obscura.core.types import (
     ToolCallInfo,
     ToolSpec,
 )
+from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+from obscura.providers.claude import ClaudeBackend
+from obscura.providers.codex import CodexBackend
+from obscura.providers.copilot import CopilotBackend
+from obscura.providers.localllm import LocalLLMBackend
+from obscura.providers.mcp_backend import MCPBackend
+from obscura.providers.moonshot import MoonshotBackend
+from obscura.providers.openai import OpenAIBackend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -255,14 +263,6 @@ class ObscuraClient:
         """
         # Connect to MCP servers and register their tools FIRST
         if self._mcp_server_configs:
-            # lazy: obscura.integrations.mcp package init pulls in obscura.agent.agents,
-            # which imports back here via obscura.core.client.
-            from obscura.integrations.mcp.types import (
-                MCPConnectionConfig,
-                MCPTransportType,
-            )
-            from obscura.providers.mcp_backend import MCPBackend
-
             configs: list[MCPConnectionConfig] = []
             for server in self._mcp_server_configs:
                 transport = MCPTransportType(server.get("transport", "stdio"))
@@ -816,15 +816,10 @@ class ObscuraClient:
         tool_policy: ToolPolicy | None = None,
     ) -> BackendProtocol:
         """Instantiate the appropriate backend, wrapped in the throttle gate."""
-        # lazy: obscura.providers.* is reached via obscura.agent.agents during
-        # obscura/__init__.py import, which means importing them at the top
-        # of this module would cycle through obscura.core.client itself.
         instance: BackendProtocol
         backend_name: str
 
         if backend == Backend.COPILOT:
-            from obscura.providers.copilot import CopilotBackend
-
             instance = CopilotBackend(
                 auth=auth,
                 model=model,
@@ -835,8 +830,6 @@ class ObscuraClient:
             )
             backend_name = "copilot"
         elif backend == Backend.CLAUDE:
-            from obscura.providers.claude import ClaudeBackend
-
             instance = ClaudeBackend(
                 auth=auth,
                 model=model,
@@ -848,8 +841,6 @@ class ObscuraClient:
             )
             backend_name = "claude"
         elif backend == Backend.LOCALLLM:
-            from obscura.providers.localllm import LocalLLMBackend
-
             instance = LocalLLMBackend(
                 auth=auth,
                 model=model,
@@ -858,8 +849,6 @@ class ObscuraClient:
             )
             backend_name = "localllm"
         elif backend == Backend.OPENAI:
-            from obscura.providers.openai import OpenAIBackend
-
             instance = OpenAIBackend(
                 auth=auth,
                 model=model,
@@ -868,8 +857,6 @@ class ObscuraClient:
             )
             backend_name = "openai"
         elif backend == Backend.CODEX:
-            from obscura.providers.codex import CodexBackend
-
             instance = CodexBackend(
                 auth=auth,
                 model=model,
@@ -878,8 +865,6 @@ class ObscuraClient:
             )
             backend_name = "codex"
         elif backend == Backend.MOONSHOT:
-            from obscura.providers.moonshot import MoonshotBackend
-
             instance = MoonshotBackend(
                 auth=auth,
                 model=model,

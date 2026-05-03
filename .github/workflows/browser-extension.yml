@@ -1,47 +1,72 @@
 name: Browser Extension Tests
 
+# Path-gated at the trigger level: pull_request only fires this workflow when
+# the diff touches the extension or its Python host tests. Push to main
+# always runs to give a baseline signal on the default branch.
+
 on:
   push:
     branches: [main]
+    paths:
+      - 'packages/browser-extension/**'
+      - 'tests/browser_extension/**'
+      - 'obscura/integrations/browser/**'
+      - '.github/workflows/browser-extension.yml'
   pull_request:
     paths:
       - 'packages/browser-extension/**'
       - 'tests/browser_extension/**'
+      - 'obscura/integrations/browser/**'
+      - '.github/workflows/browser-extension.yml'
+
+concurrency:
+  group: browser-ext-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.13.5'
+  NODE_VERSION: '20'
 
 jobs:
   browser-extension-tests:
+    name: Browser extension (Python host + JS)
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.13.5
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13.5'
-
+      # ── Python side: host lifecycle, framing, RPC, tool specs ────────────
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
           cache-dependency-glob: 'uv.lock'
 
-      - name: Install dependencies
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
         run: uv sync --extra dev
 
-      - name: Run browser extension tests (Python)
-        run: uv run pytest tests/browser_extension/ -v
+      - name: Run browser extension Python tests
+        run: uv run pytest tests/browser_extension/ -v --tb=short
 
+      # ── JS side: vitest unit tests + puppeteer smoke ─────────────────────
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: packages/browser-extension/package-lock.json
 
       - name: Install JS dependencies
         working-directory: packages/browser-extension
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
-      - name: Syntax check panel + SW
+      - name: Syntax check panel + service worker
         working-directory: packages/browser-extension
         run: npm run check
 

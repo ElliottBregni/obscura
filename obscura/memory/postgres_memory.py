@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.pg_config import PGPoolManager
-from obscura.memory import MemoryKey
+from obscura.memory.types import MemoryKey
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser

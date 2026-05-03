@@ -9,7 +9,11 @@
     ".claude",
     ".obscura",
     "output",
-    "tests/unit/obscura/vault_gen_tests"
+    "tests/unit/obscura/vault_gen_tests",
+    ".vulture_whitelist.py",
+    "tools/playwright",
+    "tests/browser_extension",
+    "typings"
   ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.13",
