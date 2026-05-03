@@ -129,3 +129,5 @@ obscura-migrate-agents-hooks.sh
 obscura-workspace-setup.sh
 package.json
 package-lock.json
+.claude/
+.claude/
