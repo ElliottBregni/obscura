@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.arbiter.notify import fire_goal_transition
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.tools import tool
+from obscura.core.task_queue import _open as _get_db  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
 from obscura.kairos.goals import GoalBoard
 from obscura.kairos.vault_sync import notify_goal_changed
-from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
 from obscura.vector_memory.vector_memory import VectorMemoryStore
 
 if TYPE_CHECKING:

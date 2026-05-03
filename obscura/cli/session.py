@@ -29,6 +29,11 @@ from dataclasses import dataclass, replace as _dc_replace
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.agent import AGENT_TYPE_REGISTRY
+from obscura.agent.coordinator import (
+    get_coordinator_system_prompt,
+    is_coordinator_mode,
+)
 from obscura.agent.daemon_agent import DaemonAgent, IMessageTrigger, ScheduleTrigger
 from obscura.agent.interaction import InteractionBus
 from obscura.agent.supervisor import SupervisorConfig
@@ -92,6 +97,7 @@ from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
 from obscura.core.session_utils import generate_session_title
 from obscura.kairos.engine import KairosEngine, is_kairos_enabled
 from obscura.core.compiler.compiled import ToolRoutingConfig
+from obscura.tools.swarm import build_agent_catalog, load_agent_configs
 from obscura.core.hooks import HookRegistry
 from obscura.core.settings import load_all_hooks
 from obscura.core.system_prompts import (
@@ -1132,9 +1138,6 @@ class ObscuraSession:
 
         # Environment context
         try:
-            # lazy: avoid circular dep with obscura.agent.agents via providers chain
-            from obscura.agent import AGENT_TYPE_REGISTRY
-
             env_section = compose_environment_context(
                 plugin_ids=list_builtin_plugin_ids(),
                 capabilities=[
@@ -1165,22 +1168,10 @@ class ObscuraSession:
 
         # Coordinator context
         try:
-            # lazy: avoid circular dep with obscura.agent.agents via providers chain
-            from obscura.agent.coordinator import (
-                get_coordinator_system_prompt,
-                is_coordinator_mode,
-            )
-
             if is_coordinator_mode():
                 custom_sections.append(get_coordinator_system_prompt())
 
                 try:
-                    # lazy: avoid circular dep with obscura.agent.agents via providers chain
-                    from obscura.tools.swarm import (
-                        build_agent_catalog,
-                        load_agent_configs,
-                    )
-
                     catalog = build_agent_catalog(load_agent_configs())
                     if catalog:
                         custom_sections.append(

@@ -11,7 +11,6 @@ import asyncio
 import contextlib
 import html as _html
 import os
-import random
 import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast, override
@@ -37,6 +36,9 @@ from obscura.cli.render import (
     console,
     get_active_text,
     get_model_space_delta,
+)
+from obscura.cli.ui_primitives import (
+    random_thinking_message as random_thinking_message,
 )
 from obscura.core.paths import resolve_obscura_home
 
@@ -149,29 +151,8 @@ def _keyword_gradient_styles() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 _SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-
-_THINKING_MESSAGES = [
-    "thinking...",
-    "pondering...",
-    "mulling it over...",
-    "ruminating...",
-    "contemplating...",
-    "brewing ideas...",
-    "connecting dots...",
-    "noodling on it...",
-    "chewing on that...",
-    "working through it...",
-    "processing...",
-    "deep in thought...",
-    "considering options...",
-    "assembling thoughts...",
-    "piecing it together...",
-]
-
-
-def random_thinking_message() -> str:
-    """Return a random thinking status message."""
-    return random.choice(_THINKING_MESSAGES)
+# random_thinking_message is re-exported at the top of this file from
+# obscura.cli.ui_primitives so legacy callers keep working.
 
 
 @dataclass

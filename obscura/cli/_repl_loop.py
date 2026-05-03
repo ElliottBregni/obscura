@@ -29,7 +29,12 @@ from dataclasses import replace as _dc_replace
 from datetime import UTC, datetime
 from typing import Any
 
+from obscura.agent import AGENT_TYPE_REGISTRY
 from obscura.agent.agents import AgentStatus
+from obscura.agent.coordinator import (
+    get_coordinator_system_prompt,
+    is_coordinator_mode,
+)
 from obscura.agent.supervisor import AgentSupervisor
 from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
 from obscura.auth.cli_user import current_cli_user
@@ -144,6 +149,7 @@ from obscura.tools.memory_tools import (
     build_channels_prompt_section,
     make_memory_tool_specs,
 )
+from obscura.tools.swarm import build_agent_catalog, load_agent_configs
 from obscura.tools.system import UI, Session, get_system_tool_specs
 from obscura.voice.session import VoiceSession
 
@@ -247,9 +253,6 @@ async def repl(
 
     # Inject environment context (available plugins, capabilities, agent types)
     try:
-        # lazy: avoid circular dep with obscura.agent.agents via providers chain
-        from obscura.agent import AGENT_TYPE_REGISTRY
-
         env_section = compose_environment_context(
             plugin_ids=list_builtin_plugin_ids(),
             capabilities=[
@@ -280,18 +283,9 @@ async def repl(
 
     # Inject coordinator system prompt
     try:
-        # lazy: avoid circular dep with obscura.agent.agents via providers chain
-        from obscura.agent.coordinator import (
-            get_coordinator_system_prompt,
-            is_coordinator_mode,
-        )
-
         if is_coordinator_mode():
             custom_sections.append(get_coordinator_system_prompt())
             try:
-                # lazy: avoid circular dep with obscura.agent.agents via providers chain
-                from obscura.tools.swarm import build_agent_catalog, load_agent_configs
-
                 catalog = build_agent_catalog(load_agent_configs())
                 if catalog:
                     custom_sections.append(

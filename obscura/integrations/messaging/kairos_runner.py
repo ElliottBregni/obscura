@@ -52,7 +52,7 @@ from typing import Any
 from obscura.core.agent_loop import AgentLoop
 from obscura.core.kairos import GoalBudget, Kairos
 from obscura.core.kairos.types import KairosEventKind
-from obscura.integrations.messaging.router import ObscuraAgentRunner
+from obscura.integrations.messaging.runners import ObscuraAgentRunner
 
 logger = logging.getLogger(__name__)
 

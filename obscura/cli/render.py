@@ -22,6 +22,7 @@ from rich.text import Text
 
 from obscura.cli.app.diff_engine import DiffEngine
 from obscura.cli.tool_summaries import summarize_tool_call
+from obscura.cli.ui_primitives import random_thinking_message
 from obscura.core.feature_flags import FLAGS, BannerTheme
 from obscura.core.types import AgentEvent, AgentEventKind
 
@@ -416,9 +417,6 @@ class StreamRenderer:
     def _start_thinking(self) -> None:
         if self._ss is None:
             return
-        # lazy: avoid circular dep with obscura.cli.prompt
-        from obscura.cli.prompt import random_thinking_message
-
         msg = random_thinking_message()
         try:
             # Prefer update(payload) API if available

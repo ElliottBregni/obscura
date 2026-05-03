@@ -83,7 +83,7 @@ _STOP_WORDS = frozenset(
 _VOWELS = frozenset("aeiou")
 
 
-def _stem(word: str) -> str:
+def _stem(word: str) -> str:  # pyright: ignore[reportUnusedFunction]
     """Lightweight English suffix stripper for keyword matching.
 
     Not a full Porter stemmer — handles the most common suffixes that

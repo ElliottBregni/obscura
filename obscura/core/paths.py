@@ -5,7 +5,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from obscura.agent.definitions import _BUILTIN_DIR  # pyright: ignore[reportPrivateUsage]
+# Built-in agent definitions live next to obscura/agent/. Compute the path
+# directly instead of importing it from obscura.agent.definitions: that
+# import is a layering violation (L0 paths → L4/L5 agent) and previously
+# forced agent.definitions to lazy-import back into this module.
+_BUILTIN_DIR = Path(__file__).resolve().parent.parent / "agent" / "builtin"
 
 
 def resolve_obscura_home(cwd: Path | None = None) -> Path:

@@ -30,8 +30,9 @@ from collections.abc import Sequence
 if TYPE_CHECKING:
     from obscura.arbiter.test_runner import TestOutcome
 
-# Import shared stop-words and stemmer from checks — same pipeline, no duplication.
-from obscura.arbiter.checks import (  # noqa: PLC2701
+# Shared stop-words and stemmer live in the leaf text_utils module so this
+# file and arbiter.checks can both depend on them without a peer cycle.
+from obscura.arbiter.text_utils import (
     _STOP_WORDS,  # pyright: ignore[reportPrivateUsage]
     _stem,  # pyright: ignore[reportPrivateUsage]
 )

@@ -26,6 +26,7 @@ from obscura.arbiter.notify import fire_task_complete
 from obscura.core.background_tasks import get_background_task_manager
 from obscura.core.task_queue import TaskQueue, _open  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
 from obscura.core.tools import tool
+from obscura.kairos.goals import GoalBoard
 import logging
 
 logger = logging.getLogger(__name__)
@@ -623,9 +624,6 @@ def _sync_goal_progress(task_id: str) -> None:
         goal_id = task.get("goal_id") if task else None
         if goal_id:
             from datetime import UTC, datetime
-
-            # lazy: avoid circular dep with obscura.kairos.goals (imports _get_db from here)
-            from obscura.kairos.goals import GoalBoard
 
             board = GoalBoard()
             board.sync_task_progress(goal_id)

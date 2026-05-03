@@ -32,6 +32,7 @@ from obscura.cli.render import (
     print_warning,
 )
 from obscura.core.client import ObscuraClient
+from obscura.tools.swarm import load_agent_configs
 from obscura.integrations.mcp.config_loader import (
     build_runtime_server_configs,
     discover_mcp_servers,
@@ -74,9 +75,6 @@ def _discover_agents() -> list[str]:  # pyright: ignore[reportUnusedFunction]
 
 def _discover_agent_infos() -> list[AgentInfo]:
     try:
-        # lazy: avoid circular dep with obscura.agent.agents via providers
-        from obscura.tools.swarm import load_agent_configs
-
         agents = load_agent_configs(include_disabled=True)
         return [
             AgentInfo(
@@ -117,9 +115,6 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
 
     manifest: AgentManifest | None = None
     try:
-        # lazy: avoid circular dep with obscura.agent.agents via providers
-        from obscura.tools.swarm import load_agent_configs
-
         agent_configs = load_agent_configs(include_disabled=True)
         cfg = agent_configs.get(agent_name)
         if cfg is not None:

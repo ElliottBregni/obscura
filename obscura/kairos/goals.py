@@ -26,8 +26,10 @@ from typing import Any, cast
 
 import yaml
 
-from obscura.core.task_queue import TaskQueue
-from obscura.tools.task_tools import _get_db  # pyright: ignore[reportPrivateUsage]
+from obscura.core.task_queue import (
+    TaskQueue,
+    _open as _get_db,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+)
 
 logger = logging.getLogger(__name__)
 
