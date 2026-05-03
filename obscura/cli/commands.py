@@ -102,7 +102,12 @@ from obscura.manifest.models import AgentManifest
 from obscura.plugins.loader import PluginLoader
 from obscura.plugins.registry import PluginEntry, PluginRegistryService
 from obscura.tools.dynamic_discovery import DynamicToolDiscovery
+from obscura.tools.swarm import build_agent_catalog, load_agent_configs
 from obscura.tools.system import get_system_tool_specs
+from obscura.tools.system.file_state import (
+    get_recently_modified_files,
+    get_recently_read_files,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1425,9 +1430,6 @@ async def cmd_context(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_thinking(_args: str, _ctx: REPLContext) -> str | None:
     """Show expanded thinking/reasoning blocks from the last response."""
-    from rich.panel import Panel
-    from rich.text import Text
-
     from obscura.cli.render import (
         THINKING_COLOR,
         _active_renderer,  # pyright: ignore[reportPrivateUsage]
@@ -1901,7 +1903,6 @@ async def _agent_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # Load manifest from merged agents config (global-wins, local adds)
-    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
 
     manifest_loaded = False
 
@@ -2328,7 +2329,6 @@ async def _fleet_spawn(args: str, ctx: REPLContext) -> str | None:
     runtime = await ctx.get_runtime()
 
     # Load merged agent configs once outside the loop (global-wins, local adds)
-    from obscura.tools.swarm import load_agent_configs  # noqa: PLC0415
 
     all_agent_configs = load_agent_configs(include_disabled=True)
 
@@ -2769,8 +2769,6 @@ async def _swarm_plan_smart(
     ctx: REPLContext,
 ) -> list[_SwarmAssignment]:
     """LLM-based planning — slower but smarter decomposition."""
-    from obscura.tools.swarm import build_agent_catalog
-
     catalog = build_agent_catalog(agent_configs)
     prompt = _SWARM_PLAN_PROMPT.format(agent_catalog=catalog, task=task)
 
@@ -2958,8 +2956,6 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
       /swarm results [id]        Show results of a swarm run
       /swarm stop [id|all]       Cancel running swarm(s)
     """
-    from obscura.tools.swarm import load_agent_configs
-
     tokens = shlex.split(args) if args else []
     if not tokens:
         print_info(
@@ -2998,9 +2994,6 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
 
     # --- /swarm results [id] ---
     if sub == "results":
-        from rich.markdown import Markdown
-        from rich.rule import Rule
-
         target = tokens[1] if len(tokens) > 1 else None
         runs = ctx.swarm_runs
         if target:
@@ -3713,8 +3706,6 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
             print_error(f"Cannot compile workspace '{resource_name}': {exc}")
             return None
 
-        from rich.table import Table
-
         console.print(f"\n[bold cyan]Workspace: {ws.name}[/]")
 
         if ws.packs:
@@ -3854,8 +3845,6 @@ async def cmd_inspect(args: str, ctx: REPLContext) -> str | None:
 
         # Fallback: check agents.yaml
         try:
-            from obscura.tools.swarm import load_agent_configs
-
             configs = load_agent_configs(include_disabled=True)
             cfg = configs.get(resource_name)
         except Exception:
@@ -4532,13 +4521,7 @@ async def _running_detail(
     ctx: REPLContext,
 ) -> None:
     """Show mini-log detail view for a single agent."""
-    from rich.console import Group
-    from rich.panel import Panel
-    from rich.text import Text
-
     state = agent.get_state()
-    from rich.console import RenderableType
-
     parts: list[RenderableType] = []
 
     # ── Header: agent state snapshot ──
@@ -4699,12 +4682,7 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     """Show running agents, daemons, and session activity."""
-    from rich.console import Group
-    from rich.panel import Panel
-    from rich.text import Text
-
     from obscura.agent.agents import AgentStatus
-    from rich.console import RenderableType
 
     target = args.strip()
     lines: list[RenderableType] = []
@@ -6021,8 +5999,6 @@ Rules:
     )
 
     # Display per-specialist results
-    from rich.markdown import Markdown
-    from rich.rule import Rule
 
     colors = ["red", "yellow", "blue", "green", "magenta"]
     for idx, (name, output) in enumerate(results):
@@ -6688,11 +6664,6 @@ async def cmd_kill_session(args: str, _ctx: REPLContext) -> str | None:
 
 async def cmd_suggestions(_args: str, ctx: REPLContext) -> str | None:
     """Show context-aware file suggestions based on recent activity."""
-    from obscura.tools.system.file_state import (
-        get_recently_modified_files,
-        get_recently_read_files,
-    )
-
     modified = get_recently_modified_files(limit=10)
     read = get_recently_read_files(limit=10)
 
@@ -6862,11 +6833,6 @@ async def cmd_add_dir(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_files(_args: str, ctx: REPLContext) -> str | None:
     """List files tracked in the current context."""
-    from obscura.tools.system.file_state import (
-        get_recently_modified_files,
-        get_recently_read_files,
-    )
-
     read = get_recently_read_files(limit=20)
     modified = get_recently_modified_files(limit=10)
 
@@ -7037,11 +7003,6 @@ async def cmd_brief(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
     """Show session statistics."""
-    from obscura.tools.system.file_state import (
-        get_recently_modified_files,
-        get_recently_read_files,
-    )
-
     tracker = get_cost_tracker()
     user_msgs = sum(1 for r, _ in ctx.message_history if r == "user")
     asst_msgs = sum(1 for r, _ in ctx.message_history if r == "assistant")
@@ -7229,17 +7190,13 @@ async def cmd_btw(args: str, ctx: REPLContext) -> str | None:
     try:
         text = await _oneshot_stream(ctx.client, question)
         if text:
-            from rich.markdown import Markdown as RichMarkdown
-
-            console.print(RichMarkdown(text))
+            console.print(Markdown(text))
         else:
             print_info("(no response)")
     except _OneshotStalled as stalled:
         logger.debug("suppressed exception in cmd_btw", exc_info=True)
         if stalled.partial:
-            from rich.markdown import Markdown as RichMarkdown
-
-            console.print(RichMarkdown(stalled.partial))
+            console.print(Markdown(stalled.partial))
             print_info(
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
@@ -7287,17 +7244,13 @@ async def cmd_summary(_args: str, ctx: REPLContext) -> str | None:
     try:
         text = await _oneshot_stream(ctx.client, prompt)
         if text:
-            from rich.markdown import Markdown as RichMarkdown
-
-            console.print(RichMarkdown(text))
+            console.print(Markdown(text))
         else:
             print_info("(no summary generated)")
     except _OneshotStalled as stalled:
         logger.debug("suppressed exception in cmd_summary", exc_info=True)
         if stalled.partial:
-            from rich.markdown import Markdown as RichMarkdown
-
-            console.print(RichMarkdown(stalled.partial))
+            console.print(Markdown(stalled.partial))
             print_info(
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
@@ -7927,8 +7880,6 @@ async def cmd_config(args: str, _ctx: REPLContext) -> str | None:
             return None
         try:
             data = json.loads(settings_path.read_text(encoding="utf-8"))
-            from rich.syntax import Syntax
-
             console.print(Syntax(json.dumps(data, indent=2), "json", theme="monokai"))
         except Exception as exc:
             logger.debug("suppressed exception in cmd_config", exc_info=True)
@@ -8299,9 +8250,7 @@ async def cmd_release_notes(_args: str, _ctx: REPLContext) -> str | None:
                 if in_section:
                     section.append(line)
             if section:
-                from rich.markdown import Markdown as RichMarkdown
-
-                console.print(RichMarkdown("\n".join(section[:50])))
+                console.print(Markdown("\n".join(section[:50])))
                 return None
 
     print_info(f"Obscura {ver} — no release notes found.")
@@ -9087,11 +9036,6 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
         print_info("Not enough conversation to recap.")
         return None
 
-    from obscura.tools.system.file_state import (
-        get_recently_modified_files,
-        get_recently_read_files,
-    )
-
     modified = get_recently_modified_files(limit=20)
     read_files = get_recently_read_files(limit=20)
     goal = getattr(ctx, "_session_goal", "")
@@ -9117,17 +9061,13 @@ async def cmd_recap(_args: str, ctx: REPLContext) -> str | None:
     try:
         text = await _oneshot_stream(ctx.client, prompt)
         if text:
-            from rich.markdown import Markdown as RichMarkdown
-
-            console.print(RichMarkdown(text))
+            console.print(Markdown(text))
         else:
             print_info("(no recap generated)")
     except _OneshotStalled as stalled:
         logger.debug("suppressed exception in cmd_recap", exc_info=True)
         if stalled.partial:
-            from rich.markdown import Markdown as RichMarkdown
-
-            console.print(RichMarkdown(stalled.partial))
+            console.print(Markdown(stalled.partial))
             print_info(
                 f"[dim](truncated — no output for {stalled.idle_timeout:.0f}s)[/]"
             )
