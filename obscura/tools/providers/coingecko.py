@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 BASE_URL = "https://api.coingecko.com/api/v3"
+
+__all__ = [
+    "_handler_market_chart",
+    "_handler_price",
+    "_handler_trending",
+]
+
+
+def _coerce_dict(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    return {"data": value}
 
 
 async def _handler_price(
@@ -21,7 +33,7 @@ async def _handler_price(
                 params={"ids": ids, "vs_currencies": vs_currencies},
             )
             resp.raise_for_status()
-            return resp.json()  # type: ignore[no-any-return]
+            return _coerce_dict(resp.json())
     except Exception as e:
         return {"error": str(e)}
 
@@ -39,7 +51,7 @@ async def _handler_market_chart(
                 params={"vs_currency": vs_currency, "days": days},
             )
             resp.raise_for_status()
-            return resp.json()  # type: ignore[no-any-return]
+            return _coerce_dict(resp.json())
     except Exception as e:
         return {"error": str(e)}
 
@@ -49,6 +61,6 @@ async def _handler_trending(**kwargs: Any) -> dict[str, Any]:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{BASE_URL}/search/trending")
             resp.raise_for_status()
-            return resp.json()  # type: ignore[no-any-return]
+            return _coerce_dict(resp.json())
     except Exception as e:
         return {"error": str(e)}
