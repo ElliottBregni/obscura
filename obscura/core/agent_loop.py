@@ -612,6 +612,7 @@ class AgentLoop:
         compiled_agent: Any | None = None,
         tool_output_level: str = "standard",
         tool_output_overrides: dict[str, str] | None = None,
+        host_callbacks: dict[str, Any] | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -635,6 +636,11 @@ class AgentLoop:
         self._arbiter_killed = False  # Set by Arbiter to force-stop the loop.
         self._arbiter_kill_reason = ""
         self._tool_output_overrides = tool_output_overrides or {}
+        # Optional per-instance host callbacks (ObscuraClient passes this when
+        # the caller wired callbacks via the host_callbacks dict pattern). If
+        # unset (the common case on this branch), tools fall back to the class
+        # state on UI / Session.
+        self._host_callbacks: dict[str, Any] = host_callbacks or {}
 
         # Apply compiled agent settings if provided
         if compiled_agent is not None:
@@ -1989,25 +1995,32 @@ class AgentLoop:
 
         return list(await asyncio.gather(*[limited(c) for c in coros]))
 
-    @staticmethod
-    def _read_host_callbacks() -> dict[str, Any]:
-        """Snapshot the legacy module-level host callbacks.
+    def _read_host_callbacks(self) -> dict[str, Any]:
+        """Snapshot host callbacks for splatting into ToolContext(...).
 
-        Returns a dict suitable for splatting into ToolContext(...). Reads
-        each global lazily via the system tools module so failures during
-        early import don't block the agent loop.
+        Prefers per-instance values passed via ``host_callbacks=`` to
+        ``__init__`` (the new pattern). Falls back to UI / Session class
+        state for callbacks the caller did not supply, so legacy callers
+        that wired callbacks via ``UI.set_ask_user_callback`` etc. keep
+        working.
         """
         try:
             from obscura.tools.system import UI, Session
 
-            return {
+            defaults = {
                 "ask_user_callback": UI.ask_user_callback,
                 "user_interact_callback": UI.user_interact_callback,
                 "permission_mode_callback": Session.permission_mode_callback,
                 "plan_approval_callback": Session.plan_approval_callback,
             }
         except Exception:
-            return {}
+            defaults = {}
+
+        # Per-instance overrides win over class state.
+        for k, v in self._host_callbacks.items():
+            if v is not None:
+                defaults[k] = v
+        return defaults
 
     async def _execute_single_tool(
         self,
