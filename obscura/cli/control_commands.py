@@ -239,8 +239,17 @@ def _probe_supervisor_sync(report: HeartbeatReport, session_id: str) -> None:
 
 
 def _render_heartbeat_rich(report: HeartbeatReport) -> None:
-    from obscura.cli.render import (console, ACCENT, ACCENT_DIM, OK_COLOR, ERROR_COLOR, WARN_COLOR, TOOL_COLOR)
     """Render a HeartbeatReport as a Rich panel with a table."""
+    from obscura.cli.render import (
+        ACCENT,
+        ACCENT_DIM,
+        ERROR_COLOR,
+        OK_COLOR,
+        TOOL_COLOR,
+        WARN_COLOR,
+        console,
+    )
+
     table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
     table.add_column("key", style="bold", width=18)
     table.add_column("value")
@@ -330,6 +339,8 @@ async def cmd_heartbeat(args: str, ctx: REPLContext) -> str | None:
     report = await _collect_heartbeat(ctx)
 
     if args.strip() == "--json":
+        from obscura.cli.render import CODE_THEME, console
+
         console.print(
             Syntax(report.to_json(), "json", theme=CODE_THEME, word_wrap=True),
         )
@@ -346,9 +357,9 @@ async def cmd_status(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
     """List policy versions from supervisor.db."""
+    from obscura.cli.render import ACCENT, console, print_error, print_info
+
     db_path = resolve_obscura_home() / "supervisor.db"
-    from obscura.cli.render import print_info
-    from obscura.cli.render import print_info
     if not db_path.exists():
         print_info("No supervisor.db found.")
         return None
@@ -362,11 +373,9 @@ async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
         ).fetchall()
         conn.close()
     except Exception as exc:
-        from obscura.cli.render import print_error
         print_error(f"Failed to query policy_versions: {exc}")
         return None
 
-    from obscura.cli.render import print_info
     if not rows:
         print_info("No policies found.")
         return None
@@ -395,14 +404,24 @@ async def cmd_policies(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_replay(args: str, ctx: REPLContext) -> str | None:
     """Replay supervisor run events for a given run_id prefix."""
+    from obscura.cli.render import (
+        ACCENT,
+        ACCENT_DIM,
+        ERROR_COLOR,
+        OK_COLOR,
+        TOOL_COLOR,
+        WARN_COLOR,
+        console,
+        print_error,
+        print_info,
+    )
+
     run_prefix = args.strip()
     if not run_prefix:
         print_error("Usage: /replay <run_id_prefix>")
         return None
 
     db_path = resolve_obscura_home() / "supervisor.db"
-    from obscura.cli.render import print_info
-    from obscura.cli.render import print_info
     if not db_path.exists():
         print_info("No supervisor.db found.")
         return None
@@ -434,7 +453,6 @@ async def cmd_replay(args: str, ctx: REPLContext) -> str | None:
         ).fetchall()
         conn.close()
     except Exception as exc:
-        from obscura.cli.render import print_error
         print_error(f"Failed to query supervisor DB: {exc}")
         return None
 
