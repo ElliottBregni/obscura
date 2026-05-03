@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -42,13 +42,7 @@ from obscura.vector_memory.backends import (
     VectorEntry,
 )
 
-try:
-    from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
-except ImportError:
-    QDRANT_AVAILABLE: bool
-
-    def QdrantBackend(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
-        """Stub when qdrant-client is not installed."""
+from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
 
 
 import contextlib
@@ -111,7 +105,8 @@ def _make_default_embedding_fn(dim: int = 384):
             "huggingface_hub",
         ):
             _logging.getLogger(_logger_name).setLevel(_logging.ERROR)
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
+        _SentenceTransformer = cast(Any, SentenceTransformer)
+        _model: Any = _SentenceTransformer("all-MiniLM-L6-v2")
         for _logger_name in (
             "transformers",
             "sentence_transformers",
@@ -128,7 +123,10 @@ def _make_default_embedding_fn(dim: int = 384):
         )
 
         def _st_embed(text: str) -> list[float]:
-            return _model.encode(text, normalize_embeddings=True).tolist()
+            return cast(
+                list[float],
+                _model.encode(text, normalize_embeddings=True).tolist(),
+            )
 
         return _st_embed
     except ImportError:
@@ -234,8 +232,10 @@ class VectorMemoryStore:
             db_type = os.environ.get("OBSCURA_DB_TYPE", "sqlite").lower()
             backend_type = "postgresql" if db_type == "postgresql" else "qdrant"
 
+        half_life: float | None
         try:
-            half_life = float(os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS"))
+            _half_life_raw = os.environ.get("OBSCURA_MEMORY_DECAY_HALF_LIFE_SECONDS")
+            half_life = float(_half_life_raw) if _half_life_raw is not None else None
         except Exception:
             half_life = None
         config = BackendConfig(
@@ -247,7 +247,7 @@ class VectorMemoryStore:
 
         # Prefer Qdrant if available, fallback to SQLite
         if backend_type == "qdrant":
-            if QDRANT_AVAILABLE:
+            if QDRANT_AVAILABLE and QdrantBackend is not None:
                 mode = os.environ.get("OBSCURA_QDRANT_MODE", "local")
                 path = os.environ.get("OBSCURA_QDRANT_PATH")
                 url = os.environ.get("OBSCURA_QDRANT_URL")
@@ -279,7 +279,10 @@ class VectorMemoryStore:
                     PostgreSQLVectorBackend,
                 )
 
-                return PostgreSQLVectorBackend(config=config)
+                # PostgreSQL backend implements the protocol with a different
+                # call signature (see backend file); cast at the boundary
+                # since the runtime is structurally compatible for our usage.
+                return cast(VectorBackend, PostgreSQLVectorBackend(config=config))
             except Exception as e:
                 logger.warning(
                     "PostgreSQL vector backend failed, falling back to SQLite: %s",

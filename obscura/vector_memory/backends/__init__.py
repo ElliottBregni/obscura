@@ -12,15 +12,20 @@ from obscura.vector_memory.backends.base import (
 )
 from obscura.vector_memory.backends.sqlite_backend import SQLiteBackend
 
+_QdrantBackend: type[VectorBackend] | None
 try:
-    from obscura.vector_memory.backends.qdrant_backend import QdrantBackend
+    from obscura.vector_memory.backends.qdrant_backend import (
+        QdrantBackend as _QdrantBackendImpl,
+    )
 
+    _QdrantBackend = _QdrantBackendImpl
     _qdrant_available = True
 except ImportError:
+    _QdrantBackend = None
     _qdrant_available = False
-    QdrantBackend = None
 
-QDRANT_AVAILABLE: bool = _qdrant_available
+QdrantBackend = _QdrantBackend
+QDRANT_AVAILABLE = _qdrant_available
 
 __all__ = [
     "QDRANT_AVAILABLE",

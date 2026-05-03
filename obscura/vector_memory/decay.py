@@ -19,7 +19,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -171,15 +171,21 @@ def load_decay_config(raw: dict[str, Any] | None = None) -> DecayConfig:
 
     profiles = dict(DEFAULT_PROFILES)
 
-    raw_profiles = raw.get("profiles", {})
+    raw_profiles_any = raw.get("profiles", {})
+    raw_profiles: dict[str, Any] = (
+        cast(dict[str, Any], raw_profiles_any)
+        if isinstance(raw_profiles_any, dict)
+        else {}
+    )
     for type_name, profile_dict in raw_profiles.items():
         if not isinstance(profile_dict, dict):
             continue
+        pd = cast(dict[str, Any], profile_dict)
         base = profiles.get(type_name, DecayProfile())
         profiles[type_name] = DecayProfile(
-            half_life_days=profile_dict.get("half_life_days", base.half_life_days),
-            min_score_floor=profile_dict.get("min_score_floor", base.min_score_floor),
-            immune=profile_dict.get("immune", base.immune),
+            half_life_days=float(pd.get("half_life_days", base.half_life_days)),
+            min_score_floor=float(pd.get("min_score_floor", base.min_score_floor)),
+            immune=bool(pd.get("immune", base.immune)),
         )
 
     return DecayConfig(
