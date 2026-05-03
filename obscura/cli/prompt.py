@@ -23,14 +23,18 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.processors import Processor, Transformation
+from prompt_toolkit.layout.processors import (
+    Processor,
+    Transformation,
+    TransformationInput,
+)
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 
 from obscura.core.paths import resolve_obscura_home
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from prompt_toolkit.document import Document
 
@@ -71,19 +75,21 @@ class KeywordHighlighter(Processor):
     @override
     def apply_transformation(
         self,
-        ti: Any,
+        transformation_input: TransformationInput,
     ) -> Transformation:
-        fragments: list[tuple[str, str]] = ti.fragments
-        doc: Any = ti.document
-        text = str(doc.text_before_cursor) + str(doc.text_after_cursor)
+        fragments = transformation_input.fragments
+        doc = transformation_input.document
+        text = doc.text_before_cursor + doc.text_after_cursor
 
         if not text:
-            return Transformation(cast(Any, fragments))
+            return Transformation(fragments)
 
-        # Flatten the existing fragments into a single string to match positions
-        flat = "".join(s for _, s in fragments)
+        # Flatten the existing fragments into a single string to match positions.
+        # OneStyleAndTextTuple is (style, text) or (style, text, mouse_handler);
+        # index [1] always gives the text part.
+        flat = "".join(frag[1] for frag in fragments)
         if not flat:
-            return Transformation(cast(Any, fragments))
+            return Transformation(fragments)
 
         # Build a set of character positions that should be styled
         styled_positions: dict[int, str] = {}
@@ -102,12 +108,14 @@ class KeywordHighlighter(Processor):
                 start = idx + 1
 
         if not styled_positions:
-            return Transformation(cast(Any, fragments))
+            return Transformation(fragments)
 
         # Rebuild fragments with styled characters
         new_fragments: list[tuple[str, str]] = []
         pos = 0
-        for style, segment in fragments:
+        for frag in fragments:
+            style = frag[0]
+            segment = frag[1]
             for ch in segment:
                 if pos in styled_positions:
                     new_fragments.append((styled_positions[pos], ch))
@@ -115,6 +123,9 @@ class KeywordHighlighter(Processor):
                     new_fragments.append((style, ch))
                 pos += 1
 
+        # cast: new_fragments is list[tuple[str, str]] which is a valid
+        # specialization of StyleAndTextTuples (list[OneStyleAndTextTuple])
+        # but pyright doesn't see the OneStyleAndTextTuple union covariantly.
         return Transformation(cast(Any, new_fragments))
 
 
@@ -235,7 +246,7 @@ class PromptStatus:
     task_count: int = 0
 
 
-def _get_git_branch() -> str:
+def _get_git_branch() -> str:  # pyright: ignore[reportUnusedFunction]
     """Return the current git branch name, or '' if not in a repo."""
     try:
         result = subprocess.run(
@@ -344,7 +355,7 @@ class SlashCommandCompleter(Completer):
         self,
         document: Document,
         complete_event: CompleteEvent,
-    ) -> list[Completion]:
+    ) -> Iterable[Completion]:
         text = document.text_before_cursor.lstrip()
 
         # /slash commands — only at the very start
@@ -376,7 +387,7 @@ class SlashCommandCompleter(Completer):
         # e.g. "$python $se" -> complete "$security"
         word = document.get_word_before_cursor(WORD=True)
         if not word:
-            return []
+            return
 
         if word.startswith("$") and self._dollar_skill_names is not None:
             prefix = word[1:]
@@ -399,8 +410,6 @@ class SlashCommandCompleter(Completer):
                         display="@" + name,
                     )
             return
-
-        return []
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +447,7 @@ PROMPT_STYLE = Style.from_dict(
 )
 
 
-def _make_prompt_message() -> HTML:
+def _make_prompt_message() -> HTML:  # pyright: ignore[reportUnusedFunction]
     return HTML("<prompt>\u276f </prompt>")
 
 
@@ -537,7 +546,11 @@ def _expand_thinking_action() -> None:
         from rich.panel import Panel
         from rich.text import Text
 
-        from obscura.cli.render import THINKING_COLOR, _active_renderer, console
+        from obscura.cli.render import (
+            THINKING_COLOR,
+            _active_renderer,  # pyright: ignore[reportPrivateUsage]
+            console,
+        )
 
         if _active_renderer is None:
             console.print("[dim]No active session.[/]")
@@ -674,7 +687,7 @@ def create_prompt_session(
     prompt_status: PromptStatus | None = None,
     at_command_names: Callable[[], list[str]] | None = None,
     dollar_skill_names: Callable[[], list[str]] | None = None,
-    hud_provider: Callable[[], dict] | None = None,
+    hud_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> PromptSession[str]:
     """Create a configured PromptSession for the Obscura REPL."""
     # Ensure the Obscura home directory exists so FileHistory can write.
@@ -699,8 +712,15 @@ def create_prompt_session(
     _static_hud_html: str | None = None
     if hud_provider is not None:
         try:
-            data = hud_provider() or {}
-            menu = data.get("menu_items", [])
+            data: dict[str, Any] = hud_provider() or {}
+            menu_raw: Any = data.get("menu_items", [])
+            menu: list[tuple[str, str]] = []
+            if isinstance(menu_raw, list):
+                for item_any in cast(list[Any], menu_raw):
+                    if isinstance(item_any, (list, tuple)):
+                        item_seq = cast("list[Any] | tuple[Any, ...]", item_any)
+                        if len(item_seq) >= 2:
+                            menu.append((str(item_seq[0]), str(item_seq[1])))
             tasks = ""
             for k, v in menu:
                 if k == "tasks":
@@ -792,16 +812,6 @@ async def confirm_prompt_async(message: str = "Allow? [y/n/always] ") -> str:
         return "n"
 
 
-# Backwards-compatible dataclass expected by older tests
-@dataclass
-class PromptLayoutConfig:
-    show_session: bool = True
-    show_branch: bool = True
-    show_model: bool = True
-    show_context: bool = True
-
-
-# Compatibility helpers and HUD/layout classes used by older tests
 @dataclass
 class PromptLayoutConfig:
     model_hpad: int = 2
@@ -818,7 +828,9 @@ class PromptHUDState:
     tasks_value: str = ""
     approvals_enabled: bool = False
     reasoning_enabled: bool = False
-    menu_items: list[tuple[str, str]] = field(default_factory=list)
+    menu_items: list[tuple[str, str]] = field(
+        default_factory=lambda: cast(list[tuple[str, str]], [])
+    )
 
 
 def _build_prompt_message_html(
@@ -826,77 +838,13 @@ def _build_prompt_message_html(
     model_text: str,
     cfg: PromptLayoutConfig,
 ) -> str:
-    # Minimal two-lane message: status lane then input lane
     status = f"<status-lane>{model_text}</status-lane>"
-    # input lane contains a vertical bar placeholder
     input_lane = "<input-lane>\u2502 </input-lane>"
     return status + "\n" + input_lane
 
 
 def _render_model_status_line(width: int, hud: PromptHUDState) -> str:
-    parts = []
-    if hud.tasks_value:
-        parts.append(f"T:{hud.tasks_value}")
-    parts.append("A:on" if hud.approvals_enabled else "A:off")
-    parts.append("R:on" if hud.reasoning_enabled else "R:off")
-    left = hud.model_text or ""
-    line = (left + " " + " ".join(parts)).strip()
-    if len(line) > width:
-        return line[:width]
-    return line
-
-
-def _render_menu_line(width: int, hud: PromptHUDState, cfg: PromptLayoutConfig) -> str:
-    # Render menu items compactly with menu_hpad spacing
-    items = hud.menu_items or []
-    menu = " ".join(f"{k}:{v}" for k, v in items)
-    base = _render_model_status_line(width, hud)
-    line = f"{base} {menu}".strip()
-    if len(line) > width:
-        return line[:width]
-    return line
-
-
-# expose aliases expected by tests
-_build_prompt_message_html = _build_prompt_message_html
-_render_model_status_line = _render_model_status_line
-_render_menu_line = _render_menu_line
-
-
-# Compatibility helpers and HUD/layout classes used by older tests
-@dataclass
-class PromptLayoutConfig:
-    model_hpad: int = 2
-    input_hpad: int = 2
-    model_vpad: int = 0
-    input_vpad: int = 0
-    menu_hpad: int = 1
-
-
-@dataclass
-class PromptHUDState:
-    model_text: str = ""
-    right_enabled: bool = False
-    tasks_value: str = ""
-    approvals_enabled: bool = False
-    reasoning_enabled: bool = False
-    menu_items: list[tuple[str, str]] = field(default_factory=list)
-
-
-def _build_prompt_message_html(
-    width: int,
-    model_text: str,
-    cfg: PromptLayoutConfig,
-) -> str:
-    # Minimal two-lane message: status lane then input lane
-    status = f"<status-lane>{model_text}</status-lane>"
-    # input lane contains a vertical bar placeholder
-    input_lane = "<input-lane>\u2502 </input-lane>"
-    return status + "\n" + input_lane
-
-
-def _render_model_status_line(width: int, hud: PromptHUDState) -> str:
-    parts = []
+    parts: list[str] = []
     if hud.tasks_value:
         parts.append(f"T:{hud.tasks_value}")
     parts.append("A:on" if hud.approvals_enabled else "A:off")
