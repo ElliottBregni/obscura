@@ -931,64 +931,6 @@ async def copilot_query(query: str) -> str:
     except Exception:
         return json.dumps({"ok": False, "error": "copilot_stub_error"})
 
-# Compatibility stub for copilot_query (some tests import it directly).
-# Returns a JSON error payload to avoid calling external services during tests.
-@tool(
-    "copilot_query",
-    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
-    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-)
-async def copilot_query(query: str) -> str:
-    try:
-        return json.dumps({"ok": False, "error": "copilot_unavailable", "query": query})
-    except Exception:
-        return json.dumps({"ok": False, "error": "copilot_stub_error"})
-
-# Compatibility stub for copilot_query (some tests import it directly).
-# Returns a JSON error payload to avoid calling external services during tests.
-@tool(
-    "copilot_query",
-    "Query the Copilot/GPT backend (stub). Returns a JSON string.",
-    {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-)
-async def copilot_query(query: str) -> str:
-    try:
-        return json.dumps({"ok": False, "error": "copilot_unavailable", "query": query})
-    except Exception:
-        return json.dumps({"ok": False, "error": "copilot_stub_error"})
-
-# Backward-compatible git helpers
-async def git_status(*, cwd: str = "", short: bool = True) -> str:
-    return await Git.git("status", short=short, cwd=cwd)
-
-async def git_diff(*, cwd: str = "", staged: bool = False, stat_only: bool = False, ref: str = "", path: str = "") -> str:
-    return await Git.git("diff", staged=staged, stat_only=stat_only, ref=ref, path=path, cwd=cwd)
-
-async def git_log(*, cwd: str = "", max_count: int = 10, oneline: bool = True, ref: str = "", author: str = "", since: str = "") -> str:
-    return await Git.git("log", max_count=max_count, oneline=oneline, ref=ref, author=author, since=since, cwd=cwd)
-
-async def git_commit(message: str, *, cwd: str = "", files: list[str] | None = None) -> str:
-    return await Git.git("commit", message=message, files=files or ["."], cwd=cwd)
-
-async def git_branch(sub_action: str = "list", *, ref: str = "", cwd: str = "") -> str:
-    return await Git.git("branch", sub_action=sub_action, ref=ref, cwd=cwd)
-
-# Backward-compatible git helpers
-async def git_status(*, cwd: str = "", short: bool = True) -> str:
-    return await Git.git("status", short=short, cwd=cwd)
-
-async def git_diff(*, cwd: str = "", staged: bool = False, stat_only: bool = False, ref: str = "", path: str = "") -> str:
-    return await Git.git("diff", staged=staged, stat_only=stat_only, ref=ref, path=path, cwd=cwd)
-
-async def git_log(*, cwd: str = "", max_count: int = 10, oneline: bool = True, ref: str = "", author: str = "", since: str = "") -> str:
-    return await Git.git("log", max_count=max_count, oneline=oneline, ref=ref, author=author, since=since, cwd=cwd)
-
-async def git_commit(message: str, *, cwd: str = "", files: list[str] | None = None) -> str:
-    return await Git.git("commit", message=message, files=files or ["."], cwd=cwd)
-
-async def git_branch(sub_action: str = "list", *, ref: str = "", cwd: str = "") -> str:
-    return await Git.git("branch", sub_action=sub_action, ref=ref, cwd=cwd)
-
 # Backward-compatible git helpers
 async def git_status(*, cwd: str = "", short: bool = True) -> str:
     return await Git.git("status", short=short, cwd=cwd)
@@ -1025,70 +967,6 @@ async def manage_crontab(action: str, marker: str = "", entry: str = "") -> str:
     if action == "list":
         return json.dumps({"ok": True, "entries": []})
     return json.dumps({"ok": False, "error": "not_implemented", "action": action})
-
-@tool(
-    "manage_crontab",
-    (
-        "Manage crontab entries. Compatibility stub for tests: 'list' returns "
-        "an empty set of entries on non-mac environments."
-    ),
-    {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string"},
-            "marker": {"type": "string"},
-            "entry": {"type": "string"},
-        },
-        "required": ["action"],
-    },
-)
-async def manage_crontab(action: str, marker: str = "", entry: str = "") -> str:
-    if action == "list":
-        return json.dumps({"ok": True, "entries": []})
-    return json.dumps({"ok": False, "error": "not_implemented", "action": action})
-
-# Backward-compatible command helpers
-async def run_python(code: str, *, cwd: str = "", timeout_seconds: float = 30.0) -> str:
-    return await Shell.run_python3(code, cwd=cwd, timeout_seconds=timeout_seconds)
-
-async def run_npx(args: list[str] | None = None, *, cwd: str = "", timeout_seconds: float = 60.0) -> str:
-    return await Shell.run_command("npx", args=args or [], cwd=cwd, timeout_seconds=timeout_seconds)
-
-# Security lookup stub (legacy name used by tests)
-async def security_lookup(query: str) -> str:
-    return json.dumps({"ok": False, "error": "security_lookup_unavailable", "query": query})
-
-@tool(
-    "manage_crontab",
-    (
-        "Manage crontab entries. Compatibility stub for tests: 'list' returns "
-        "an empty set of entries on non-mac environments."
-    ),
-    {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string"},
-            "marker": {"type": "string"},
-            "entry": {"type": "string"},
-        },
-        "required": ["action"],
-    },
-)
-async def manage_crontab(action: str, marker: str = "", entry: str = "") -> str:
-    if action == "list":
-        return json.dumps({"ok": True, "entries": []})
-    return json.dumps({"ok": False, "error": "not_implemented", "action": action})
-
-# Backward-compatible command helpers
-async def run_python(code: str, *, cwd: str = "", timeout_seconds: float = 30.0) -> str:
-    return await Shell.run_python3(code, cwd=cwd, timeout_seconds=timeout_seconds)
-
-async def run_npx(args: list[str] | None = None, *, cwd: str = "", timeout_seconds: float = 60.0) -> str:
-    return await Shell.run_command("npx", args=args or [], cwd=cwd, timeout_seconds=timeout_seconds)
-
-# Security lookup stub (legacy name used by tests)
-async def security_lookup(query: str) -> str:
-    return json.dumps({"ok": False, "error": "security_lookup_unavailable", "query": query})
 
 # Backward-compatible command helpers
 async def run_python(code: str, *, cwd: str = "", timeout_seconds: float = 30.0) -> str:
