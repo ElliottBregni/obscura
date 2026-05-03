@@ -79,7 +79,7 @@ class TestLazyManifestProxy:
 
         manifest = AgentManifest(
             name="dev",
-            mcp_server_refs=[
+            mcp_servers=[
                 MCPServerRef(
                     name="github",
                     command="npx",

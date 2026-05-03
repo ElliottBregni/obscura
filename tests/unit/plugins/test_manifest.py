@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import json
 from pathlib import Path
 
@@ -10,14 +12,14 @@ import tomli_w
 
 from obscura.plugins.manifest import (
     ManifestError,
-    _parse_bootstrap,
-    _parse_capabilities,
-    _parse_config_requirements,
-    _parse_healthcheck,
-    _parse_instructions,
-    _parse_policy_hints,
-    _parse_tools,
-    _parse_workflows,
+    parse_bootstrap,
+    parse_capabilities,
+    parse_config_requirements,
+    parse_healthcheck,
+    parse_instructions,
+    parse_policy_hints,
+    parse_tools,
+    parse_workflows,
     parse_manifest,
     parse_manifest_file,
 )
@@ -35,7 +37,7 @@ from obscura.plugins.models import (
 MINIMAL_DATA = {"id": "test-plugin", "version": "1.0.0"}
 
 
-def _full_manifest() -> dict:
+def _full_manifest() -> dict[str, Any]:
     return {
         "id": "full-plugin",
         "name": "Full Plugin",
@@ -183,14 +185,14 @@ class TestParseManifest:
 
 class TestParseConfigRequirements:
     def test_none_returns_empty(self) -> None:
-        assert _parse_config_requirements(None) == ()
+        assert parse_config_requirements(None) == ()
 
     def test_dict_form(self) -> None:
         raw = {
             "API_KEY": {"type": "secret", "required": True, "description": "api key"},
             "TIMEOUT": {"type": "int", "required": False, "default": "30"},
         }
-        result = _parse_config_requirements(raw)
+        result = parse_config_requirements(raw)
         assert len(result) == 2
         by_key = {r.key: r for r in result}
         assert by_key["API_KEY"].type == "secret"
@@ -200,7 +202,7 @@ class TestParseConfigRequirements:
 
     def test_dict_form_non_dict_spec(self) -> None:
         # When value is not a dict (e.g. bare string), fallback to defaults
-        result = _parse_config_requirements({"SIMPLE_KEY": "just a note"})
+        result = parse_config_requirements({"SIMPLE_KEY": "just a note"})
         assert len(result) == 1
         assert result[0].key == "SIMPLE_KEY"
         assert result[0].type == "string"
@@ -210,7 +212,7 @@ class TestParseConfigRequirements:
             {"key": "DB_HOST", "type": "string", "required": True},
             {"name": "DB_PORT", "type": "int", "required": False},
         ]
-        result = _parse_config_requirements(raw)
+        result = parse_config_requirements(raw)
         assert len(result) == 2
         assert result[0].key == "DB_HOST"
         assert result[1].key == "DB_PORT"
@@ -224,10 +226,10 @@ class TestParseConfigRequirements:
 
 class TestParseCapabilities:
     def test_none_returns_empty(self) -> None:
-        assert _parse_capabilities(None) == ()
+        assert parse_capabilities(None) == ()
 
     def test_empty_list(self) -> None:
-        assert _parse_capabilities([]) == ()
+        assert parse_capabilities([]) == ()
 
     def test_basic(self) -> None:
         raw = [
@@ -238,19 +240,19 @@ class TestParseCapabilities:
                 "tools": ["git_log", "git_diff"],
             },
         ]
-        result = _parse_capabilities(raw)
+        result = parse_capabilities(raw)
         assert len(result) == 1
         assert result[0].id == "repo.read"
         assert result[0].tools == ("git_log", "git_diff")
 
     def test_tools_as_string(self) -> None:
         raw = [{"id": "repo.read", "version": "1.0.0", "tools": "git_log"}]
-        result = _parse_capabilities(raw)
+        result = parse_capabilities(raw)
         assert result[0].tools == ("git_log",)
 
     def test_defaults(self) -> None:
         raw = [{"id": "repo.read", "version": "1.0.0"}]
-        result = _parse_capabilities(raw)
+        result = parse_capabilities(raw)
         assert result[0].requires_approval is False
         assert result[0].default_grant is True
         assert result[0].description == ""
@@ -263,10 +265,10 @@ class TestParseCapabilities:
 
 class TestParseTools:
     def test_none_returns_empty(self) -> None:
-        assert _parse_tools(None) == ()
+        assert parse_tools(None) == ()
 
     def test_empty_list(self) -> None:
-        assert _parse_tools([]) == ()
+        assert parse_tools([]) == ()
 
     def test_full_tool(self) -> None:
         raw = [
@@ -281,7 +283,7 @@ class TestParseTools:
                 "retries": 2,
             },
         ]
-        result = _parse_tools(raw)
+        result = parse_tools(raw)
         assert len(result) == 1
         t = result[0]
         assert t.name == "search"
@@ -293,12 +295,12 @@ class TestParseTools:
 
     def test_handler_ref_alias(self) -> None:
         raw = [{"name": "tool1", "handler_ref": "mod:func"}]
-        result = _parse_tools(raw)
+        result = parse_tools(raw)
         assert result[0].handler_ref == "mod:func"
 
     def test_defaults(self) -> None:
         raw = [{"name": "minimal"}]
-        result = _parse_tools(raw)
+        result = parse_tools(raw)
         t = result[0]
         assert t.description == ""
         assert t.parameters == {}
@@ -315,7 +317,7 @@ class TestParseTools:
 
 class TestParseBootstrap:
     def test_none_returns_none(self) -> None:
-        assert _parse_bootstrap(None) is None
+        assert parse_bootstrap(None) is None
 
     def test_full_spec(self) -> None:
         raw = {
@@ -323,7 +325,8 @@ class TestParseBootstrap:
             "post_install": "echo done",
             "check_command": "httpx --version",
         }
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert isinstance(result, BootstrapSpec)
         assert len(result.deps) == 1
         assert result.deps[0].type == "pip"
@@ -333,34 +336,38 @@ class TestParseBootstrap:
 
     def test_shorthand_strings(self) -> None:
         raw = {"deps": ["pip:httpx", "binary:gws"]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert len(result.deps) == 2
         assert result.deps[0] == BootstrapDep(type="pip", package="httpx")
         assert result.deps[1] == BootstrapDep(type="binary", package="gws")
 
     def test_shorthand_no_colon_defaults_pip(self) -> None:
         raw = {"deps": ["requests"]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].type == "pip"
         assert result.deps[0].package == "requests"
 
     def test_list_only_form(self) -> None:
         raw = [{"type": "pip", "package": "httpx"}]
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert isinstance(result, BootstrapSpec)
         assert len(result.deps) == 1
         assert result.deps[0].package == "httpx"
 
     def test_dep_optional_flag(self) -> None:
         raw = {"deps": [{"type": "pip", "package": "opt", "optional": True}]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].optional is True
 
     def test_empty_dict_returns_none(self) -> None:
-        assert _parse_bootstrap({}) is None
+        assert parse_bootstrap({}) is None
 
     def test_empty_list_returns_none(self) -> None:
-        assert _parse_bootstrap([]) is None
+        assert parse_bootstrap([]) is None
 
     def test_all_dep_types_shorthand(self) -> None:
         """All 8 dep types parse correctly in shorthand form."""
@@ -376,7 +383,8 @@ class TestParseBootstrap:
                 "pipx:black",
             ],
         }
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert len(result.deps) == 8
         by_type = {d.type: d.package for d in result.deps}
         assert by_type == {
@@ -393,24 +401,28 @@ class TestParseBootstrap:
     def test_shorthand_with_version(self) -> None:
         """Shorthand 'pip:requests>=2.0' keeps version in package string."""
         raw = {"deps": ["pip:requests>=2.0"]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].type == "pip"
         assert result.deps[0].package == "requests>=2.0"
 
     def test_shorthand_with_extras(self) -> None:
         """Shorthand 'pip:my-pkg[extra]' keeps extras in package string."""
         raw = {"deps": ["pip:my-pkg[extra]"]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].package == "my-pkg[extra]"
 
     def test_dict_with_version(self) -> None:
         raw = {"deps": [{"type": "pip", "package": "click", "version": ">=8.0"}]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].version == ">=8.0"
 
     def test_mixed_string_and_dict_deps(self) -> None:
         raw = {"deps": ["pip:requests", {"type": "binary", "package": "git"}]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert len(result.deps) == 2
         assert result.deps[0] == BootstrapDep(type="pip", package="requests")
         assert result.deps[1].type == "binary"
@@ -418,7 +430,8 @@ class TestParseBootstrap:
 
     def test_post_install_preserved(self) -> None:
         raw = {"deps": [{"type": "pip", "package": "x"}], "post_install": "echo ok"}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.post_install == "echo ok"
 
     def test_check_command_preserved(self) -> None:
@@ -426,17 +439,20 @@ class TestParseBootstrap:
             "deps": [{"type": "pip", "package": "x"}],
             "check_command": "foo --version",
         }
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.check_command == "foo --version"
 
     def test_dict_optional_true(self) -> None:
         raw = {"deps": [{"type": "npm", "package": "pkg", "optional": True}]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].optional is True
 
     def test_dict_optional_defaults_false(self) -> None:
         raw = {"deps": [{"type": "npm", "package": "pkg"}]}
-        result = _parse_bootstrap(raw)
+        result = parse_bootstrap(raw)
+        assert result is not None
         assert result.deps[0].optional is False
 
 
@@ -447,10 +463,10 @@ class TestParseBootstrap:
 
 class TestParseWorkflows:
     def test_none_returns_empty(self) -> None:
-        assert _parse_workflows(None) == ()
+        assert parse_workflows(None) == ()
 
     def test_empty_list(self) -> None:
-        assert _parse_workflows([]) == ()
+        assert parse_workflows([]) == ()
 
     def test_basic_workflow(self) -> None:
         raw = [
@@ -463,7 +479,7 @@ class TestParseWorkflows:
                 "required_capabilities": ["cap.one"],
             },
         ]
-        result = _parse_workflows(raw)
+        result = parse_workflows(raw)
         assert len(result) == 1
         assert result[0].id == "flow1"
         assert result[0].steps == ({"tool": "t1"},)
@@ -471,27 +487,27 @@ class TestParseWorkflows:
 
     def test_capabilities_as_string(self) -> None:
         raw = [{"id": "flow2", "version": "1.0.0", "required_capabilities": "cap.one"}]
-        result = _parse_workflows(raw)
+        result = parse_workflows(raw)
         assert result[0].required_capabilities == ("cap.one",)
 
     def test_name_defaults_to_id(self) -> None:
         raw = [{"id": "flow3", "version": "1.0.0"}]
-        result = _parse_workflows(raw)
+        result = parse_workflows(raw)
         assert result[0].name == "flow3"
 
 
 class TestParseInstructions:
     def test_none_returns_empty(self) -> None:
-        assert _parse_instructions(None) == ()
+        assert parse_instructions(None) == ()
 
     def test_empty_list(self) -> None:
-        assert _parse_instructions([]) == ()
+        assert parse_instructions([]) == ()
 
     def test_basic(self) -> None:
         raw = [
             {"id": "instr1", "scope": "agent", "content": "Do this.", "priority": 90},
         ]
-        result = _parse_instructions(raw)
+        result = parse_instructions(raw)
         assert len(result) == 1
         assert result[0].id == "instr1"
         assert result[0].scope == "agent"
@@ -500,17 +516,17 @@ class TestParseInstructions:
 
     def test_defaults(self) -> None:
         raw = [{"id": "instr2", "content": "Some content."}]
-        result = _parse_instructions(raw)
+        result = parse_instructions(raw)
         assert result[0].scope == "agent"
         assert result[0].priority == 50
 
 
 class TestParsePolicyHints:
     def test_none_returns_empty(self) -> None:
-        assert _parse_policy_hints(None) == ()
+        assert parse_policy_hints(None) == ()
 
     def test_empty_list(self) -> None:
-        assert _parse_policy_hints([]) == ()
+        assert parse_policy_hints([]) == ()
 
     def test_basic(self) -> None:
         raw = [
@@ -520,7 +536,7 @@ class TestParsePolicyHints:
                 "reason": "not safe",
             },
         ]
-        result = _parse_policy_hints(raw)
+        result = parse_policy_hints(raw)
         assert len(result) == 1
         assert result[0].capability_id == "net.fetch"
         assert result[0].recommended_action == "deny"
@@ -528,7 +544,7 @@ class TestParsePolicyHints:
 
     def test_defaults(self) -> None:
         raw = [{"capability_id": "net.fetch"}]
-        result = _parse_policy_hints(raw)
+        result = parse_policy_hints(raw)
         assert result[0].recommended_action == "allow"
         assert result[0].reason == ""
 
@@ -540,10 +556,10 @@ class TestParsePolicyHints:
 
 class TestParseHealthcheck:
     def test_none_returns_none(self) -> None:
-        assert _parse_healthcheck(None) is None
+        assert parse_healthcheck(None) is None
 
     def test_empty_dict_returns_none(self) -> None:
-        assert _parse_healthcheck({}) is None
+        assert parse_healthcheck({}) is None
 
     def test_valid(self) -> None:
         raw = {
@@ -551,7 +567,8 @@ class TestParseHealthcheck:
             "target": "http://localhost/health",
             "interval_seconds": 120,
         }
-        result = _parse_healthcheck(raw)
+        result = parse_healthcheck(raw)
+        assert result is not None
         assert isinstance(result, HealthcheckSpec)
         assert result.type == "http"
         assert result.target == "http://localhost/health"
@@ -559,7 +576,8 @@ class TestParseHealthcheck:
 
     def test_defaults(self) -> None:
         raw = {"type": "callable", "target": "mod:check"}
-        result = _parse_healthcheck(raw)
+        result = parse_healthcheck(raw)
+        assert result is not None
         assert result.interval_seconds == 300
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import dataclasses
 
 import pytest
@@ -127,8 +129,8 @@ class TestEnvironmentManifestCustom:
 # ---------------------------------------------------------------------------
 
 
-def _minimal_agent(**overrides) -> CompiledAgent:
-    defaults = {
+def _minimal_agent(**overrides: Any) -> CompiledAgent:
+    defaults: dict[str, Any] = {
         "name": "test-agent",
         "template_name": "base",
         "mode": "code",

@@ -116,6 +116,7 @@ class InstructionManifest(BaseModel):
 
     apply_to: list[str] = Field(default_factory=_empty_str_list)
     body: str = ""
+    source_path: Path | None = None
 
     model_config = {"arbitrary_types_allowed": True, "populate_by_name": True}
 
@@ -141,23 +142,32 @@ def _empty_mcp_refs() -> list[MCPServerRef]:
     return []
 
 
+def _empty_hook_list() -> list[HookDefinition]:
+    return []
+
+
+def _empty_skill_list() -> list[SkillManifest]:
+    return []
+
+
+def _empty_trigger_list() -> list[dict[str, Any]]:
+    return []
+
+
 class AgentManifest(BaseModel):
     """Complete parsed agent manifest from an ``*.agent.md`` file."""
 
     name: str
     description: str = ""
-    provider: str = Field("copilot", alias="model")
+    provider: str = "copilot"
     model_id: str | None = None
     completion_params: dict[str, Any] = Field(default_factory=_empty_any_dict)
     system_prompt: str = ""
     tools: list[str] = Field(default_factory=_empty_str_list)
     tool_allowlist: list[str] | None = None
-    mcp_servers: list[Any] = Field(
-        default_factory=_empty_mcp_refs,
-        alias="mcp_server_refs",
-    )
+    mcp_servers: list[Any] = Field(default_factory=_empty_mcp_refs)
     permissions: PermissionConfig = Field(default_factory=PermissionConfig)
-    hooks: list[HookDefinition] = Field(default_factory=list)
+    hooks: list[HookDefinition] = Field(default_factory=_empty_hook_list)
 
     capabilities: CapabilityConfig = Field(default_factory=CapabilityConfig)
     plugins: PluginDepsConfig = Field(default_factory=PluginDepsConfig)
@@ -170,9 +180,7 @@ class AgentManifest(BaseModel):
     )
 
     # Inline skill manifests (when constructed programmatically)
-    skills: list[SkillManifest] = Field(default_factory=list)
-
-    # Inline skill manifests (when constructed programmatically)
+    skills: list[SkillManifest] = Field(default_factory=_empty_skill_list)
 
     # Delegation
     can_delegate: bool = False
@@ -183,7 +191,7 @@ class AgentManifest(BaseModel):
     agent_type: str = "loop"
     max_turns: int = 25
     tags: list[str] = Field(default_factory=_empty_str_list)
-    triggers: list[dict[str, Any]] = Field(default_factory=list)
+    triggers: list[dict[str, Any]] = Field(default_factory=_empty_trigger_list)
 
     # Source tracking
     source_path: Path | None = None
@@ -290,9 +298,11 @@ def agent_manifest_from_frontmatter(
 
     # Auto-convert skills.filter to capability grants
     if isinstance(raw_skills, dict):
-        raw_filter = raw_skills.get("filter")
+        skills_dict: dict[str, Any] = cast("dict[str, Any]", raw_skills)
+        raw_filter: Any = skills_dict.get("filter")
         if isinstance(raw_filter, list):
-            skill_caps = [f"skill.{str(name).replace('-', '_')}" for name in raw_filter]
+            raw_filter_list: list[Any] = cast("list[Any]", raw_filter)
+            skill_caps = [f"skill.{str(name).replace('-', '_')}" for name in raw_filter_list]
             existing_caps: CapabilityConfig = kwargs.get(
                 "capabilities",
                 CapabilityConfig(),

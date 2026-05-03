@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, cast
 
 from obscura.plugins.models import (
     BootstrapDep,
@@ -61,7 +61,7 @@ def _require(data: dict[str, Any], key: str, path: Path | None = None) -> Any:
     return data[key]
 
 
-def _parse_config_requirements(
+def parse_config_requirements(
     raw: dict[str, Any] | list[dict[str, Any]] | None,
 ) -> tuple[ConfigRequirement, ...]:
     if raw is None:
@@ -71,19 +71,21 @@ def _parse_config_requirements(
     if isinstance(raw, dict):
         for key, spec in raw.items():
             if isinstance(spec, dict):
+                spec_d: dict[str, Any] = cast("dict[str, Any]", spec)
                 items.append(
                     ConfigRequirement(
                         key=key,
-                        type=spec.get("type", "string"),
-                        required=spec.get("required", True),
-                        description=spec.get("description", ""),
-                        default=spec.get("default"),
+                        type=spec_d.get("type", "string"),
+                        required=spec_d.get("required", True),
+                        description=spec_d.get("description", ""),
+                        default=spec_d.get("default"),
                     ),
                 )
             else:
                 items.append(ConfigRequirement(key=key))
     elif isinstance(raw, list):
-        for entry in raw:
+        for _entry in raw:
+            entry: dict[str, Any] = cast("dict[str, Any]", _entry)
             items.append(
                 ConfigRequirement(
                     key=entry.get("key", entry.get("name", "")),
@@ -96,7 +98,7 @@ def _parse_config_requirements(
     return tuple(items)
 
 
-def _parse_capabilities(
+def parse_capabilities(
     raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[CapabilitySpec, ...]:
     if not raw:
@@ -128,7 +130,7 @@ def _parse_capabilities(
     return tuple(items)
 
 
-def _parse_tools(
+def parse_tools(
     raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[ToolContribution, ...]:
     if not raw:
@@ -162,7 +164,7 @@ def _parse_tools(
     return tuple(items)
 
 
-def _parse_workflows(
+def parse_workflows(
     raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[WorkflowSpec, ...]:
     if not raw:
@@ -195,7 +197,7 @@ def _parse_workflows(
     return tuple(items)
 
 
-def _parse_instructions(
+def parse_instructions(
     raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[InstructionSpec, ...]:
     if not raw:
@@ -223,7 +225,7 @@ def _parse_instructions(
     return tuple(items)
 
 
-def _parse_policy_hints(
+def parse_policy_hints(
     raw: list[dict[str, Any]] | dict[str, Any] | None,
 ) -> tuple[PolicyHintSpec, ...]:
     if not raw:
@@ -251,7 +253,7 @@ def _parse_policy_hints(
     return tuple(items)
 
 
-def _parse_healthcheck(
+def parse_healthcheck(
     raw: dict[str, Any] | None,
 ) -> HealthcheckSpec | None:
     if not raw:
@@ -263,7 +265,7 @@ def _parse_healthcheck(
     )
 
 
-def _parse_bootstrap(
+def parse_bootstrap(
     raw: dict[str, Any] | list[dict[str, Any]] | None,
 ) -> BootstrapSpec | None:
     if not raw:
@@ -282,12 +284,13 @@ def _parse_bootstrap(
                 dep_type, pkg = "pip", entry
             deps.append(BootstrapDep(type=dep_type, package=pkg))
         elif isinstance(entry, dict):
+            entry_d: dict[str, Any] = cast("dict[str, Any]", entry)
             deps.append(
                 BootstrapDep(
-                    type=entry.get("type", "pip"),
-                    package=entry.get("package", ""),
-                    version=entry.get("version", ""),
-                    optional=entry.get("optional", False),
+                    type=entry_d.get("type", "pip"),
+                    package=entry_d.get("package", ""),
+                    version=entry_d.get("version", ""),
+                    optional=entry_d.get("optional", False),
                 ),
             )
     return BootstrapSpec(
@@ -328,16 +331,16 @@ def parse_manifest(
             author=data.get("author", ""),
             description=data.get("description", ""),
             source_dir=source_path.parent if source_path else None,
-            config_requirements=_parse_config_requirements(data.get("config")),
-            capabilities=_parse_capabilities(data.get("capabilities")),
-            tools=_parse_tools(data.get("tools")),
-            workflows=_parse_workflows(data.get("workflows")),
-            instructions=_parse_instructions(data.get("instructions")),
-            policy_hints=_parse_policy_hints(data.get("policy_hints")),
+            config_requirements=parse_config_requirements(data.get("config")),
+            capabilities=parse_capabilities(data.get("capabilities")),
+            tools=parse_tools(data.get("tools")),
+            workflows=parse_workflows(data.get("workflows")),
+            instructions=parse_instructions(data.get("instructions")),
+            policy_hints=parse_policy_hints(data.get("policy_hints")),
             install_hook=data.get("install_hook"),
             bootstrap_hook=data.get("bootstrap_hook"),
-            bootstrap=_parse_bootstrap(data.get("bootstrap")),
-            healthcheck=_parse_healthcheck(data.get("healthcheck")),
+            bootstrap=parse_bootstrap(data.get("bootstrap")),
+            healthcheck=parse_healthcheck(data.get("healthcheck")),
         )
     except ManifestError:
         raise
@@ -404,7 +407,19 @@ def parse_manifest_file(path: Path) -> PluginSpec:
         msg = "Manifest must be a mapping"
         raise ManifestError(msg, path)
 
-    return parse_manifest(data, source_path=path)
+    return parse_manifest(cast("dict[str, Any]", data), source_path=path)
 
 
-__all__ = ["ManifestError", "parse_manifest", "parse_manifest_file"]
+__all__ = [
+    "ManifestError",
+    "parse_manifest",
+    "parse_manifest_file",
+    "parse_bootstrap",
+    "parse_capabilities",
+    "parse_config_requirements",
+    "parse_healthcheck",
+    "parse_instructions",
+    "parse_policy_hints",
+    "parse_tools",
+    "parse_workflows",
+]

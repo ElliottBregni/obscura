@@ -92,7 +92,7 @@ class TestAgentManifest:
     def test_full_manifest(self) -> None:
         a = AgentManifest(
             name="researcher",
-            model="claude",
+            provider="claude",
             tools=["Read", "Bash"],
             can_delegate=True,
             delegate_allowlist=["code-reviewer"],

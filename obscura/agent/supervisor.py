@@ -146,7 +146,7 @@ class SupervisorConfig:
                 AgentDefinition(
                     name=m.name,
                     type=m.agent_type,
-                    model=m.model,
+                    model=m.provider,
                     system_prompt=m.system_prompt,
                     max_turns=m.max_turns,
                     mcp_servers=m.mcp_servers,

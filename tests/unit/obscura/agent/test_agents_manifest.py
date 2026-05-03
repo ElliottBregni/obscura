@@ -20,7 +20,7 @@ class TestAgentConfigFromManifest:
     def test_basic_manifest(self) -> None:
         manifest = AgentManifest(
             name="dev",
-            model="claude",
+            provider="claude",
             system_prompt="You are a developer.",
             max_turns=10,
         )
@@ -104,7 +104,7 @@ class TestAgentConfigFromManifest:
     def test_mcp_from_refs(self) -> None:
         manifest = AgentManifest(
             name="x",
-            mcp_server_refs=[
+            mcp_servers=[
                 MCPServerRef(
                     name="github",
                     command="npx",
