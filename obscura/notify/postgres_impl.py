@@ -15,16 +15,6 @@ except ImportError:
     _asyncpg = None
 
 
-def _payload_of(message: Message) -> dict[str, Any]:
-    """Read message.payload with explicit typing.
-
-    Storage's ``Message.payload`` is annotated as bare ``dict`` (no params); pyright
-    infers ``dict[Unknown, Unknown]`` on attribute access. This helper centralises
-    the boundary cast so call sites stay clean.
-    """
-    return cast(dict[str, Any], message.payload)  # pyright: ignore[reportUnknownMemberType]
-
-
 class PostgresStorage:
     """Async Postgres-backed Storage implementation using asyncpg.
 
@@ -64,7 +54,7 @@ class PostgresStorage:
 
     async def save_message(self, message: Message) -> str | None:
         pool = self._require_pool()
-        payload_json = json.dumps(_payload_of(message))
+        payload_json = json.dumps(message.payload)
         async with pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO messages(id,user_id,channel,payload,status,attempts,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)",

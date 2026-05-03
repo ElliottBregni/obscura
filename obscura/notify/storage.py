@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass
@@ -9,7 +9,7 @@ class Message:
     id: str
     user_id: str
     channel: str
-    payload: dict
+    payload: dict[str, Any]
     status: str
     attempts: int = 0
     idempotency_key: str | None = None

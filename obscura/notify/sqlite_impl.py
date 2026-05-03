@@ -19,16 +19,6 @@ except ImportError:
 _MAX_ATTEMPTS = 3
 
 
-def _payload_of(message: Message) -> dict[str, Any]:
-    """Read message.payload with explicit typing.
-
-    Storage's ``Message.payload`` is annotated as bare ``dict`` (no params); pyright
-    infers ``dict[Unknown, Unknown]`` on attribute access. This helper centralises
-    the boundary cast so call sites stay clean.
-    """
-    return cast(dict[str, Any], message.payload)  # pyright: ignore[reportUnknownMemberType]
-
-
 class SQLiteStorage:
     """Simple async SQLite-backed Storage implementation."""
 
@@ -107,7 +97,7 @@ class SQLiteStorage:
             if row is not None:
                 return cast(str, row[0])
 
-        payload_json = json.dumps(_payload_of(message))
+        payload_json = json.dumps(message.payload)
         await conn.execute(
             "INSERT INTO messages(id,user_id,channel,payload,status,attempts,created_at,idempotency_key,last_error) VALUES(?,?,?,?,?,?,?,?,?)",
             (
@@ -194,7 +184,7 @@ class SQLiteStorage:
         if attempts is not None and attempts >= _MAX_ATTEMPTS and status == "failed":
             msg = await self.get_message(message_id)
             if msg is not None:
-                payload_json = json.dumps(_payload_of(msg))
+                payload_json = json.dumps(msg.payload)
                 await conn.execute(
                     "INSERT INTO dead_letters(original_id,user_id,channel,payload,attempts,reason,created_at) VALUES(?,?,?,?,?,?,?)",
                     (
