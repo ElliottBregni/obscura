@@ -208,9 +208,9 @@ class AgentConfig(BaseModel):
         # Enable MCP if there are actual server configs resolved from the
         # manifest, OR if the manifest explicitly listed server refs.
         mcp_enabled = bool(mcp_configs) or bool(manifest.mcp_servers)
-        server_names: list[str] = []
-        if isinstance(manifest.mcp_servers, list):
-            server_names = [str(s) for s in manifest.mcp_servers if isinstance(s, str)]
+        server_names: list[str] = [
+            str(s) for s in manifest.mcp_servers if isinstance(s, str)
+        ]
 
         mcp = MCPConfig(
             enabled=mcp_enabled,
@@ -222,9 +222,12 @@ class AgentConfig(BaseModel):
         skills_cfg = manifest.skills_config
         lazy_load = bool(skills_cfg.get("lazy_load", False))
         raw_filter = skills_cfg.get("filter", None)
-        skill_filter = (
-            [str(item) for item in raw_filter] if isinstance(raw_filter, list) else None
-        )
+        skill_filter: list[str] | None
+        if isinstance(raw_filter, list):
+            raw_filter_list = cast("list[Any]", raw_filter)
+            skill_filter = [str(item) for item in raw_filter_list]
+        else:
+            skill_filter = None
 
         return cls(
             name=manifest.name,
@@ -629,26 +632,23 @@ class Agent:
                 elif lazy_enabled:
                     # Lazy mode: discover all plugins, register schemas only,
                     # defer handler loading until first tool call.
-                    _ws_include = None
-                    _ws_exclude = None
-                    _eager = set[str]()
-                    if (
-                        hasattr(self, "_compiled_workspace")
-                        and self._compiled_workspace
-                    ):
-                        _ws_include = getattr(
-                            self._compiled_workspace,
-                            "plugin_include",
-                            None,
+                    _ws_include: frozenset[str] | None = None
+                    _ws_exclude: frozenset[str] | None = None
+                    _eager: set[str] = set()
+                    _compiled_ws: Any = getattr(self, "_compiled_workspace", None)
+                    if _compiled_ws:
+                        _ws_include = cast(
+                            "frozenset[str] | None",
+                            getattr(_compiled_ws, "plugin_include", None),
                         )
-                        _ws_exclude = getattr(
-                            self._compiled_workspace,
-                            "plugin_exclude",
-                            None,
+                        _ws_exclude = cast(
+                            "frozenset[str] | None",
+                            getattr(_compiled_ws, "plugin_exclude", None),
                         )
                     _eager_cfg = self.config.plugins.get("eager", [])
                     if isinstance(_eager_cfg, list):
-                        _eager = set(_eager_cfg)
+                        _eager_cfg_list = cast("list[Any]", _eager_cfg)
+                        _eager = {str(item) for item in _eager_cfg_list}
                     plugin_loader.load_lazy(
                         broker,
                         plugin_include=_ws_include,
@@ -764,19 +764,21 @@ class Agent:
                         score_index=score_index,
                         capability_index=cap_index,
                         quarantined_tools=set(broker.quarantined_tools),
-                        backend=self.config.backend or "copilot",
+                        backend=self.config.provider or "copilot",
                     )
                 else:
                     router = ToolRouter(
                         config=routing_config,
                         score_index=score_index,
-                        backend=self.config.backend or "copilot",
+                        backend=self.config.provider or "copilot",
                     )
                 backend_obj.set_tool_router(router)
+                _cap_descriptions = router._cap_descriptions  # pyright: ignore[reportPrivateUsage]
+                _cap_tool_map = router._cap_tool_map  # pyright: ignore[reportPrivateUsage]
                 logger.info(
                     "Tool router attached (%d capabilities, %d cap-tool mappings, %d historical scores)",
-                    len(router._cap_descriptions),
-                    sum(len(v) for v in router._cap_tool_map.values()),
+                    len(_cap_descriptions),
+                    sum(len(v) for v in _cap_tool_map.values()),
                     len(score_index),
                 )
         except Exception as exc:
@@ -789,11 +791,11 @@ class Agent:
                 from obscura.core.hooks import HookRegistry
 
                 # If the client has a hook registry, merge; otherwise set it
-                existing: HookRegistry | None = getattr(self._client, "hooks", None)
+                existing: HookRegistry | None = getattr(self._client, "_hooks", None)
                 if existing is not None:
                     existing.merge(manifest_hooks)
                 else:
-                    self._client.hooks = manifest_hooks
+                    self._client._hooks = manifest_hooks  # pyright: ignore[reportPrivateUsage]
 
         # Register eval hooks (tool checks + past-failure memory injection)
         if self.config.eval_tools:
@@ -805,10 +807,10 @@ class Agent:
                 )
                 from obscura.core.types import AgentEventKind as _AEK
 
-                hook_reg: HookRegistry | None = getattr(self._client, "hooks", None)
+                hook_reg: HookRegistry | None = getattr(self._client, "_hooks", None)
                 if hook_reg is None:
                     hook_reg = HookRegistry()
-                    self._client.hooks = hook_reg
+                    self._client._hooks = hook_reg  # pyright: ignore[reportPrivateUsage]
                 import inspect
 
                 # Defer factory execution until the hook is actually run. Some
@@ -817,15 +819,17 @@ class Agent:
                 # produces RuntimeWarnings because the coroutine is not
                 # awaited. Wrap the factory so it's only called when the
                 # event executes, and await any coroutine results then.
-                def _defer_factory(factory):
-                    async def _deferred(event):
-                        hook = factory()
+                def _defer_factory(
+                    factory: Callable[[], Any],
+                ) -> Callable[[AgentEvent], Awaitable[AgentEvent | None]]:
+                    async def _deferred(event: AgentEvent) -> AgentEvent | None:
+                        hook: Any = factory()
                         if inspect.isawaitable(hook):
                             hook = await hook
-                        result = hook(event)
+                        result: Any = hook(event)
                         if inspect.isawaitable(result):
-                            return await result
-                        return result
+                            return cast("AgentEvent | None", await result)
+                        return cast("AgentEvent | None", result)
 
                     return _deferred
 
@@ -851,10 +855,10 @@ class Agent:
                 from obscura.core.lifecycle import make_tool_pace_hook
                 from obscura.core.types import AgentEventKind as _AEK
 
-                hook_reg_: HookRegistry | None = getattr(self._client, "hooks", None)
+                hook_reg_: HookRegistry | None = getattr(self._client, "_hooks", None)
                 if hook_reg_ is None:
                     hook_reg_ = HookRegistry()
-                    self._client.hooks = hook_reg_
+                    self._client._hooks = hook_reg_  # pyright: ignore[reportPrivateUsage]
 
                 count_hook, remind_hook, text_reset_hook = make_tool_pace_hook(
                     max_consecutive=self.config.max_consecutive_tools,
@@ -1141,8 +1145,11 @@ class Agent:
         # Use vector search with reranking if available
         if hasattr(self, "vector_memory"):
             try:
-                recall_fn: Callable[..., list[VectorMemoryEntry]] = self.recall
-                memories = recall_fn(
+                recall_fn = cast(
+                    "Callable[..., list[VectorMemoryEntry]]",
+                    getattr(self, "recall"),  # noqa: B009
+                )
+                memories: list[VectorMemoryEntry] = recall_fn(
                     prompt,
                     top_k=5,
                     use_reranking=True,
