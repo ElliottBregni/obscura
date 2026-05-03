@@ -6,6 +6,8 @@ by the JWT validation middleware and consumed by RBAC dependencies.
 
 from __future__ import annotations
 
+import os
+
 from pydantic import BaseModel, ConfigDict
 
 # ---------------------------------------------------------------------------
@@ -59,6 +61,43 @@ class AuthenticatedUser(BaseModel):
     # Supabase session_id (JWT ``session_id`` claim). Used for revocation
     # checks against ``auth.sessions`` on sensitive routes.
     session_id: str | None = None
+
+    # -- factory constructors ----------------------------------------------
+
+    @classmethod
+    def local_cli(cls) -> AuthenticatedUser:
+        """Return the synthetic user used by CLI/daemon code paths.
+
+        There is no real authentication in standalone tooling — vector memory,
+        profile store, and goal board still need a stable ``user_id`` to
+        namespace per-user state, so we mint a placeholder identity from
+        ``$USER`` (falling back to ``"local"``).
+        """
+        return cls(
+            user_id=os.environ.get("USER", "local"),
+            email="cli@obscura.local",
+            roles=("operator",),
+            org_id="local",
+            token_type="user",
+            raw_token="",
+        )
+
+    @classmethod
+    def from_tool_context(cls) -> AuthenticatedUser:
+        """Return the user bound to the active tool context, or the CLI fallback.
+
+        Tool handlers should prefer this over :meth:`local_cli` so that
+        server-side invocations (where the agent loop binds an authenticated
+        user into the :class:`~obscura.core.tool_context.ToolContext`) get the
+        real user, while CLI/daemon paths transparently fall back to the
+        local synthetic identity.
+        """
+        from obscura.core.tool_context import current_tool_context
+
+        ctx = current_tool_context()
+        if ctx is not None and isinstance(ctx.user, cls):
+            return ctx.user
+        return cls.local_cli()
 
     # -- convenience helpers ------------------------------------------------
 

@@ -608,9 +608,7 @@ class ObscuraSession:
                             if isinstance(_usage, dict):
                                 _usage_dict = cast(dict[str, Any], _usage)
                                 inp: int = int(_usage_dict.get("input_tokens", 0) or 0)
-                                out: int = int(
-                                    _usage_dict.get("output_tokens", 0) or 0
-                                )
+                                out: int = int(_usage_dict.get("output_tokens", 0) or 0)
                             else:
                                 inp = int(getattr(_usage, "input_tokens", 0) or 0)
                                 out = int(getattr(_usage, "output_tokens", 0) or 0)
@@ -1042,18 +1040,9 @@ class ObscuraSession:
 
     def _init_vector_memory(self) -> None:
         """Initialize vector store and memory channels."""
-        import os
-
         from obscura.auth.models import AuthenticatedUser
 
-        cli_user = AuthenticatedUser(
-            user_id=os.environ.get("USER", "local"),
-            email="cli@obscura.local",
-            roles=("operator",),
-            org_id="local",
-            token_type="user",
-            raw_token="",
-        )
+        cli_user = AuthenticatedUser.local_cli()
         self._cli_user = cli_user
 
         self._vector_store = init_vector_store(cli_user)

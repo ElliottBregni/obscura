@@ -44,7 +44,9 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-def _retry(fn: Any, *, attempts: int = 3, base_delay: float = 0.5, label: str = "") -> Any:
+def _retry(
+    fn: Any, *, attempts: int = 3, base_delay: float = 0.5, label: str = ""
+) -> Any:
     """Call fn() up to `attempts` times with exponential backoff on exception."""
     last_exc: Exception | None = None
     for i in range(attempts):
@@ -53,9 +55,14 @@ def _retry(fn: Any, *, attempts: int = 3, base_delay: float = 0.5, label: str = 
         except Exception as exc:
             last_exc = exc
             if i < attempts - 1:
-                delay = base_delay * (2 ** i)
+                delay = base_delay * (2**i)
                 logger.debug(
-                    "Retry %d/%d for %s after %.1fs: %s", i + 1, attempts, label, delay, exc
+                    "Retry %d/%d for %s after %.1fs: %s",
+                    i + 1,
+                    attempts,
+                    label,
+                    delay,
+                    exc,
                 )
                 _time.sleep(delay)
     logger.warning("All %d attempts failed for %s: %s", attempts, label, last_exc)
@@ -217,7 +224,11 @@ class VaultSync:
                     )
                     # Project file shadows global file with the same relative path.
                     if rel in global_rels:
-                        metas = [m for m in metas if m.path.relative_to(self.vault_dir) != rel]
+                        metas = [
+                            m
+                            for m in metas
+                            if m.path.relative_to(self.vault_dir) != rel
+                        ]
                     metas.append(proj_meta)
 
         return metas
@@ -415,7 +426,9 @@ class VaultSync:
             logger.debug("[vault] Conflict archive written: %s", out_path.name)
         except Exception:
             logger.warning(
-                "[vault] Could not write conflict archive for %s", goal.id, exc_info=True
+                "[vault] Could not write conflict archive for %s",
+                goal.id,
+                exc_info=True,
             )
 
     def _ingest_task(self, meta: FileMeta) -> None:
@@ -441,11 +454,10 @@ class VaultSync:
     def _ingest_profile(self, meta: FileMeta) -> None:
         """Update user profile from a vault file."""
         try:
-            from obscura.auth.context import current_user
+            from obscura.auth.models import AuthenticatedUser
             from obscura.profile.store import ProfileStore
 
-            user = current_user()
-            store = ProfileStore.for_user(user)
+            store = ProfileStore.for_user(AuthenticatedUser.local_cli())
             # Parse simple key: value pairs from the body.
             for line in meta.body.splitlines():
                 line = line.strip()
@@ -465,10 +477,10 @@ class VaultSync:
     def _ingest_to_vector(self, meta: FileMeta, memory_type: str) -> None:
         """Ingest a note/reference file into vector memory."""
         try:
-            from obscura.auth.context import current_user
+            from obscura.auth.models import AuthenticatedUser
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore.for_user(current_user())
+            store = VectorMemoryStore.for_user(AuthenticatedUser.local_cli())
             key = f"vault:{meta.owner}:{meta.path.stem}"
             store.set(
                 key=key,
@@ -722,12 +734,11 @@ class VaultSync:
     def _export_profile_summary(self) -> int:
         """Export a profile summary to vault/agent/profile-summary.md."""
         try:
-            from obscura.auth.context import current_user
+            from obscura.auth.models import AuthenticatedUser
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            user = current_user()
-            store = ProfileStore.for_user(user)
+            store = ProfileStore.for_user(AuthenticatedUser.local_cli())
             builder = ProfileBuilder()
             summary = builder.build_summary(store, max_tokens=600)
 
