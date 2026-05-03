@@ -102,9 +102,7 @@ class Supervisor:
         else:
             self._backend = create_supervisor_backend()
         self._config = config or SupervisorConfig()
-        self._lock = SessionLock(
-            backend=self._backend, default_ttl=self._config.lock_ttl
-        )
+        self._lock = SessionLock(backend=self._backend, default_ttl=self._config.lock_ttl)
         self._tool_store = ToolSnapshotStore(backend=self._backend)
 
     def _sql(self, sql: str) -> str:
@@ -235,16 +233,22 @@ class Supervisor:
 
         # Register profile + goal context hooks
         try:
-            from obscura.auth.models import AuthenticatedUser
             from obscura.core.supervisor.profile_goal_hook import (
                 register_profile_goal_hooks,
             )
 
-            # Resolve from the active tool context if bound (server runtime),
-            # else fall back to the local CLI synthetic identity.
-            register_profile_goal_hooks(
-                hooks, user=AuthenticatedUser.from_tool_context()
-            )
+            # Best-effort user resolution for profile injection.
+            _user: Any = None
+            try:
+                # obscura.auth.context.current_user is provided when running in
+                # an authenticated runtime; absent in standalone tooling.
+                auth_ctx: Any = __import__(
+                    "obscura.auth.context", fromlist=["current_user"]
+                )
+                _user = auth_ctx.current_user()
+            except Exception:
+                pass
+            register_profile_goal_hooks(hooks, user=_user)
         except Exception as exc:
             logger.debug("Could not register profile/goal hooks: %s", exc)
 

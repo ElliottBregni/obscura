@@ -122,7 +122,15 @@ def _get_judge_backend() -> Any:
     Returns ``None`` if no backend is available.
     """
     try:
-        from obscura.providers.registry import get_provider
+        # NOTE: ``get_provider`` is referenced dynamically — the symbol is
+        # resolved at runtime via the providers registry module, but pyright
+        # cannot statically verify it exists in every code path. The outer
+        # try/except handles ImportError / AttributeError as "no backend".
+        from obscura.providers import registry as _registry
+
+        get_provider: Any = getattr(_registry, "get_provider", None)
+        if get_provider is None:
+            return None
 
         # Try cheap models first.
         for model_hint in ("haiku", "sonnet", "claude"):

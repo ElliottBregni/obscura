@@ -8,7 +8,7 @@ hook points.  Follows the same pattern as
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping, cast
 
 from obscura.arbiter.engine import ArbiterEngine
 from obscura.arbiter.types import (
@@ -118,11 +118,12 @@ async def _task_complete_handler(context: dict[str, Any]) -> dict[str, Any] | bo
     if engine is None or not engine.is_running:
         return context
 
+    task = cast(Mapping[str, Any], context.get("task") or {})
     score = await engine.evaluate(
         ArbiterCheckKind.TASK_COMPLETE,
         {
-            "task": context.get("task") or {},
-            "output_text": str((context.get("task") or {}).get("output", "")),
+            "task": task,
+            "output_text": str(task.get("output", "")),
         },
     )
 
@@ -162,7 +163,7 @@ async def _run_tests_on_complete() -> str:
 
         from dataclasses import asdict
 
-        test_score, test_issues = check_test_results(asdict(outcome))
+        _test_score, test_issues = check_test_results(asdict(outcome))
         if test_issues:
             return f"Test failures after completion: {'; '.join(test_issues)}"
         return ""

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Mapping, Sequence, cast
 
 from obscura.arbiter.checks import (
     check_drift,
@@ -129,7 +129,7 @@ class ArbiterEngine:
         if kind == ArbiterCheckKind.MODEL_TURN:
             historical = self._session_errors.get(target_id_early, [])
             if historical:
-                existing_recent = context.get("recent_errors") or []
+                existing_recent = cast(list[str], context.get("recent_errors") or [])
                 context["recent_errors"] = historical + list(existing_recent)
 
         # 1. Deterministic checks
@@ -251,19 +251,21 @@ class ArbiterEngine:
             return self._check_model_turn(context)
 
         if kind == ArbiterCheckKind.TASK_COMPLETE:
-            task = context.get("task") or {}
+            task = cast(Mapping[str, Any], context.get("task") or {})
             return check_task_complete(
                 task,
                 output_text=str(context.get("output_text", "")),
-                files_changed=context.get("files_changed"),
+                files_changed=cast("list[str] | None", context.get("files_changed")),
                 tool_call_count=int(context.get("tool_call_count", 0)),
             )
 
         if kind == ArbiterCheckKind.GOAL_TRANSITION:
-            goal = context.get("goal") or {}
+            goal = cast(Mapping[str, Any], context.get("goal") or {})
             return check_goal_transition(
                 goal,
-                linked_task_statuses=context.get("linked_task_statuses"),
+                linked_task_statuses=cast(
+                    "Sequence[str] | None", context.get("linked_task_statuses")
+                ),
             )
 
         return 1.0, []
@@ -300,14 +302,18 @@ class ArbiterEngine:
                 task_subject=task_subject,
                 task_description=task_description,
                 tool_call_count=int(context.get("tool_call_count", 0)),
-                files_touched=context.get("files_touched") or [],
+                files_touched=cast(
+                    "Sequence[str]", context.get("files_touched") or []
+                ),
                 turn_count=int(context.get("turn_count", 0)),
             )
             scores.append(scope_score)
             all_issues.extend(scope_issues)
 
         # 3. Drift (if task context + recent activity available).
-        recent_tool_calls = context.get("recent_tool_calls") or []
+        recent_tool_calls = cast(
+            "Sequence[str]", context.get("recent_tool_calls") or []
+        )
         if task_subject and recent_tool_calls:
             drift_score, drift_issues = check_drift(
                 task_subject=task_subject,
@@ -319,14 +325,14 @@ class ArbiterEngine:
             all_issues.extend(drift_issues)
 
         # 4. Retry spiral (if recent errors available).
-        recent_errors = context.get("recent_errors") or []
+        recent_errors = cast("Sequence[str]", context.get("recent_errors") or [])
         if len(recent_errors) >= 3:
             spiral_score, spiral_issues = check_retry_spiral(recent_errors)
             scores.append(spiral_score)
             all_issues.extend(spiral_issues)
 
         # 5. File quality (if files_touched available).
-        files_touched = context.get("files_touched") or []
+        files_touched = cast("Sequence[str]", context.get("files_touched") or [])
         if files_touched:
             fq_score, fq_issues = check_file_quality(files_touched)
             scores.append(fq_score)
@@ -505,10 +511,10 @@ class ArbiterEngine:
         if kind == ArbiterCheckKind.TOOL_CALL:
             return f"tool:{context.get('tool_name', 'unknown')}"
         if kind == ArbiterCheckKind.TASK_COMPLETE:
-            task = context.get("task") or {}
+            task = cast(Mapping[str, Any], context.get("task") or {})
             return f"task:{task.get('task_id', 'unknown')}"
         if kind == ArbiterCheckKind.GOAL_TRANSITION:
-            goal = context.get("goal") or {}
+            goal = cast(Mapping[str, Any], context.get("goal") or {})
             return f"goal:{goal.get('id', 'unknown')}"
         return f"turn:{int(time.time())}"
 

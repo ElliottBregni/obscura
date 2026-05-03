@@ -6,12 +6,26 @@ import asyncio
 import logging
 import shlex
 import shutil
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_handler_str(tool: Any) -> str:
+    """Read a tool's CLI handler template.
+
+    Production ``ToolContribution`` exposes ``handler_ref``; legacy/test fakes
+    expose ``handler``. Returns the first non-empty value as a ``str``.
+    """
+    handler_ref = getattr(tool, "handler_ref", "")
+    if isinstance(handler_ref, str) and handler_ref:
+        return handler_ref
+    handler = getattr(tool, "handler", "")
+    return handler if isinstance(handler, str) else ""
 
 
 class CLIAdapter:
@@ -28,10 +42,11 @@ class CLIAdapter:
     async def load(self, spec: PluginSpec, config: dict[str, Any]) -> dict[str, Any]:
         handlers: dict[str, Any] = {}
         for tool in spec.tools:
-            if not tool.handler:
+            handler_str = _tool_handler_str(tool)
+            if not handler_str:
                 continue
-            handlers[tool.name] = _make_cli_handler(tool.handler, tool.name)
-            logger.debug("Created CLI handler for %s → %s", tool.name, tool.handler)
+            handlers[tool.name] = _make_cli_handler(handler_str, tool.name)
+            logger.debug("Created CLI handler for %s → %s", tool.name, handler_str)
         return {"handlers": handlers}
 
     async def healthcheck(self, spec: PluginSpec) -> bool:
@@ -39,8 +54,9 @@ class CLIAdapter:
             return shutil.which(spec.healthcheck.target) is not None
         # Check that the first tool's binary exists
         for tool in spec.tools:
-            if tool.handler:
-                binary = tool.handler.split()[0]
+            handler_str = _tool_handler_str(tool)
+            if handler_str:
+                binary = handler_str.split()[0]
                 return shutil.which(binary) is not None
         return True
 
@@ -48,7 +64,10 @@ class CLIAdapter:
         pass
 
 
-def _make_cli_handler(handler_template: str, tool_name: str):
+def _make_cli_handler(
+    handler_template: str,
+    tool_name: str,
+) -> Callable[..., Awaitable[str]]:
     """Create an async handler that executes a CLI command."""
 
     async def _handler(**kwargs: Any) -> str:

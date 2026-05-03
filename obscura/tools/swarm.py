@@ -26,11 +26,19 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.types import ToolSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _empty_agent_configs() -> dict[str, dict[str, Any]]:
+    return {}
+
+
+def _empty_str_list() -> list[str]:
+    return []
 
 
 def load_agent_configs(include_disabled: bool = False) -> dict[str, dict[str, Any]]:
@@ -117,9 +125,11 @@ class SwarmToolContext:
 
     runtime: Any  # AgentRuntime — typed as Any to avoid circular import
     parent_agent_id: str = ""
-    agent_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    agent_configs: dict[str, dict[str, Any]] = field(
+        default_factory=_empty_agent_configs,
+    )
     backend: str = "copilot"
-    delegate_allowlist: list[str] = field(default_factory=list)
+    delegate_allowlist: list[str] = field(default_factory=_empty_str_list)
     event_store: Any = None  # EventStoreProtocol | None
     session_id: str = ""
 
@@ -135,31 +145,6 @@ _team_memory: dict[str, dict[str, Any]] = {}
 
 # Agent team metrics — tracks timing and token usage per spawn.
 _team_metrics: list[dict[str, Any]] = []
-
-
-async def _run_background_agent(
-    ctx: SwarmToolContext,
-    agent_type: str,
-    prompt: str,
-    model: str = "",
-) -> None:
-    """Run an agent in the background, updating _background_agents with progress."""
-    agent_id = f"bg-{agent_type}-{id(prompt) % 10000:04d}"
-    _background_agents[agent_id] = {
-        "agent_type": agent_type,
-        "status": "starting",
-        "output_lines": [],
-        "error": None,
-    }
-    try:
-        result = await _run_one_agent(ctx, agent_type, prompt, model)
-        _background_agents[agent_id]["status"] = (
-            "completed" if result.get("ok") else "failed"
-        )
-        _background_agents[agent_id]["result"] = result
-    except Exception as exc:
-        _background_agents[agent_id]["status"] = "failed"
-        _background_agents[agent_id]["error"] = str(exc)
 
 
 def _build_agent_type_list(agent_configs: dict[str, dict[str, Any]]) -> str:
@@ -275,43 +260,51 @@ def make_spawn_subagent_tool(ctx: SwarmToolContext) -> ToolSpec:
 
         try:
             if cfg is not None:
-                s_cfg = cfg.get("skills", {})
-                if not isinstance(s_cfg, dict):
-                    s_cfg = {}
+                raw_skills = cfg.get("skills", {})
+                s_cfg: dict[str, Any] = (
+                    cast("dict[str, Any]", raw_skills)
+                    if isinstance(raw_skills, dict)
+                    else {}
+                )
                 raw_caps = cfg.get("capabilities", {})
-                cap_cfg = (
-                    CapabilityConfig(
-                        grant=list(raw_caps.get("grant", [])),
-                        deny=list(raw_caps.get("deny", [])),
+                if isinstance(raw_caps, dict):
+                    caps_dict = cast("dict[str, Any]", raw_caps)
+                    cap_cfg = CapabilityConfig(
+                        grant=list(caps_dict.get("grant", [])),
+                        deny=list(caps_dict.get("deny", [])),
                     )
-                    if isinstance(raw_caps, dict)
-                    else CapabilityConfig()
-                )
+                else:
+                    cap_cfg = CapabilityConfig()
                 plugins_cfg = cfg.get("plugins", {})
-                plugin_deps = (
-                    PluginDepsConfig(
-                        require=list(plugins_cfg.get("require", [])),
-                        optional=list(plugins_cfg.get("optional", [])),
+                if isinstance(plugins_cfg, dict):
+                    plugins_dict = cast("dict[str, Any]", plugins_cfg)
+                    plugin_deps = PluginDepsConfig(
+                        require=list(plugins_dict.get("require", [])),
+                        optional=list(plugins_dict.get("optional", [])),
                     )
-                    if isinstance(plugins_cfg, dict)
-                    else PluginDepsConfig()
-                )
+                else:
+                    plugin_deps = PluginDepsConfig()
                 raw_model_id = cfg.get("model_id")
-                raw_params = cfg.get("completion_params") or {}
+                raw_params_unknown = cfg.get("completion_params")
+                raw_params: dict[str, Any] = (
+                    cast("dict[str, Any]", raw_params_unknown)
+                    if isinstance(raw_params_unknown, dict)
+                    else {}
+                )
+                raw_mcp = cfg.get("mcp_servers", [])
+                mcp_list: list[Any] = (
+                    cast("list[Any]", raw_mcp) if isinstance(raw_mcp, list) else []
+                )
                 manifest = AgentManifest(
                     name=cfg["name"],
                     provider=cfg.get("provider") or model or ctx.backend,
                     model_id=str(raw_model_id) if raw_model_id else None,
-                    completion_params=raw_params if isinstance(raw_params, dict) else {},
+                    completion_params=raw_params,
                     system_prompt=cfg.get("system_prompt", ""),
                     max_turns=cfg.get("max_turns", 25),
                     tools=cfg.get("tools", []),
                     tags=cfg.get("tags", []),
-                    mcp_servers=(
-                        cfg.get("mcp_servers", [])
-                        if isinstance(cfg.get("mcp_servers"), list)
-                        else []
-                    ),
+                    mcp_servers=mcp_list,
                     skills_config=s_cfg,
                     capabilities=cap_cfg,
                     plugins=plugin_deps,
@@ -495,43 +488,51 @@ async def _run_one_agent(
     agent = None
     try:
         if cfg is not None:
-            s_cfg = cfg.get("skills", {})
-            if not isinstance(s_cfg, dict):
-                s_cfg = {}
+            raw_skills = cfg.get("skills", {})
+            s_cfg: dict[str, Any] = (
+                cast("dict[str, Any]", raw_skills)
+                if isinstance(raw_skills, dict)
+                else {}
+            )
             raw_caps = cfg.get("capabilities", {})
-            cap_cfg = (
-                CapabilityConfig(
-                    grant=list(raw_caps.get("grant", [])),
-                    deny=list(raw_caps.get("deny", [])),
+            if isinstance(raw_caps, dict):
+                caps_dict = cast("dict[str, Any]", raw_caps)
+                cap_cfg = CapabilityConfig(
+                    grant=list(caps_dict.get("grant", [])),
+                    deny=list(caps_dict.get("deny", [])),
                 )
-                if isinstance(raw_caps, dict)
-                else CapabilityConfig()
-            )
+            else:
+                cap_cfg = CapabilityConfig()
             plugins_cfg = cfg.get("plugins", {})
-            plugin_deps = (
-                PluginDepsConfig(
-                    require=list(plugins_cfg.get("require", [])),
-                    optional=list(plugins_cfg.get("optional", [])),
+            if isinstance(plugins_cfg, dict):
+                plugins_dict = cast("dict[str, Any]", plugins_cfg)
+                plugin_deps = PluginDepsConfig(
+                    require=list(plugins_dict.get("require", [])),
+                    optional=list(plugins_dict.get("optional", [])),
                 )
-                if isinstance(plugins_cfg, dict)
-                else PluginDepsConfig()
-            )
+            else:
+                plugin_deps = PluginDepsConfig()
             raw_model_id = cfg.get("model_id")
-            raw_params = cfg.get("completion_params") or {}
+            raw_params_unknown = cfg.get("completion_params")
+            raw_params: dict[str, Any] = (
+                cast("dict[str, Any]", raw_params_unknown)
+                if isinstance(raw_params_unknown, dict)
+                else {}
+            )
+            raw_mcp = cfg.get("mcp_servers", [])
+            mcp_list: list[Any] = (
+                cast("list[Any]", raw_mcp) if isinstance(raw_mcp, list) else []
+            )
             manifest = AgentManifest(
                 name=cfg["name"],
                 provider=cfg.get("provider") or model or ctx.backend,
                 model_id=str(raw_model_id) if raw_model_id else None,
-                completion_params=raw_params if isinstance(raw_params, dict) else {},
+                completion_params=raw_params,
                 system_prompt=cfg.get("system_prompt", ""),
                 max_turns=cfg.get("max_turns", 25),
                 tools=cfg.get("tools", []),
                 tags=cfg.get("tags", []),
-                mcp_servers=(
-                    cfg.get("mcp_servers", [])
-                    if isinstance(cfg.get("mcp_servers"), list)
-                    else []
-                ),
+                mcp_servers=mcp_list,
                 skills_config=s_cfg,
                 capabilities=cap_cfg,
                 plugins=plugin_deps,

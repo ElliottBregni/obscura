@@ -21,9 +21,24 @@ import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
+
+
+def _as_str(value: Any, default: str = "") -> str:
+    """Coerce *value* to ``str`` (returning *default* when not a string)."""
+    return value if isinstance(value, str) else default
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    """Coerce *value* to ``int`` (returning *default* when not a non-bool int)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+def _as_optional_str(value: Any) -> str | None:
+    """Coerce *value* to ``str | None`` (returning ``None`` when not a string)."""
+    return value if isinstance(value, str) else None
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +96,7 @@ class PolicyRule:
 class PolicyRuleSet:
     """An ordered collection of rules."""
 
-    rules: list[PolicyRule] = field(default_factory=list)
+    rules: list[PolicyRule] = field(default_factory=list[PolicyRule])
 
     def sorted_rules(self) -> list[PolicyRule]:
         return sorted(self.rules, key=lambda r: r.priority, reverse=True)
@@ -168,33 +183,43 @@ class PluginPolicyEngine:
             )
             for f in policy_files:
                 try:
-                    data = load_config(f) or {}
+                    data: dict[str, Any] = load_config(f) or {}
                     # Support both list-form [[rules]] and dict-form [rules.<id>]
-                    raw_rules = data.get("rules", [])
-                    if isinstance(raw_rules, dict):
+                    raw_rules_obj: Any = data.get("rules", [])
+                    raw_rules: list[dict[str, Any]]
+                    if isinstance(raw_rules_obj, dict):
+                        raw_rules_dict = cast(dict[str, Any], raw_rules_obj)
                         raw_rules = [
-                            {**spec, "id": rule_id}
+                            {**cast(dict[str, Any], spec), "id": rule_id}
                             if isinstance(spec, dict)
                             else {"id": rule_id}
-                            for rule_id, spec in raw_rules.items()
+                            for rule_id, spec in raw_rules_dict.items()
                         ]
+                    elif isinstance(raw_rules_obj, list):
+                        raw_rules = [
+                            cast(dict[str, Any], r)
+                            for r in cast(list[Any], raw_rules_obj)
+                            if isinstance(r, dict)
+                        ]
+                    else:
+                        raw_rules = []
                     for i, rd in enumerate(raw_rules):
                         rule = PolicyRule(
-                            id=rd.get("id", f"{f.stem}-{i}"),
-                            plugin=rd.get("plugin"),
-                            trust_level=rd.get("trust_level"),
-                            capability=rd.get("capability"),
-                            tool=rd.get("tool"),
-                            agent=rd.get("agent"),
-                            environment=rd.get("environment"),
-                            action=PolicyAction(rd.get("action", "deny")),
-                            reason=rd.get("reason", ""),
-                            priority=rd.get("priority", 0),
+                            id=_as_str(rd.get("id"), f"{f.stem}-{i}"),
+                            plugin=_as_optional_str(rd.get("plugin")),
+                            trust_level=_as_optional_str(rd.get("trust_level")),
+                            capability=_as_optional_str(rd.get("capability")),
+                            tool=_as_optional_str(rd.get("tool")),
+                            agent=_as_optional_str(rd.get("agent")),
+                            environment=_as_optional_str(rd.get("environment")),
+                            action=PolicyAction(_as_str(rd.get("action"), "deny")),
+                            reason=_as_str(rd.get("reason"), ""),
+                            priority=_as_int(rd.get("priority"), 0),
                         )
                         ruleset.rules.append(rule)
                     logger.debug(
                         "Loaded %d rules from %s",
-                        len(data.get("rules", [])),
+                        len(raw_rules),
                         f,
                     )
                 except Exception as exc:

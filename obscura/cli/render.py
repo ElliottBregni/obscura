@@ -1062,6 +1062,7 @@ def print_banner(
     available_agents: list[str] | None = None,
     agent_infos: list[Any] | None = None,
     health_checks: list[Any] | None = None,
+    browser_status: dict[str, Any] | None = None,
 ) -> None:
     """Print the REPL startup banner."""
     _obscura_ascii_banner()
@@ -1075,6 +1076,10 @@ def print_banner(
         info_parts.append(f"[{TOOL_COLOR}]{tool_count} tools[/]")
     if mcp_servers:
         info_parts.append(f"[{ACCENT}]MCP: {', '.join(mcp_servers)}[/]")
+    if browser_status:
+        b_name = browser_status.get("browser") or "browser"
+        b_tools = int(browser_status.get("tool_count") or 0)
+        info_parts.append(f"[{ACCENT}]browser: {b_name}, {b_tools} tools[/]")
     info_parts.append(f"mode: [bold]{mode}[/]")
     info_line = "  ".join(info_parts)
 

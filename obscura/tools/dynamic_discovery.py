@@ -104,7 +104,7 @@ class DynamicToolDiscovery:
         }
 
         keywords = category_keywords.get(category.lower(), [category.lower()])
-        filtered = []
+        filtered: list[ToolCapability] = []
 
         for cap in all_capabilities:
             name_lower = cap.name.lower()
@@ -120,7 +120,7 @@ class DynamicToolDiscovery:
         source: str,
     ) -> list[ToolCapability]:
         """Convert catalog entries to tool capabilities."""
-        capabilities = []
+        capabilities: list[ToolCapability] = []
         for entry in entries:
             # Extract npm package name if possible
             npm_package = None
@@ -205,15 +205,15 @@ class AutoInstallToolProvider:
             capabilities.extend(category_caps)
 
         # Deduplicate by slug
-        seen_slugs = set()
-        unique_caps = []
+        seen_slugs: set[str] = set()
+        unique_caps: list[ToolCapability] = []
         for cap in capabilities:
             if cap.slug not in seen_slugs:
                 unique_caps.append(cap)
                 seen_slugs.add(cap.slug)
 
         # Build MCP config
-        mcp_servers = {}
+        mcp_servers: dict[str, dict[str, Any]] = {}
         for cap in unique_caps:
             if cap.installation_command:
                 mcp_servers[cap.slug] = {

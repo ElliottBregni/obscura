@@ -24,6 +24,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _empty_metadata() -> dict[str, Any]:
+    return {}
+
+
 @dataclass(frozen=True)
 class WatchdogAction:
     """An action the watchdog recommends."""
@@ -31,7 +35,7 @@ class WatchdogAction:
     action: str  # "kill_task", "release_claim", "deprioritize", "alert"
     target_id: str
     reason: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
 class ArbiterWatchdog:
@@ -76,7 +80,9 @@ class ArbiterWatchdog:
             now = time.time()
             # Find all claimed pending tasks.
             # We check directly since list_claimed requires a worker_id.
-            from obscura.core.task_queue import _open
+            from obscura.core.task_queue import (
+                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+            )
 
             conn = _open()
             try:
@@ -116,7 +122,9 @@ class ArbiterWatchdog:
     def _check_spinning_tasks(self) -> list[WatchdogAction]:
         actions: list[WatchdogAction] = []
         try:
-            from obscura.core.task_queue import _open
+            from obscura.core.task_queue import (
+                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+            )
 
             conn = _open()
             try:
@@ -152,7 +160,9 @@ class ArbiterWatchdog:
     def _check_orphan_tasks(self) -> list[WatchdogAction]:
         actions: list[WatchdogAction] = []
         try:
-            from obscura.core.task_queue import _open
+            from obscura.core.task_queue import (
+                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+            )
             from obscura.kairos.goals import GoalBoard
 
             board = GoalBoard()
@@ -225,8 +235,13 @@ class ArbiterWatchdog:
         """
         actions: list[WatchdogAction] = []
         try:
-            from obscura.arbiter.checks import _stem, _STOP_WORDS
-            from obscura.core.task_queue import _open
+            from obscura.arbiter.checks import (  # noqa: PLC2701
+                _stem,  # pyright: ignore[reportPrivateUsage]
+                _STOP_WORDS,  # pyright: ignore[reportPrivateUsage]
+            )
+            from obscura.core.task_queue import (
+                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+            )
             import re
 
             def _kw(text: str) -> set[str]:
@@ -246,10 +261,11 @@ class ArbiterWatchdog:
                 conn.close()
 
             # Group by goal_id
-            by_goal: dict[str, list[dict]] = {}
+            by_goal: dict[str, list[dict[str, Any]]] = {}
             for row in rows:
-                g = row["goal_id"]
-                by_goal.setdefault(g, []).append(dict(row))
+                g = str(row["goal_id"])
+                row_dict: dict[str, Any] = dict(row)
+                by_goal.setdefault(g, []).append(row_dict)
 
             killed: set[str] = set()
             for goal_id, tasks in by_goal.items():
@@ -258,13 +274,13 @@ class ArbiterWatchdog:
                 for i, t1 in enumerate(tasks):
                     if t1["task_id"] in killed:
                         continue
-                    kw1 = _kw(t1["subject"])
+                    kw1 = _kw(str(t1["subject"]))
                     if not kw1:
                         continue
                     for t2 in tasks[i + 1:]:
                         if t2["task_id"] in killed:
                             continue
-                        kw2 = _kw(t2["subject"])
+                        kw2 = _kw(str(t2["subject"]))
                         if not kw2:
                             continue
                         overlap = kw1 & kw2
@@ -272,15 +288,16 @@ class ArbiterWatchdog:
                         if ratio >= 0.6:  # noqa: PLR2004
                             # Kill the lower-priority task (higher priority int)
                             victim = t2 if t2["priority"] >= t1["priority"] else t1
-                            killed.add(victim["task_id"])
+                            victim_id = str(victim["task_id"])
+                            killed.add(victim_id)
                             actions.append(
                                 WatchdogAction(
                                     action="kill_task",
-                                    target_id=victim["task_id"],
+                                    target_id=victim_id,
                                     reason=(
                                         f"Duplicate work: {ratio:.0%} keyword overlap "
                                         f"with task in same goal '{goal_id}' "
-                                        f"— '{victim['subject'][:60]}'"
+                                        f"— '{str(victim['subject'])[:60]}'"
                                     ),
                                     metadata={"goal_id": goal_id, "overlap_ratio": ratio},
                                 )
@@ -302,7 +319,9 @@ class ArbiterWatchdog:
         """
         actions: list[WatchdogAction] = []
         try:
-            from obscura.core.task_queue import _open
+            from obscura.core.task_queue import (
+                _open,  # pyright: ignore[reportPrivateUsage]  # noqa: PLC2701
+            )
 
             conn = _open()
             try:

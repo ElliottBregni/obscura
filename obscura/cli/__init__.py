@@ -27,6 +27,10 @@ from typing import Any, cast
 
 import click
 
+from obscura.core.client import ObscuraClient
+from obscura.core.types import AgentEventKind, Backend, SessionRef, ToolChoice
+from obscura.core.event_store import SessionStatus
+
 _log = logging.getLogger("obscura.cli")
 
 
@@ -310,9 +314,10 @@ async def send_message(
 
     renderer = create_renderer(streaming_status=streaming_status)
     # Feed session context into the modern renderer's status bar
-    if hasattr(renderer, "set_session_context"):
+    _set_session_context = getattr(renderer, "set_session_context", None)
+    if callable(_set_session_context):
         _ps = getattr(ctx, "_prompt_status", None)
-        renderer.set_session_context(
+        _set_session_context(
             title=getattr(_ps, "session_title", "") or "",
             model=ctx.model or "",
             ctx_pct=getattr(_ps, "ctx_pct", 0),
@@ -537,13 +542,16 @@ async def send_message(
                     meta = getattr(event, "metadata", None)
                     if meta is not None:
                         # StreamMetadata stores usage in .usage dict, not direct attributes.
-                        _usage = getattr(meta, "usage", None) or {}
-                        if isinstance(_usage, dict):
-                            inp = _usage.get("input_tokens", 0) or 0
-                            out = _usage.get("output_tokens", 0) or 0
+                        _usage_raw: Any = getattr(meta, "usage", None) or {}
+                        inp: int = 0
+                        out: int = 0
+                        if isinstance(_usage_raw, dict):
+                            _usage_dict = cast(dict[str, Any], _usage_raw)
+                            inp = int(_usage_dict.get("input_tokens", 0) or 0)
+                            out = int(_usage_dict.get("output_tokens", 0) or 0)
                         else:
-                            inp = getattr(_usage, "input_tokens", 0) or 0
-                            out = getattr(_usage, "output_tokens", 0) or 0
+                            inp = int(getattr(_usage_raw, "input_tokens", 0) or 0)
+                            out = int(getattr(_usage_raw, "output_tokens", 0) or 0)
                         if inp > 0 or out > 0:
                             try:
                                 from obscura.core.cost_tracker import get_cost_tracker
@@ -684,12 +692,13 @@ async def send_message(
         try:
             from obscura.core.session_utils import generate_session_title
 
-            title = await generate_session_title(text, ctx.client._backend)
+            title = await generate_session_title(text, ctx.client._backend)  # pyright: ignore[reportPrivateUsage]
             if title:
                 await ctx.store.update_session(ctx.session_id, summary=title)
                 # Update the prompt status so the title appears in the banner/toolbar
-                if hasattr(ctx, "_prompt_status") and ctx._prompt_status is not None:
-                    ctx._prompt_status.session_title = title
+                _prompt_status = getattr(ctx, "_prompt_status", None)
+                if _prompt_status is not None:
+                    _prompt_status.session_title = title
                 # Show a subtle notification
                 console.print(
                     f"  [dim]session titled:[/] [bold bright_cyan]{title}[/]",
@@ -761,6 +770,7 @@ async def _start_imessage_daemon(
             continue
 
         from obscura.agent.daemon_agent import IMessageTrigger as _IMT
+        from obscura.agent.interaction import AttentionPriority as _AttentionPriority
 
         triggers: list[Any] = []
         for tdef in im_triggers:
@@ -770,12 +780,18 @@ async def _start_imessage_daemon(
                 for k, v in im_cfg.items()
                 if k not in {"contacts", "poll_interval"}
             }
+            _priority_val = tdef.priority
+            _priority = (
+                _priority_val
+                if isinstance(_priority_val, _AttentionPriority)
+                else _AttentionPriority.NORMAL
+            )
             triggers.append(
                 _IMT(
                     contacts=tuple(im_cfg.get("contacts", [])),
                     poll_interval=im_cfg.get("poll_interval", 30),
                     notify_user=tdef.notify_user,
-                    priority=tdef.priority,
+                    priority=_priority,
                     data=im_data,
                 ),
             )
@@ -826,13 +842,13 @@ async def _start_imessage_daemon(
             _log.debug("Failed to load persisted schedules: %s", _sched_exc)
 
         daemon = DaemonAgent(daemon_client, name=agent_def.name, triggers=triggers)
-        daemon._bus = bus
+        daemon._bus = bus  # pyright: ignore[reportPrivateUsage]
         task: asyncio.Task[None] = asyncio.create_task(
-            daemon.loop_forever(),  # type: ignore[arg-type]
+            daemon.loop_forever(),
             name=f"daemon-{agent_def.name}",
         )
 
-        def _on_task_done(t: asyncio.Task[None]) -> None:  # type: ignore[type-arg]
+        def _on_task_done(t: asyncio.Task[None]) -> None:
             exc = t.exception() if not t.cancelled() else None
             if exc:
                 _console.print(f"[red]Daemon task crashed: {exc}[/]")
@@ -843,7 +859,7 @@ async def _start_imessage_daemon(
 
         task.add_done_callback(_on_task_done)
         # Stash client on the task so we can close it later
-        task._daemon_client = daemon_client
+        task._daemon_client = daemon_client  # type: ignore[attr-defined]
         return task
 
     return None
@@ -921,9 +937,18 @@ async def _repl(
         mcp_configs, mcp_names = _discover_mcp()
 
     # Create authenticated user for vector memory + memory tools
+    import os
+
     from obscura.auth.models import AuthenticatedUser
 
-    cli_user = AuthenticatedUser.local_cli()
+    cli_user = AuthenticatedUser(
+        user_id=os.environ.get("USER", "local"),
+        email="cli@obscura.local",
+        roles=("operator",),
+        org_id="local",
+        token_type="user",
+        raw_token="",
+    )
 
     # Initialize vector memory store
     vector_store = init_vector_store(cli_user)
@@ -1424,8 +1449,9 @@ async def _repl(
                 from obscura.core.tool_score_index import ToolScoreIndex
                 from obscura.plugins.loader import (
                     PluginLoader,
-                    _load_plugin_config_flag,
+                    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
                 )
+                from obscura.plugins.models import PluginSpec
                 from obscura.plugins.registries.capability_index import CapabilityIndex
 
                 _routing_config = ToolRoutingConfig()
@@ -1434,7 +1460,7 @@ async def _repl(
                 # Build capability index from loaded plugins
                 _cap_index = CapabilityIndex()
                 _pl = PluginLoader()
-                _all_pspecs = []
+                _all_pspecs: list[PluginSpec] = []
                 if _load_plugin_config_flag("load_builtins"):
                     _all_pspecs.extend(_pl.discover_builtins())
                 _all_pspecs.extend(_pl.discover_local())
@@ -1449,7 +1475,11 @@ async def _repl(
                     capability_index=_cap_index,
                     backend=backend,
                 )
-                client._backend.set_tool_router(_router)
+                from obscura.core.types import ToolRouterCapable
+
+                _backend_ref = client._backend  # pyright: ignore[reportPrivateUsage]
+                if isinstance(_backend_ref, ToolRouterCapable):
+                    _backend_ref.set_tool_router(_router)
                 # Let the TOOL_CALL hook feed file_context to this router
                 _tool_router_ref = _router
             except Exception:
@@ -1474,20 +1504,6 @@ async def _repl(
         loop_kwargs: dict[str, Any] = {}
         if not tools_enabled:
             loop_kwargs["tool_choice"] = ToolChoice.none()
-
-        # Wire effort level → thinking budget if set on context.
-        def _inject_effort(kwargs: dict[str, Any], ctx_ref: Any) -> dict[str, Any]:
-            """Inject max_thinking_tokens from effort level into loop kwargs."""
-            effort_val = getattr(ctx_ref, "effort_level", None)
-            if effort_val:
-                try:
-                    from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
-
-                    level = EffortLevel(effort_val)
-                    kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[level]
-                except (ValueError, KeyError):
-                    pass
-            return kwargs
 
         # Build REPL context
         ctx = REPLContext(
@@ -1562,13 +1578,23 @@ async def _repl(
         supervisor: Any = None
         if supervise and agent_infos:
             try:
+                import os as _os
+
                 from obscura.agent.supervisor import AgentSupervisor
                 from obscura.auth.models import AuthenticatedUser
 
+                sup_user = AuthenticatedUser(
+                    user_id=_os.environ.get("USER", "local"),
+                    email="cli@obscura.local",
+                    roles=("operator",),
+                    org_id="local",
+                    token_type="user",
+                    raw_token="",
+                )
                 agents_yaml = resolve_obscura_home() / "agents.yaml"
                 supervisor = AgentSupervisor(
                     config_path=agents_yaml,
-                    user=AuthenticatedUser.local_cli(),
+                    user=sup_user,
                 )
                 supervisor_task = asyncio.create_task(
                     supervisor.run_forever(),
@@ -1818,7 +1844,7 @@ async def _repl(
 
             _uds_inbox = UDSInbox(sid)
 
-            def _on_peer_message(msg: dict) -> None:
+            def _on_peer_message(msg: dict[str, Any]) -> None:
                 sender = msg.get("from", "?")
                 text = msg.get("text", "")
                 console.print(f"\n[bold cyan]Message from {sender}:[/] {text}")
@@ -1842,7 +1868,7 @@ async def _repl(
                         if now - daemon_last_restart_at >= 5.0:
                             daemon_last_restart_at = now
                             daemon_restart_count += 1
-                            exc: Exception | None = None
+                            exc: BaseException | None = None
                             if not daemon_task.cancelled():
                                 try:
                                     exc = daemon_task.exception()
@@ -2252,10 +2278,10 @@ async def _repl(
                             avg_judge_score=None,
                             avg_composite_score=_pass_ct / max(len(criteria), 1),
                         )
-                        store = EvalResultStore()
+                        eval_store = EvalResultStore()
                         import asyncio as _aio
 
-                        _aio.create_task(store.save_run(summary))
+                        _aio.create_task(eval_store.save_run(summary))
                     except Exception:
                         pass  # eval store not available — non-fatal
 
@@ -2853,27 +2879,22 @@ main.add_command(_kairos_group)
 
 
 # Backwards-compat aliases added by test harness
-def _emit_context_warnings(*args, **kwargs):
+def _emit_context_warnings(*args: Any, **kwargs: Any) -> Any:  # pyright: ignore[reportUnusedFunction]
     from .warnings import emit_context_warnings as _impl
 
     return _impl(*args, **kwargs)
 
 
-def _copilot_budget_pct(tokens: int, context_window: int):
+def _copilot_budget_pct(tokens: int, context_window: int) -> Any:  # pyright: ignore[reportUnusedFunction]
     from .warnings import get_copilot_budget_pct as _impl
 
     return _impl(tokens, context_window)
 
 
-def _parse_confirm_decision(answer: str) -> str | None:
+def _parse_confirm_decision(answer: str) -> str | None:  # pyright: ignore[reportUnusedFunction]
     a = (answer or "").lower()
     if "approve" in a or a.strip().startswith("yes") or "accept" in a:
         return "approve"
     if "deny" in a or a.strip().startswith("no") or "do not" in a or "dont" in a:
         return "deny"
     return None
-
-
-def _track_task_surface_event(ctx, ev) -> None:
-    """Compatibility stub: track a task-surface event (no-op)."""
-    return

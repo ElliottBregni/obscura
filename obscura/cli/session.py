@@ -82,13 +82,13 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
                 before = ""
-            ctx.pending_file_reads[ev.tool_use_id] = (path, before)  # pyright: ignore[reportPrivateUsage]
+            ctx.pending_file_reads[ev.tool_use_id] = (path, before)
 
     elif (
         ev.kind == AgentEventKind.TOOL_RESULT
-        and ev.tool_use_id in ctx.pending_file_reads  # pyright: ignore[reportPrivateUsage]
+        and ev.tool_use_id in ctx.pending_file_reads
     ):
-        path, before = ctx.pending_file_reads.pop(ev.tool_use_id)  # pyright: ignore[reportPrivateUsage]
+        path, before = ctx.pending_file_reads.pop(ev.tool_use_id)
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
@@ -120,7 +120,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
 
 def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     """If in PLAN mode, attempt to parse a structured plan from the response."""
-    mm = ctx.mode_manager  # pyright: ignore[reportPrivateUsage]
+    mm = ctx.mode_manager
     if mm is None:
         return
 
@@ -377,7 +377,7 @@ class ObscuraSession:
                     text,
                     inline_agent_response,
                     turn_number=turn_num,
-                    classifier=ctx.turn_classifier,  # pyright: ignore[reportPrivateUsage]
+                    classifier=ctx.turn_classifier,
                 )
             return inline_agent_response
 
@@ -442,8 +442,8 @@ class ObscuraSession:
             augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
         if ctx.vector_store is not None:
-            if ctx.context_router is not None:  # pyright: ignore[reportPrivateUsage]
-                vm_context = search_with_router(ctx.context_router, text)  # pyright: ignore[reportPrivateUsage]
+            if ctx.context_router is not None:
+                vm_context = search_with_router(ctx.context_router, text)
             else:
                 vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
             if vm_context:
@@ -497,11 +497,11 @@ class ObscuraSession:
             nonlocal _stream_output_chars
             _buf: list[str] = []
             _effective_kwargs = dict(effective_kwargs)
-            if hasattr(ctx, "effort_level") and ctx.effort_level:  # pyright: ignore[reportPrivateUsage]
+            if hasattr(ctx, "effort_level") and ctx.effort_level:
                 try:
                     from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
-                    _lvl = EffortLevel(ctx.effort_level)  # pyright: ignore[reportPrivateUsage]
+                    _lvl = EffortLevel(ctx.effort_level)
                     _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[
                         _lvl
                     ]
@@ -572,8 +572,8 @@ class ObscuraSession:
                             from obscura.cli.tool_collapse import ToolCollapser
 
                             if not hasattr(ctx, "collapser"):
-                                ctx.collapser = ToolCollapser()  # pyright: ignore[reportPrivateUsage]
-                            ctx.collapser.record(tool_name, tool_input)  # pyright: ignore[reportPrivateUsage]
+                                ctx.collapser = ToolCollapser()
+                            ctx.collapser.record(tool_name, tool_input)
                         except Exception:
                             pass
                         # Tips
@@ -608,7 +608,9 @@ class ObscuraSession:
                             if isinstance(_usage, dict):
                                 _usage_dict = cast(dict[str, Any], _usage)
                                 inp: int = int(_usage_dict.get("input_tokens", 0) or 0)
-                                out: int = int(_usage_dict.get("output_tokens", 0) or 0)
+                                out: int = int(
+                                    _usage_dict.get("output_tokens", 0) or 0
+                                )
                             else:
                                 inp = int(getattr(_usage, "input_tokens", 0) or 0)
                                 out = int(getattr(_usage, "output_tokens", 0) or 0)
@@ -709,7 +711,7 @@ class ObscuraSession:
                 text,
                 response_text,
                 turn_number=turn_num,
-                classifier=ctx.turn_classifier,  # pyright: ignore[reportPrivateUsage]
+                classifier=ctx.turn_classifier,
             )
 
         # Post-send: update token tracker
@@ -1040,9 +1042,18 @@ class ObscuraSession:
 
     def _init_vector_memory(self) -> None:
         """Initialize vector store and memory channels."""
+        import os
+
         from obscura.auth.models import AuthenticatedUser
 
-        cli_user = AuthenticatedUser.local_cli()
+        cli_user = AuthenticatedUser(
+            user_id=os.environ.get("USER", "local"),
+            email="cli@obscura.local",
+            roles=("operator",),
+            org_id="local",
+            token_type="user",
+            raw_token="",
+        )
         self._cli_user = cli_user
 
         self._vector_store = init_vector_store(cli_user)
@@ -1383,7 +1394,7 @@ class ObscuraSession:
                 from obscura.tools.system import Session as _Session_for_plan
 
                 def _set_permission_mode(mode: str) -> None:
-                    self._ctx.permission_mode = mode  # pyright: ignore[reportPrivateUsage]
+                    self._ctx.permission_mode = mode
 
                 _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
 

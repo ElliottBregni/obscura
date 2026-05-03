@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 
 class ArbiterVerdict(StrEnum):
@@ -89,24 +89,28 @@ class ArbiterConfig:
         settings_path = Path(path) if path else Path.home() / ".obscura" / "settings.json"
         if settings_path.is_file():
             try:
-                raw = json.loads(settings_path.read_text(encoding="utf-8"))
-                settings = raw.get("arbiter", {}) if isinstance(raw, dict) else {}
+                raw: Any = json.loads(settings_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    raw_dict = cast(dict[str, Any], raw)
+                    arbiter_section = raw_dict.get("arbiter", {})
+                    if isinstance(arbiter_section, dict):
+                        settings = cast(dict[str, Any], arbiter_section)
             except (json.JSONDecodeError, OSError):
                 pass
 
-        def _get(key: str, default: Any, cast: type) -> Any:
+        def _get(key: str, default: Any, caster: type) -> Any:
             # Settings file takes priority, then env, then default
             if key in settings:
-                val = settings[key]
-                if cast is bool and isinstance(val, str):
+                val: Any = settings[key]
+                if caster is bool and isinstance(val, str):
                     return val.lower() in ("true", "1", "yes")
-                return cast(val)
+                return caster(val)
             env_key = f"OBSCURA_ARBITER_{key.upper()}"
             env_val = os.environ.get(env_key)
             if env_val is not None:
-                if cast is bool:
+                if caster is bool:
                     return env_val.lower() in ("true", "1", "yes")
-                return cast(env_val)
+                return caster(env_val)
             return default
 
         return cls(

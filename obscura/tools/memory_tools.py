@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.core.types import ToolSpec
 from obscura.memory import MemoryStore
-from obscura.vector_memory import VectorMemoryStore
+from obscura.vector_memory import VectorMemoryEntry, VectorMemoryStore
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -92,7 +92,7 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
                 "action": "store",
                 "namespace": namespace,
                 "key": key,
-                "value_keys": list(value.keys()) if isinstance(value, dict) else None,
+                "value_keys": list(value.keys()),
             },
         )
 
@@ -130,25 +130,26 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
         # When no namespace is specified, search the project namespace first
         # for relevance, then fall back to searching all namespaces.
         search_ns = namespace if namespace is not None else None
+        results: list[VectorMemoryEntry]
         if search_ns is None:
             proj_ns = _project_namespace()
             proj_results = store.search_similar(query, namespace=proj_ns, top_k=top_k)
             global_results = store.search_similar(query, namespace=None, top_k=top_k)
             # Merge: project results first (higher priority), deduplicate by key.
             seen_keys: set[str] = set()
-            results = []
+            merged: list[VectorMemoryEntry] = []
             for r in proj_results + global_results:
-                rk = str(getattr(r, "key", r))
+                rk = str(r.key)
                 if rk not in seen_keys:
                     seen_keys.add(rk)
-                    results.append(r)
-            results = results[:top_k]
+                    merged.append(r)
+            results = merged[:top_k]
         else:
             results = store.search_similar(query, namespace=search_ns, top_k=top_k)
-        items = [
+        items: list[dict[str, Any]] = [
             {
                 "key": str(r.key),
-                "namespace": r.key.namespace if hasattr(r.key, "namespace") else "",
+                "namespace": r.key.namespace,
                 "score": round(r.score, 3),
                 "final_score": round(r.final_score, 3),
                 "text": r.text,

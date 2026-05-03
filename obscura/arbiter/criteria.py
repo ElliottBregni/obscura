@@ -24,13 +24,16 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, Sequence
 
 if TYPE_CHECKING:
     from obscura.arbiter.test_runner import TestOutcome
 
 # Import shared stop-words and stemmer from checks — same pipeline, no duplication.
-from obscura.arbiter.checks import _STOP_WORDS, _stem  # noqa: PLC2701
+from obscura.arbiter.checks import (  # noqa: PLC2701
+    _STOP_WORDS,  # pyright: ignore[reportPrivateUsage]
+    _stem,  # pyright: ignore[reportPrivateUsage]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +93,8 @@ def _verify_tests_pass(
     *,
     test_outcome: "TestOutcome | None" = None,
     output_text: str = "",
+    files_changed: Sequence[str] = (),  # noqa: ARG001 (uniform verifier signature)
+    error_count: int = 0,  # noqa: ARG001 (uniform verifier signature)
 ) -> CriterionResult | None:
     """Return a result if the criterion is about test passing, else None."""
     if not _TESTS_PASS_PATTERNS.search(criterion):
@@ -160,6 +165,8 @@ def _verify_lint_clean(
     *,
     output_text: str = "",
     files_changed: Sequence[str] = (),
+    test_outcome: "TestOutcome | None" = None,  # noqa: ARG001 (uniform verifier signature)
+    error_count: int = 0,  # noqa: ARG001 (uniform verifier signature)
 ) -> CriterionResult | None:
     """Return a result if the criterion is about lint/ruff passing, else None."""
     if not _LINT_CLEAN_PATTERNS.search(criterion):
@@ -226,6 +233,8 @@ def _verify_file_exists(
     *,
     files_changed: Sequence[str] = (),
     output_text: str = "",
+    test_outcome: "TestOutcome | None" = None,  # noqa: ARG001 (uniform verifier signature)
+    error_count: int = 0,  # noqa: ARG001 (uniform verifier signature)
 ) -> CriterionResult | None:
     """Return a result if the criterion mentions a specific file must exist."""
     match = _FILE_EXISTS_PATTERNS.search(criterion)
@@ -278,6 +287,8 @@ def _verify_no_errors(
     *,
     output_text: str = "",
     error_count: int = 0,
+    files_changed: Sequence[str] = (),  # noqa: ARG001 (uniform verifier signature)
+    test_outcome: "TestOutcome | None" = None,  # noqa: ARG001 (uniform verifier signature)
 ) -> CriterionResult | None:
     """Return a result if the criterion requires absence of errors."""
     if not _NO_ERRORS_PATTERNS.search(criterion):
@@ -360,7 +371,22 @@ def _verify_keyword_overlap(
 # Public API
 # ---------------------------------------------------------------------------
 
-_VERIFIERS = [
+
+class _Verifier(Protocol):
+    """Uniform signature shared by every structured verifier."""
+
+    def __call__(
+        self,
+        criterion: str,
+        *,
+        output_text: str = ...,
+        files_changed: Sequence[str] = ...,
+        test_outcome: "TestOutcome | None" = ...,
+        error_count: int = ...,
+    ) -> CriterionResult | None: ...
+
+
+_VERIFIERS: list[_Verifier] = [
     _verify_tests_pass,
     _verify_lint_clean,
     _verify_file_exists,
@@ -396,7 +422,7 @@ def verify_criterion(
 
             sig = inspect.signature(verifier)
             params = set(sig.parameters)
-            kwargs: dict = {}
+            kwargs: dict[str, Any] = {}
             if "output_text" in params:
                 kwargs["output_text"] = output_text
             if "files_changed" in params:

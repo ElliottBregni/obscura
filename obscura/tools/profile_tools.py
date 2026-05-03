@@ -51,10 +51,11 @@ def _profile() -> Any:
 def _profile_store() -> Any:
     """Get the vector-backed ProfileStore (lazy, may fail if no user context)."""
     try:
-        from obscura.auth.models import AuthenticatedUser
+        from obscura.auth.context import current_user
         from obscura.profile.store import ProfileStore
 
-        return ProfileStore.for_user(AuthenticatedUser.from_tool_context())
+        user = current_user()
+        return ProfileStore.for_user(user)
     except Exception:
         return None
 
