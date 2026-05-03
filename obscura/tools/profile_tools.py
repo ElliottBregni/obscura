@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.auth.cli_user import local_cli_user
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -49,13 +50,11 @@ def _profile() -> Any:
 
 
 def _profile_store() -> Any:
-    """Get the vector-backed ProfileStore (lazy, may fail if no user context)."""
-    try:
-        from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
-        from obscura.profile.store import ProfileStore
+    """Get the vector-backed ProfileStore."""
+    from obscura.profile.store import ProfileStore
 
-        user: Any = current_user()  # pyright: ignore[reportUnknownVariableType]
-        return ProfileStore.for_user(user)  # pyright: ignore[reportUnknownArgumentType]
+    try:
+        return ProfileStore.for_user(local_cli_user())
     except Exception:
         return None
 

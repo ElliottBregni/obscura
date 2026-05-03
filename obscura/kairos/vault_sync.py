@@ -42,6 +42,8 @@ from typing import Any, cast
 
 import yaml
 
+from obscura.auth.cli_user import local_cli_user
+
 logger = logging.getLogger(__name__)
 
 
@@ -462,11 +464,9 @@ class VaultSync:
     def _ingest_profile(self, meta: FileMeta) -> None:
         """Update user profile from a vault file."""
         try:
-            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.profile.store import ProfileStore
 
-            user = cast(Any, current_user())
-            store: Any = ProfileStore.for_user(user)
+            store: Any = ProfileStore.for_user(local_cli_user())
             # Parse simple key: value pairs from the body.
             for line in meta.body.splitlines():
                 line = line.strip()
@@ -486,10 +486,9 @@ class VaultSync:
     def _ingest_to_vector(self, meta: FileMeta, memory_type: str) -> None:
         """Ingest a note/reference file into vector memory."""
         try:
-            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.vector_memory.vector_memory import VectorMemoryStore
 
-            store = VectorMemoryStore.for_user(cast(Any, current_user()))
+            store = VectorMemoryStore.for_user(local_cli_user())
             key = f"vault:{meta.owner}:{meta.path.stem}"
             store.set(
                 key=key,
@@ -743,12 +742,10 @@ class VaultSync:
     def _export_profile_summary(self) -> int:
         """Export a profile summary to vault/agent/profile-summary.md."""
         try:
-            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            user = cast(Any, current_user())
-            store = ProfileStore.for_user(user)
+            store = ProfileStore.for_user(local_cli_user())
             builder = ProfileBuilder()
             summary = builder.build_summary(store, max_tokens=600)
 

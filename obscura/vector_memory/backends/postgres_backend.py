@@ -14,10 +14,15 @@ import json
 import logging
 import threading
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.pg_config import PGPoolManager
 from obscura.vector_memory.backends.base import BackendConfig, VectorEntry
+from obscura.vector_memory.vector_memory_filters import match_metadata_filters
+
+if TYPE_CHECKING:
+    from obscura.memory import MemoryKey
+    from obscura.vector_memory.vector_memory_filters import MetadataFilter
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +106,7 @@ class PostgreSQLVectorBackend:
 
     def store_vector(
         self,
-        key: Any,
+        key: MemoryKey,
         text: str,
         embedding: list[float],
         metadata: dict[str, Any],
@@ -141,7 +146,7 @@ class PostgreSQLVectorBackend:
         finally:
             self._put_conn(conn)
 
-    def get_vector(self, key: Any) -> VectorEntry | None:
+    def get_vector(self, key: MemoryKey) -> VectorEntry | None:
         """Get a single vector by key."""
         conn = self._get_conn()
         try:

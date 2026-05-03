@@ -9332,20 +9332,12 @@ def _resolve_phantom_identity() -> tuple[str, str, str, str]:
 
     # Vector-backed profile.
     try:
-        import importlib
-
+        from obscura.auth.cli_user import local_cli_user
         from obscura.profile.builder import ProfileBuilder
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        # NOTE: `obscura.auth.context` may not exist on all branches; fail
-        # silently into the `except Exception` below. See spawned task.
-        _auth_context = importlib.import_module("obscura.auth.context")
-        _current_user_fn: Any = getattr(_auth_context, "current_user", None)
-        if _current_user_fn is None:
-            raise ImportError("current_user not available")
-        user: Any = _current_user_fn()
-        store = ProfileStore.for_user(user)
+        store = ProfileStore.for_user(local_cli_user())
         builder = ProfileBuilder()
         summary = builder.build_summary(store, max_tokens=600)
         if summary:

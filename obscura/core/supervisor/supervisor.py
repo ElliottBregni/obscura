@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from obscura.auth.cli_user import local_cli_user
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
     SQLiteSupervisorBackend,
@@ -238,17 +239,7 @@ class Supervisor:
             )
 
             # Best-effort user resolution for profile injection.
-            _user: Any = None
-            try:
-                # obscura.auth.context.current_user is provided when running in
-                # an authenticated runtime; absent in standalone tooling.
-                auth_ctx: Any = __import__(
-                    "obscura.auth.context", fromlist=["current_user"]
-                )
-                _user = auth_ctx.current_user()
-            except Exception:
-                pass
-            register_profile_goal_hooks(hooks, user=_user)
+            register_profile_goal_hooks(hooks, user=local_cli_user())
         except Exception as exc:
             logger.debug("Could not register profile/goal hooks: %s", exc)
 

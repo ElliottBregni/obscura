@@ -15,6 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.auth.cli_user import local_cli_user
 from obscura.kairos.daily_log import DailyLog
 from obscura.kairos.proactive import ProactiveMode
 from obscura.kairos.state import KairosState
@@ -390,12 +391,10 @@ class KairosEngine:
         # Inject user profile summary (prefer vector-backed, fall back to markdown).
         profile_injected = False
         try:
-            from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
             from obscura.profile.builder import ProfileBuilder
             from obscura.profile.store import ProfileStore
 
-            user = cast(Any, current_user())
-            profile_store = ProfileStore.for_user(user)
+            profile_store = ProfileStore.for_user(local_cli_user())
             builder = ProfileBuilder()
             profile_summary = builder.build_summary(profile_store, max_tokens=400)
             if profile_summary:
