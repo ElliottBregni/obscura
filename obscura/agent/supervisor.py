@@ -137,7 +137,7 @@ class SupervisorConfig:
         for m in manifests:
             triggers: list[TriggerDefinition] = []
             for raw_t in m.triggers:
-                if isinstance(raw_t, dict):
+                if isinstance(raw_t, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
                     filtered_t = {
                         k: v for k, v in raw_t.items() if k in _trigger_fields
                     }

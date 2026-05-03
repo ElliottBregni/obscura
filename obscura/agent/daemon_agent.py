@@ -87,12 +87,12 @@ def _get_phantom_message_preamble() -> str:
     name = "the user"
     style_hint = ""
     try:
-        from obscura.auth.context import current_user
+        from obscura.auth.context import current_user  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
         from obscura.profile.models import ProfileCategory
         from obscura.profile.store import ProfileStore
 
-        user = current_user()
-        store = ProfileStore.for_user(user)
+        user: Any = current_user()  # pyright: ignore[reportUnknownVariableType]
+        store = ProfileStore.for_user(user)  # pyright: ignore[reportUnknownArgumentType]
 
         identity = store.get_facts_by_category(ProfileCategory.IDENTITY)
         for f in identity:
@@ -401,7 +401,7 @@ class DaemonAgent:
                         )
                     # Back off before restarting to avoid tight spin loops.
                     _sched_restart_count = getattr(self, "_sched_restart_count", 0) + 1
-                    self._sched_restart_count = _sched_restart_count  # type: ignore[attr-defined]
+                    self._sched_restart_count = _sched_restart_count
                     _backoff = min(2.0 ** min(_sched_restart_count, 6), 60.0)
                     logger.info(
                         "[%s] scheduler restart backoff: %.1fs",

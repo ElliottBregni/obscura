@@ -61,7 +61,7 @@ class SupervisedRuntimeConfig:
 
     # Whether to enable coordinator/swarm mode on the coordinator agent
     can_delegate: bool = True
-    delegate_allowlist: list[str] = field(default_factory=list)
+    delegate_allowlist: list[str] = field(default_factory=list[str])
 
     # Memory namespace for the coordinator
     memory_namespace: str = "supervised"

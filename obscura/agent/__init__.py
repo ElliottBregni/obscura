@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from obscura.agent.agent import BaseAgent
 from obscura.agent.agents import (
     Agent,
@@ -34,7 +36,7 @@ from obscura.core.agent_loop import AgentLoop
 # Agent type registry — maps spec ``agent_type`` values to concrete classes
 # ---------------------------------------------------------------------------
 
-AGENT_TYPE_REGISTRY: dict[str, type[BaseAgent]] = {
+AGENT_TYPE_REGISTRY: dict[str, type[Any]] = {
     "loop": LoopAgent,
     "daemon": DaemonAgent,
     "aper": APERLoopAgent,

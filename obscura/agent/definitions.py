@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.frontmatter import parse_frontmatter_file
 
@@ -26,7 +26,8 @@ _BUILTIN_DIR = Path(__file__).parent / "builtin"
 def _str_list(val: Any) -> list[str]:
     """Coerce a value to a list of strings."""
     if isinstance(val, list):
-        return [str(v) for v in val]
+        seq = cast(list[Any], val)
+        return [str(v) for v in seq]
     if isinstance(val, str):
         return [s.strip() for s in val.split(",") if s.strip()]
     return []
