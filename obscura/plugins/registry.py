@@ -29,7 +29,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from obscura.core.paths import resolve_obscura_home
 from obscura.plugins.models import PluginSpec, PluginStatus
@@ -60,16 +60,16 @@ class PluginEntry:
     error: str | None = None
     installed_at: str = ""
     updated_at: str = ""
-    contributed_capabilities: list[str] = field(default_factory=list)
-    contributed_tools: list[str] = field(default_factory=list)
-    contributed_workflows: list[str] = field(default_factory=list)
+    contributed_capabilities: list[str] = field(default_factory=list[str])
+    contributed_tools: list[str] = field(default_factory=list[str])
+    contributed_workflows: list[str] = field(default_factory=list[str])
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PluginEntry:
-        known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        known = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known}
         return cls(**filtered)
 
@@ -117,8 +117,10 @@ class PluginRegistryService:
     def _read(self) -> list[dict[str, Any]]:
         try:
             raw = self._registry_file.read_text()
-            data = json.loads(raw) if raw.strip() else []
-            return data if isinstance(data, list) else []
+            data: Any = json.loads(raw) if raw.strip() else []
+            if isinstance(data, list):
+                return cast(list[dict[str, Any]], data)
+            return []
         except Exception:
             return []
 

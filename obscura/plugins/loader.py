@@ -25,7 +25,7 @@ import contextlib
 import importlib
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_global_home
 from obscura.plugins.manifest import ManifestError, parse_manifest_file
@@ -57,9 +57,11 @@ def _load_plugin_config_flag(key: str, default: bool = True) -> bool:
         from obscura.core.workspace import load_workspace_config
 
         config = load_workspace_config()
-        section = config.get("plugins", {})
+        section: Any = config.get("plugins", {})
         for part in key.split("."):
-            section = section.get(part, {})  # type: ignore[union-attr]
+            if not isinstance(section, dict):
+                return default
+            section = cast(dict[str, Any], section).get(part, {})
         return section if isinstance(section, bool) else default
     except Exception:
         return default
@@ -75,10 +77,11 @@ def _load_plugin_config_list(key: str) -> frozenset[str]:
         from obscura.core.workspace import load_workspace_config
 
         config = load_workspace_config()
-        section = config.get("plugins", {})
+        section: dict[str, Any] = config.get("plugins", {})
         val = section.get(key)
         if isinstance(val, list):
-            return frozenset(str(v) for v in val)
+            items = cast(list[Any], val)
+            return frozenset(str(v) for v in items)
         return frozenset()
     except Exception:
         return frozenset()
@@ -212,7 +215,7 @@ def _resolve_handler_from_plugin_module(
         if tools_list_attr:
             spec_map = getattr(mod, tools_list_attr, None)
             if isinstance(spec_map, dict) and tool_name in spec_map:
-                return spec_map[tool_name]
+                return cast(dict[str, Any], spec_map)[tool_name]
         return None
     except Exception as exc:
         logger.debug(
@@ -659,11 +662,14 @@ class PluginLoader:
                 if not broker._specs.get(tool.name):
                     if tool.parameters:
                         broker._schemas[tool.name] = tool.parameters
+                    def _placeholder_handler(**_kw: Any) -> None:
+                        return None
+
                     broker._specs[tool.name] = ToolSpec(
                         name=tool.name,
                         description=tool.description,
                         parameters=tool.parameters,
-                        handler=lambda **_kw: None,  # placeholder, never called
+                        handler=_placeholder_handler,  # never called; lazy resolution replaces it
                         side_effects=tool.side_effects,
                         required_tier=tool.required_tier,
                         timeout_seconds=tool.timeout_seconds,
@@ -674,11 +680,12 @@ class PluginLoader:
         # Wire the manager into the broker for on-demand resolution
         broker.set_lazy_manager(manager)
 
+        eager_set: set[str] = eager_plugins or set()
         logger.info(
             "Lazy plugin loader: %d plugins discovered, %d eager, %d lazy",
             len(all_specs),
-            len(eager_plugins or set()),
-            len(all_specs) - len(eager_plugins or set()),
+            len(eager_set),
+            len(all_specs) - len(eager_set),
         )
         return manager
 

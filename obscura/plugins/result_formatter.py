@@ -27,7 +27,7 @@ from __future__ import annotations
 import enum
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -92,7 +92,7 @@ def format_tool_result(result: Any, spec: ToolSpec, level: str) -> Any:
     if not isinstance(data, dict):
         return result
 
-    typed_data: dict[str, Any] = data
+    typed_data = cast(dict[str, Any], data)
     filtered: dict[str, Any] = {
         k: v for k, v in typed_data.items() if k in allowed_keys
     }

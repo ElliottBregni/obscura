@@ -35,7 +35,7 @@ class PluginEvent:
     plugin_id: str = ""
     timestamp: float = field(default_factory=time.time)
     trace_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
-    details: dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def to_dict(self) -> dict[str, Any]:
         return {

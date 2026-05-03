@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -62,7 +63,7 @@ class RegistrationResult:
     """Outcome of a tool registration attempt."""
 
     status: str  # "registered" | "quarantined"
-    issues: list[RegistrationIssue] = field(default_factory=list)
+    issues: list[RegistrationIssue] = field(default_factory=list[RegistrationIssue])
 
     @property
     def has_critical(self) -> bool:
@@ -489,7 +490,7 @@ class ToolBroker:
         """Invoke handler with timeout."""
         coro = (
             handler(**envelope.args)
-            if asyncio.iscoroutinefunction(handler)
+            if inspect.iscoroutinefunction(handler)
             else asyncio.to_thread(handler, **envelope.args)
         )
         return await asyncio.wait_for(coro, timeout=self._default_timeout)

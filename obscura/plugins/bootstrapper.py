@@ -22,7 +22,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from obscura.plugins.models import BootstrapDep, PluginSpec
@@ -110,10 +110,10 @@ class BootstrapResult:
 
     plugin_id: str
     ok: bool = True
-    installed: list[str] = field(default_factory=list)  # deps that were installed
-    skipped: list[str] = field(default_factory=list)  # already present
-    errors: list[str] = field(default_factory=list)  # hard failures
-    warnings: list[str] = field(default_factory=list)  # optional dep failures
+    installed: list[str] = field(default_factory=list[str])  # deps that were installed
+    skipped: list[str] = field(default_factory=list[str])  # already present
+    errors: list[str] = field(default_factory=list[str])  # hard failures
+    warnings: list[str] = field(default_factory=list[str])  # optional dep failures
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +358,10 @@ def _brew_binary_name(package: str) -> str:
     return package.rsplit("/", 1)[-1]
 
 
-_INSTALLERS = {
+_Checker = Callable[[str], bool]
+_Installer = Callable[["BootstrapDep"], "tuple[bool, str]"]
+
+_INSTALLERS: dict[str, tuple[_Checker, _Installer]] = {
     "pip": (_is_pip_installed, _install_pip),
     "uv": (_is_pip_installed, _install_uv),
     "npx": (lambda p: _is_binary_available("npx"), _install_npx),

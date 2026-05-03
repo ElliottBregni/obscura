@@ -256,7 +256,7 @@ class ToolContribution:
 
     name: str
     description: str
-    parameters: dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict[str, Any])
     handler_ref: str = ""  # e.g. "my_plugin.tools:search_repo"
     capability: str = ""  # capability ID this tool belongs to
     side_effects: str = "none"  # "none" | "read" | "write"

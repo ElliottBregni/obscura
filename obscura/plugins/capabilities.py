@@ -259,9 +259,10 @@ def resolve_allowed_tools_from_config() -> set[str] | None:
         from obscura.core.workspace import load_workspace_config
         from obscura.plugins.loader import (
             PluginLoader,
-            _load_plugin_config_flag,
+            _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
             get_capability_map,
         )
+        from obscura.plugins.models import PluginSpec
 
         config = load_workspace_config()
         caps_cfg = config.get("defaults", {}).get("capabilities", {})
@@ -271,7 +272,7 @@ def resolve_allowed_tools_from_config() -> set[str] | None:
         # Discover all plugin specs to read default_grant flags
         load_builtins = _load_plugin_config_flag("load_builtins")
         loader = PluginLoader()
-        all_specs = []
+        all_specs: list[PluginSpec] = []
         if load_builtins:
             all_specs.extend(loader.discover_builtins())
         all_specs.extend(loader.discover_local())
