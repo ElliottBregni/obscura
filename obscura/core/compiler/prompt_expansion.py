@@ -18,6 +18,9 @@ import logging
 import re
 from collections.abc import Callable
 
+from obscura.core.context_lazy import LazyCommandLoader, LazySkillLoader
+from obscura.core.paths import resolve_all_commands_dirs, resolve_all_skills_dirs
+
 logger = logging.getLogger(__name__)
 
 # Match $skill or @command tokens at line start or after whitespace.
@@ -39,10 +42,6 @@ def expand_prompt_references(text: str) -> str:
     """
     if not text or ("$" not in text and "@" not in text):
         return text
-
-    # Lazy-import to avoid circular imports at module level
-    from obscura.core.context_lazy import LazyCommandLoader, LazySkillLoader
-    from obscura.core.paths import resolve_all_commands_dirs, resolve_all_skills_dirs
 
     # Build loaders (cached per call; compile_agent is called infrequently)
     skill_loaders = [LazySkillLoader(d) for d in resolve_all_skills_dirs()]
@@ -93,8 +92,6 @@ def _expand_chained_line(
 
     Returns expanded text or None if no expansion was possible.
     """
-    from obscura.core.context_lazy import LazyCommandLoader
-
     assert isinstance(command_loader, LazyCommandLoader)
 
     tokens = line.split()

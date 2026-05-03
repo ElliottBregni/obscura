@@ -13,6 +13,13 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
+from obscura.core.eval_checks import (
+    check_python_syntax,
+    check_shell_syntax,
+    check_written_json,
+    check_written_yaml_toml,
+)
+
 # ---------------------------------------------------------------------------
 # Keyword extraction (for drift detection)
 # ---------------------------------------------------------------------------
@@ -481,6 +488,7 @@ def check_acceptance_criteria(
 
     Returns (score, issues).
     """
+    # lazy: avoid circular dep with obscura.arbiter.criteria
     from obscura.arbiter.criteria import verify_criteria
 
     score, issues, _ = verify_criteria(
@@ -686,13 +694,6 @@ def check_file_quality(
 def _run_file_check(path: str, *, skip_pyright: bool = True) -> str:
     """Run appropriate eval checks on a single file. Returns error text or ''."""
     try:
-        from obscura.core.eval_checks import (
-            check_python_syntax,
-            check_shell_syntax,
-            check_written_json,
-            check_written_yaml_toml,
-        )
-
         tool_input = {"file_path": path, "path": path}
         errors: list[str] = []
 

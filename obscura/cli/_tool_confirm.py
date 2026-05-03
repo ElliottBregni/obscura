@@ -22,7 +22,13 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from obscura.cli.app.modes import Plan, TUIMode
+from obscura.cli.commands import _FILE_WRITE_TOOLS  # pyright: ignore[reportPrivateUsage]
+from obscura.cli.render import render_plan
+from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
+from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.types import AgentEventKind
+from obscura.tools.system.file_state import record_file_access
 
 if TYPE_CHECKING:
     from obscura.cli.commands import REPLContext
@@ -38,8 +44,6 @@ async def cli_confirm(
     """Prompt user to approve a tool call via TUI widget. Returns True to allow."""
     if tool_name in ctx.confirm_always:
         return True
-
-    from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
 
     result = await confirm_tool(
         ToolConfirmRequest(tool_name=tool_name, tool_input=tool_input),
@@ -75,12 +79,7 @@ def track_file_event(
         ``_FILE_WRITE_TOOLS`` from ``obscura.cli.commands``.
     """
     if file_write_tools is None:
-        try:
-            from obscura.cli.commands import _FILE_WRITE_TOOLS  # pyright: ignore[reportPrivateUsage]
-
-            file_write_tools = frozenset(_FILE_WRITE_TOOLS)
-        except Exception:
-            file_write_tools = frozenset()
+        file_write_tools = frozenset(_FILE_WRITE_TOOLS)
 
     if ev.kind == AgentEventKind.TOOL_CALL and ev.tool_name in file_write_tools:
         path = ev.tool_input.get("path") or ev.tool_input.get("file_path", "")
@@ -104,8 +103,6 @@ def track_file_event(
             ctx.add_file_change(path, before, after)
             # Record attribution.
             try:
-                from obscura.core.commit_attribution import get_attribution_tracker
-
                 added = len(after.splitlines()) - len(before.splitlines())
                 if added >= 0:
                     get_attribution_tracker().record_agent_edit(path, lines_added=added)
@@ -118,8 +115,6 @@ def track_file_event(
                 pass
             # Record in file history.
             try:
-                from obscura.tools.system.file_state import record_file_access
-
                 record_file_access(Path(path), "edit")
             except Exception:
                 pass
@@ -131,16 +126,11 @@ def maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     if mm is None:
         return
 
-    from obscura.cli.app.modes import TUIMode
-
     if mm.current != TUIMode.PLAN:
         return
 
     if not response_text.strip():
         return
-
-    from obscura.cli.app.modes import Plan
-    from obscura.cli.render import render_plan
 
     plan = Plan.parse(response_text)
     if plan.steps:

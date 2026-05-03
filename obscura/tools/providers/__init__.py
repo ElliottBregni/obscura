@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any
 from obscura.core.tools import ToolRegistry
 from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.tool_adapter import register_remote_agent_as_tool
+from obscura.providers.mcp_backend import MCPBackend
+from obscura.tools.delegation import DelegationContext, make_task_tool
+from obscura.tools.memory_tools import make_memory_tool_specs
 from obscura.tools.system import get_system_tool_specs
 
 if TYPE_CHECKING:

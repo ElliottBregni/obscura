@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.config_io import apply_agent_defaults, dumps_toml, load_config
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -52,8 +54,6 @@ def migrate_agents_yaml(
         Summary of what was migrated.
 
     """
-    from obscura.core.config_io import load_config  # noqa: PLC0415
-
     result = MigrationResult()
 
     if not agents_yaml.is_file():
@@ -65,8 +65,6 @@ def migrate_agents_yaml(
     except Exception as exc:
         result.errors.append(f"Failed to parse {agents_yaml}: {exc}")
         return result
-
-    from obscura.core.config_io import apply_agent_defaults  # noqa: PLC0415
 
     raw = apply_agent_defaults(raw)
 
@@ -202,7 +200,5 @@ def _agent_to_template_toml(agent: dict[str, Any]) -> str:
     }
     if tags:
         doc["metadata"]["tags"] = tags
-
-    from obscura.core.config_io import dumps_toml  # noqa: PLC0415
 
     return dumps_toml(doc)

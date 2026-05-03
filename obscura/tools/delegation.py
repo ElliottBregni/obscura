@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from obscura.core.types import ToolSpec
+from obscura.tools.policy.models import inject_subagent_context
 
 if TYPE_CHECKING:
     from obscura.agent.peers import PeerRegistry
@@ -163,8 +164,6 @@ def make_task_tool(ctx: DelegationContext) -> ToolSpec:
         # 2. Sets config.tool_allowlist so AgentLoop enforces it.
         # 3. Installs a before-TOOL_CALL hook rewriting native tool names.
         try:
-            from obscura.tools.policy.models import inject_subagent_context
-
             agent_config = getattr(agent, "config", None)
             allowlist = (
                 getattr(agent_config, "tool_allowlist", None)

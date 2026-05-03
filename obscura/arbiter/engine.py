@@ -39,6 +39,8 @@ from obscura.arbiter.checks import (
     check_task_complete,
     check_tool_call,
 )
+from obscura.arbiter.judge import maybe_judge
+from obscura.arbiter.store import ArbiterStore
 from obscura.arbiter.types import (
     ArbiterCheckKind,
     ArbiterConfig,
@@ -46,6 +48,7 @@ from obscura.arbiter.types import (
     ArbiterScore,
     ArbiterVerdict,
 )
+from obscura.kairos.daily_log import DailyLog
 
 logger = logging.getLogger(__name__)
 
@@ -363,8 +366,6 @@ class ArbiterEngine:
     ) -> tuple[float | None, str]:
         """Conditionally invoke the LLM judge."""
         try:
-            from obscura.arbiter.judge import maybe_judge
-
             score, reasoning = await maybe_judge(
                 det_score,
                 kind,
@@ -521,8 +522,6 @@ class ArbiterEngine:
     def _persist_event(self, event: ArbiterEvent) -> None:
         """Best-effort persistence to the verdict store and daily log."""
         try:
-            from obscura.arbiter.store import ArbiterStore
-
             ArbiterStore().record(event)
         except Exception:
             logger.debug("Could not persist arbiter event", exc_info=True)
@@ -535,8 +534,6 @@ class ArbiterEngine:
     def _log_to_daily(event: ArbiterEvent) -> None:
         """Append an Arbiter verdict to the KAIROS daily log."""
         try:
-            from obscura.kairos.daily_log import DailyLog
-
             feedback_short = event.score.feedback[:80] if event.score.feedback else ""
             entry = (
                 f"arbiter {event.verdict.value}: {event.kind.value} "
@@ -557,7 +554,6 @@ class ArbiterEngine:
         """Load cross-session patterns from previous runs for this project."""
         try:
             import os
-            from obscura.arbiter.store import ArbiterStore
             project_root = os.getcwd()
             self._project_root = project_root
             self._historical_patterns = ArbiterStore().patterns_for_project(project_root)
@@ -618,7 +614,6 @@ class ArbiterEngine:
 
         # Regression warning: flag if current session is tracking >10% below baseline.
         try:
-            from obscura.arbiter.store import ArbiterStore
             reg = ArbiterStore().score_regression(
                 session_id=self._session_id,
                 project_root=self._project_root,

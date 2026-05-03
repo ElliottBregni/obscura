@@ -150,8 +150,8 @@ class ObscuraClient:
             except Exception:
                 pass  # Degrade gracefully if capability module not available
 
-        # Inject project context (OBSCURA.md + instructions + skills)
-        # Off by default — Obscura uses its own system prompts
+        # Inject project context (OBSCURA.md + instructions + skills).
+        # On by default so skills work uniformly across all backends.
         if inject_claude_context:
             try:
                 from obscura.core.context import ContextLoader

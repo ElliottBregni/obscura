@@ -25,6 +25,23 @@ import textwrap
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core._default_commands import DEFAULT_COMMANDS
+from obscura.core._default_docs import (
+    CAPABILITY_GUIDE,
+    CONFIG_REFERENCE,
+    PLUGIN_GUIDE,
+    POLICY_GUIDE,
+    SPEC_GUIDE,
+)
+from obscura.core._default_evals import DEFAULT_EVALS
+from obscura.core._default_skills import DEFAULT_SKILLS
+from obscura.core.config_io import dumps_toml, try_load_config
+from obscura.plugins.bootstrapper import run_bootstrap
+from obscura.plugins.loader import (
+    PluginLoader,
+    _apply_plugin_filters,  # pyright: ignore[reportPrivateUsage]
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -188,14 +205,6 @@ def init_workspace(
 
     # -- docs ----------------------------------------------------------------
     (ws / "docs").mkdir(parents=True, exist_ok=True)
-    from obscura.core._default_docs import (  # noqa: PLC0415
-        CAPABILITY_GUIDE,
-        CONFIG_REFERENCE,
-        PLUGIN_GUIDE,
-        POLICY_GUIDE,
-        SPEC_GUIDE,
-    )
-
     _write_if_missing(
         dst=ws / "docs" / "PLUGIN_GUIDE.md",
         content=PLUGIN_GUIDE,
@@ -223,8 +232,6 @@ def init_workspace(
     )
 
     # -- default @commands ---------------------------------------------------
-    from obscura.core._default_commands import DEFAULT_COMMANDS  # noqa: PLC0415
-
     for filename, content in DEFAULT_COMMANDS.items():
         _write_if_missing(
             dst=ws / "commands" / filename,

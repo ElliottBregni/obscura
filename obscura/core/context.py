@@ -98,9 +98,16 @@ class ContextLoader:
         return dirs
 
     def _ensure_lazy_loaders(self) -> list[LazySkillLoader]:
-        """Lazily create one LazySkillLoader per discovered skill dir."""
+        """Lazily create one LazySkillLoader per discovered skill dir.
+
+        Each loader is pre-populated with its metadata cache so subsequent
+        :meth:`load_skill_body` calls skip the disk walk.
+        """
         if self._lazy_loaders is None:
-            self._lazy_loaders = [LazySkillLoader(d) for d in self._skill_dirs()]
+            loaders = [LazySkillLoader(d) for d in self._skill_dirs()]
+            for loader in loaders:
+                loader.discover_skills(filter_names=self._skill_filter)
+            self._lazy_loaders = loaders
         return self._lazy_loaders
 
     def load_instructions(self) -> str:
@@ -147,12 +154,12 @@ class ContextLoader:
             higher-priority dirs winning.
 
         """
-        loaders = self._ensure_lazy_loaders()
-
+        # _ensure_lazy_loaders pre-populates each loader's metadata cache,
+        # so we can read from it directly instead of re-walking the disk.
         seen: set[str] = set()
         skills: list[SkillMetadata] = []
-        for loader in loaders:
-            for s in loader.discover_skills(filter_names=self._skill_filter):
+        for loader in self._ensure_lazy_loaders():
+            for s in loader._metadata_cache.values():  # noqa: SLF001
                 if s.name in seen:
                     continue
                 skills.append(s)
@@ -183,8 +190,6 @@ class ContextLoader:
 
         """
         for loader in self._ensure_lazy_loaders():
-            # Ensure metadata is populated before asking for the body.
-            loader.discover_skills(filter_names=self._skill_filter)
             body = loader.load_skill_body(skill_name)
             if body is not None:
                 return body

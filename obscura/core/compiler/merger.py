@@ -23,6 +23,7 @@ from obscura.core.compiler.compiled import (
     CompiledPolicy,
     ToolRoutingConfig,
 )
+from obscura.core.compiler.prompt_expansion import expand_prompt_references
 from obscura.core.compiler.specs import (
     MCPServerSpec,
     PolicySpec,
@@ -242,8 +243,6 @@ def compile_agent(
     )
 
     # Expand $skill and @command references in instructions
-    from obscura.core.compiler.prompt_expansion import expand_prompt_references
-
     expanded_instructions = expand_prompt_references(spec.instructions)
 
     # Compile tool routing config if present in the spec.

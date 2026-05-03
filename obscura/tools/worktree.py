@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any
 
 import obscura.tools.worktree_observer as worktree_observer
 import obscura.tools.worktree_registry as worktree_registry
+from obscura.auth.secrets import safe_subprocess_env
+from obscura.core.cleanup import register_cleanup
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -44,8 +46,6 @@ async def _git(
     cwd: str | None = None,
 ) -> tuple[int, str, str]:
     """Run a git command and return (exit_code, stdout, stderr)."""
-    from obscura.auth.secrets import safe_subprocess_env
-
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
@@ -89,8 +89,6 @@ def _ensure_cleanup_registered() -> None:
     if _cleanup_registered:
         return
     try:
-        from obscura.core.cleanup import register_cleanup
-
         register_cleanup("worktree_observers", worktree_observer.stop_all)
         _cleanup_registered = True
     except Exception:
