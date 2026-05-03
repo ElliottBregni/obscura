@@ -194,6 +194,34 @@ _FILE_WRITE_TOOLS = frozenset(
 # ---------------------------------------------------------------------------
 
 
+def _empty_str_any_dict_list() -> list[dict[str, Any]]:
+    return []
+
+
+def _empty_str_set() -> set[str]:
+    return set()
+
+
+def _empty_history() -> list[tuple[str, str]]:
+    return []
+
+
+def _empty_str_str_dict_list() -> list[dict[str, str]]:
+    return []
+
+
+def _empty_pending_reads() -> dict[str, tuple[str, str]]:
+    return {}
+
+
+def _empty_swarm_runs() -> dict[str, dict[str, Any]]:
+    return {}
+
+
+def _empty_str_list() -> list[str]:
+    return []
+
+
 @dataclass
 class REPLContext:
     """Mutable state for the REPL session."""
@@ -206,19 +234,21 @@ class REPLContext:
     system_prompt: str
     max_turns: int
     tools_enabled: bool
-    mcp_configs: list[dict[str, Any]] = field(default_factory=list)
+    mcp_configs: list[dict[str, Any]] = field(default_factory=_empty_str_any_dict_list)
 
     # Approval gates
     confirm_enabled: bool = False
-    confirm_always: set[str] = field(default_factory=set)
+    confirm_always: set[str] = field(default_factory=_empty_str_set)
 
     # Message history for context tracking
-    message_history: list[tuple[str, str]] = field(default_factory=list)
+    message_history: list[tuple[str, str]] = field(default_factory=_empty_history)
 
     # File change tracking for /diff (path -> {path, original, modified})
-    _file_changes: list[dict[str, str]] = field(default_factory=list, repr=False)
+    _file_changes: list[dict[str, str]] = field(
+        default_factory=_empty_str_str_dict_list, repr=False
+    )
     _pending_file_reads: dict[str, tuple[str, str]] = field(
-        default_factory=dict,
+        default_factory=_empty_pending_reads,
         repr=False,
     )
 
@@ -236,7 +266,9 @@ class REPLContext:
     _runtime: Any = field(default=None, repr=False)
 
     # Background swarm tasks: {swarm_id: {task, assignments, results, ...}}
-    _swarm_runs: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+    _swarm_runs: dict[str, dict[str, Any]] = field(
+        default_factory=_empty_swarm_runs, repr=False
+    )
 
     # Supervisor reference (set when --supervise is active)
     _supervisor: Any = field(default=None, repr=False)
@@ -244,7 +276,7 @@ class REPLContext:
 
     # Slash-skill state (metadata lazy-loaded, bodies loaded on activation)
     _lazy_skill_loader: LazySkillLoader | None = field(default=None, repr=False)
-    active_skills: list[str] = field(default_factory=list)
+    active_skills: list[str] = field(default_factory=_empty_str_list)
 
     # @command state (lazy-loaded from ~/.obscura/commands/ + ~/.claude/commands/)
     _lazy_command_loader: LazyCommandLoader | None = field(default=None, repr=False)
