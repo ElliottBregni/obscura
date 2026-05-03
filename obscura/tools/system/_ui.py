@@ -322,9 +322,6 @@ class UI:
         # OS notification channel — use NativeNotifier
         if "os" in resolved_channels:
             try:
-                from obscura.agent.interaction import AttentionPriority
-                from obscura.notifications.native import NativeNotifier
-
                 prio_map = {
                     "low": AttentionPriority.LOW,
                     "normal": AttentionPriority.NORMAL,

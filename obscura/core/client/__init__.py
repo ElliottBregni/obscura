@@ -15,7 +15,15 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 _logger = logging.getLogger(__name__)
 
+from obscura.auth.capability import CapabilityTier
+from obscura.core.agent_loop import AgentLoop
 from obscura.core.auth import AuthConfig, resolve_auth
+from obscura.core.circuit_breaker import CircuitBreakerRegistry, CircuitOpenError
+from obscura.core.context import load_session_messages
+from obscura.core.llm_cache import LLMCache
+from obscura.core.paths import resolve_obscura_home
+from obscura.core.retry import with_retry
+from obscura.core.throttle import ThrottledBackend, wrap_if_enabled
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
@@ -24,11 +32,14 @@ from obscura.core.types import (
     BackendCapabilities,
     BackendProtocol,
     ConfirmationCapable,
+    ContentBlock,
     HookPoint,
     Message,
     NativeHandle,
+    Role,
     SessionRef,
     StreamChunk,
+    ToolCallInfo,
     ToolSpec,
 )
 
@@ -175,8 +186,6 @@ class ObscuraClient:
 
         # -- Reliability infrastructure ------------------------------------------
         # Circuit breaker (per-backend, shared via registry if passed in)
-        from obscura.core.circuit_breaker import CircuitBreakerRegistry
-
         self._circuit_registry = CircuitBreakerRegistry()
 
         # Retry config
@@ -250,7 +259,7 @@ class ObscuraClient:
                 MCPConnectionConfig,
                 MCPTransportType,
             )
-            from obscura.providers.mcp_backend import MCPBackend
+            from obscura.providers.mcp_backend import MCPBackend  # lazy: avoid circular dep with obscura.providers (loaded via obscura.core.client at module init)
 
             configs: list[MCPConnectionConfig] = []
             for server in self._mcp_server_configs:

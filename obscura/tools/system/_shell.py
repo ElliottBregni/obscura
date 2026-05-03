@@ -8,6 +8,8 @@ import os
 import shutil
 from pathlib import Path
 
+from obscura.auth.secrets import safe_subprocess_env
+from obscura.core.background_tasks import get_background_task_manager
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 
@@ -99,8 +101,6 @@ class Shell:
         timeout_seconds: float = 30.0,
     ) -> str:
         command = Shell.resolve_command("python3")
-        from obscura.auth.secrets import safe_subprocess_env
-
         proc = await asyncio.create_subprocess_exec(
             command,
             "-c",
@@ -206,8 +206,6 @@ class Shell:
             return Policy.json_error("command_not_found", command=normalized_command)
 
         process_args = args or []
-        from obscura.auth.secrets import safe_subprocess_env
-
         proc = await asyncio.create_subprocess_exec(
             resolved_command,
             *process_args,
@@ -316,8 +314,6 @@ class Shell:
             return json.dumps({"ok": False, "error": "no_script_provided"})
 
         if run_in_background:
-            from obscura.core.background_tasks import get_background_task_manager
-
             mgr = get_background_task_manager()
             task_id = await mgr.start(
                 f"/bin/zsh -lc {Shell.shell_quote(actual_script)}",

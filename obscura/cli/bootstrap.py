@@ -37,7 +37,6 @@ from obscura.integrations.mcp.config_loader import (
     discover_mcp_servers,
 )
 from obscura.manifest.models import AgentManifest
-from obscura.tools.swarm import load_agent_configs
 
 if TYPE_CHECKING:
     from obscura.cli.commands import REPLContext
@@ -72,6 +71,9 @@ def _discover_agents() -> list[str]:  # pyright: ignore[reportUnusedFunction]
 
 def _discover_agent_infos() -> list[AgentInfo]:
     try:
+        # lazy: avoid circular dep with obscura.agent.agents via providers
+        from obscura.tools.swarm import load_agent_configs
+
         agents = load_agent_configs(include_disabled=True)
         return [
             AgentInfo(
@@ -111,6 +113,9 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
 
     manifest: AgentManifest | None = None
     try:
+        # lazy: avoid circular dep with obscura.agent.agents via providers
+        from obscura.tools.swarm import load_agent_configs
+
         agent_configs = load_agent_configs(include_disabled=True)
         cfg = agent_configs.get(agent_name)
         if cfg is not None:
@@ -209,10 +214,7 @@ async def _run_inline_agent_from_mention(  # pyright: ignore[reportUnusedFunctio
 async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
     client: Any,
 ) -> asyncio.Task[None] | None:
-    from obscura.agent.daemon_agent import DaemonAgent
-    from obscura.agent.interaction import AttentionPriority, InteractionBus
-    from obscura.agent.supervisor import SupervisorConfig
-    from obscura.cli.render import console as _console
+    _console = console
 
     config_path = Path.home() / ".obscura" / "agents.yaml"
     if not config_path.exists():
@@ -224,7 +226,6 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
         im_triggers = [t for t in agent_def.triggers if t.imessage is not None]
         if not im_triggers:
             continue
-        from obscura.agent.daemon_agent import IMessageTrigger as _IMT
 
         triggers: list[Any] = []
         for tdef in im_triggers:
@@ -241,7 +242,7 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
                 else AttentionPriority.NORMAL
             )
             triggers.append(
-                _IMT(
+                IMessageTrigger(
                     contacts=tuple(im_cfg.get("contacts", [])),
                     poll_interval=im_cfg.get("poll_interval", 30),
                     notify_user=tdef.notify_user,
@@ -265,13 +266,11 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
         await daemon_client.__aenter__()
         # Load persisted schedules from ~/.obscura/schedules.json
         try:
-            from obscura.agent.daemon_agent import ScheduleTrigger as _ST
-
             _schedules_path = Path.home() / ".obscura" / "schedules.json"
             if _schedules_path.is_file():
                 for sched in json.loads(_schedules_path.read_text(encoding="utf-8")):
                     triggers.append(
-                        _ST(
+                        ScheduleTrigger(
                             cron=sched["cron"],
                             prompt=sched["prompt"],
                             description=f"{sched.get('id', '?')}: {sched['prompt'][:40]}",

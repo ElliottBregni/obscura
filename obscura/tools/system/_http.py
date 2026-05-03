@@ -12,6 +12,7 @@ from urllib import request as url_request
 
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
+from obscura.tools.system._shell import Shell
 
 
 class Http:

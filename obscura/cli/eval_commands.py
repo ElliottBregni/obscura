@@ -10,8 +10,21 @@ from typing import TYPE_CHECKING
 import click
 from rich.console import Console
 
+from obscura.core.auth import resolve_auth
+from obscura.core.tools import ToolRegistry
+from obscura.core.types import Backend
+from obscura.eval.compiler import compile_suite
+from obscura.eval.engine import EvalEngine
+from obscura.eval.loader import (
+    discover_eval_files,
+    load_all_eval_suites,
+    load_eval_suite,
+)
+from obscura.eval.models import CompiledEvalCase
+from obscura.eval.report import render_json, render_markdown, render_table
+from obscura.eval.store import EvalResultStore
+
 if TYPE_CHECKING:
-    from obscura.core.tools import ToolRegistry
     from obscura.core.types import BackendProtocol
 
 console = Console()

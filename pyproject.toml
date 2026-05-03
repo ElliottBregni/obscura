@@ -215,10 +215,36 @@ markers = [
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F"]
-ignore = ["E501"]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # bugbear
+    "UP",  # pyupgrade (py313-safe)
+    "SIM", # simplify
+    "TID", # banned/relative imports
+    "TCH", # type-checking-only imports
+    "PL",  # pylint subset (incl. PLC0415: no nested imports)
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",    # line length
+    "PLR0913", # too many args (Click commands legitimately have many)
+    "PLR0912", # too many branches (REPL command dispatch)
+    "PLR0915", # too many statements
+    "PLR2004", # magic numbers (status codes, byte sizes are clearer inline)
+    "PLR0911", # too many return statements (command handlers)
+    "PLW2901", # for loop var overwritten
+    "PLW0603", # global statements (used intentionally for caches)
+    "SIM108",  # ternary suggestion (often less readable for long branches)
+    "SIM117",  # combine nested with-statements (often less readable)
+    "B008",    # function calls in defaults (Click idiom)
+    "B904",    # raise-from (often verbose without value)
+    "B007",    # unused loop variable (common with enumerate)
+    "UP038",   # isinstance with X|Y (rejected by some Python versions at runtime)
+]
 
 [tool.ruff.lint.per-file-ignores]
+# Pre-existing ignores
 "scripts/sync.py" = ["F541"]
 "scripts/test_server.py" = ["F541"]
 "obscura/agent/agent.py" = ["E402"]
@@ -231,6 +257,39 @@ ignore = ["E501"]
 "obscura/deps/__init__.py" = ["E402"]
 "obscura/integrations/mcp/server.py" = ["F811"]
 "obscura/routes/admin.py" = ["E741"]
+
+# Lazy-import accessors live here intentionally — single canonical home for
+# every justified runtime-deferred import. Subsequent commits empty the rest
+# of this list as files are cleaned up.
+"obscura/cli/_lazy/*.py" = ["PLC0415"]
+
+# Transitional: silence PLC0415 in CLI files we'll clean up in commits 2-5.
+"obscura/cli/__init__.py" = ["E402", "PLC0415"]
+"obscura/cli/commands.py" = ["PLC0415"]
+"obscura/cli/_repl_loop.py" = ["PLC0415"]
+"obscura/cli/session.py" = ["PLC0415"]
+"obscura/cli/_send.py" = ["PLC0415"]
+"obscura/cli/eval_commands.py" = ["PLC0415"]
+"obscura/cli/bootstrap.py" = ["PLC0415"]
+"obscura/cli/auth_commands.py" = ["PLC0415"]
+"obscura/cli/control_commands.py" = ["PLC0415"]
+"obscura/cli/prompt.py" = ["PLC0415"]
+"obscura/cli/_daemon.py" = ["PLC0415"]
+"obscura/cli/_tool_confirm.py" = ["PLC0415"]
+"obscura/cli/kairos_commands.py" = ["PLC0415"]
+"obscura/cli/render.py" = ["PLC0415"]
+"obscura/cli/mcp_commands.py" = ["PLC0415"]
+"obscura/cli/_env_loader.py" = ["PLC0415"]
+"obscura/cli/_guide_sync.py" = ["PLC0415"]
+"obscura/cli/repl.py" = ["PLC0415"]
+"obscura/cli/widgets.py" = ["PLC0415"]
+"obscura/cli/renderer/__init__.py" = ["PLC0415"]
+"obscura/cli/app/__init__.py" = ["PLC0415"]
+"obscura/cli/app/diff_engine.py" = ["PLC0415"]
+"obscura/cli/app/modes.py" = ["PLC0415"]
+"obscura/auth/cli_user.py" = ["PLC0415"]
+"obscura/auth/profile.py" = ["PLC0415"]
+"obscura/auth/supabase_secrets.py" = ["PLC0415"]
 
 [tool.uv.sources]
 # Pin to openai/codex monorepo — the third-party "codex-app-server-sdk" on

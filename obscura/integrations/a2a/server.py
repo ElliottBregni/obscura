@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.integrations.a2a.agent_card import AgentCardGenerator
 from obscura.integrations.a2a.service import A2AService
-from obscura.integrations.a2a.store import InMemoryTaskStore, TaskStore
+from obscura.integrations.a2a.store import InMemoryTaskStore, RedisTaskStore, TaskStore
+from obscura.integrations.a2a.transports.unix_socket import (
+    start_unix_socket_server,
+    stop_unix_socket_server,
+)
 
 if TYPE_CHECKING:
     import asyncio
@@ -93,8 +97,6 @@ class ObscuraA2AServer:
 
     async def startup(self) -> None:
         """Connect resources (e.g., Redis, Unix socket)."""
-        from obscura.integrations.a2a.store import RedisTaskStore
-
         if isinstance(self._store, RedisTaskStore):
             await self._store.connect()
 
@@ -105,8 +107,6 @@ class ObscuraA2AServer:
 
     async def shutdown(self) -> None:
         """Disconnect resources."""
-        from obscura.integrations.a2a.store import RedisTaskStore
-
         if self._unix_socket_server is not None:
             await self.stop_unix_socket()
 
@@ -131,10 +131,6 @@ class ObscuraA2AServer:
             The running Unix socket server.
 
         """
-        from obscura.integrations.a2a.transports.unix_socket import (
-            start_unix_socket_server,
-        )
-
         path = socket_path or self._unix_socket_path or "/tmp/obscura-a2a.sock"
         self._unix_socket_path = path
         self._unix_socket_server = await start_unix_socket_server(
@@ -147,10 +143,6 @@ class ObscuraA2AServer:
         """Stop the Unix domain socket transport."""
         if self._unix_socket_server is None:
             return
-        from obscura.integrations.a2a.transports.unix_socket import (
-            stop_unix_socket_server,
-        )
-
         await stop_unix_socket_server(
             self._unix_socket_server,
             self._unix_socket_path or "/tmp/obscura-a2a.sock",
