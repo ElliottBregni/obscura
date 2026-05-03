@@ -17,8 +17,6 @@ class MessagePlatformAdapter(Protocol):
 
     async def poll(self) -> list[PlatformMessage]:
         """Poll or receive new inbound messages."""
-        ...
 
     async def send(self, recipient: str, text: str) -> bool:
         """Send a plain-text outbound message."""
-        ...

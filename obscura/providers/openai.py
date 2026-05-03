@@ -15,7 +15,7 @@ import inspect
 import json
 import uuid
 from collections.abc import AsyncIterator, Callable, Mapping
-from typing import TYPE_CHECKING, Any, cast, override
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.agent_loop import AgentLoop
 from obscura.core.sessions import SessionStore
@@ -517,7 +517,6 @@ class OpenAIBackend(BackendToolHostMixin):
             logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
         return "\n".join(lines)
 
-    @override
     def get_tool_registry(self) -> ToolRegistry:
         """Return the tool registry."""
         return self._tool_registry
