@@ -1,4 +1,5 @@
 """Test-compatible copilot_models registry with minimal entries."""
+
 from dataclasses import dataclass
 import os
 
@@ -8,12 +9,14 @@ PREMIUM = "premium"
 
 _AUTOMATION_SAFE_MODELS = {"gpt-5-mini", "gpt-4o-mini"}
 
+
 @dataclass(frozen=True)
 class ModelConfig:
     alias: str
     model_id: str
     category: str
     max_requests_per_run: int | None = None
+
 
 # Minimal alias registry used by tests
 _ALIAS_REGISTRY: dict[str, ModelConfig] = {
@@ -45,7 +48,7 @@ _ALIAS_REGISTRY: dict[str, ModelConfig] = {
 
 
 def _normalize_env_alias(alias: str) -> str:
-    return alias.upper().replace('-', '_')
+    return alias.upper().replace("-", "_")
 
 
 def resolve(alias: str) -> ModelConfig:
@@ -58,11 +61,13 @@ def resolve(alias: str) -> ModelConfig:
         if override and cfg.category == AUTOMATION:
             # only allow safe model ids
             if override in _AUTOMATION_SAFE_MODELS:
-                return ModelConfig(cfg.alias, override, cfg.category, cfg.max_requests_per_run)
+                return ModelConfig(
+                    cfg.alias, override, cfg.category, cfg.max_requests_per_run
+                )
             # otherwise ignore override
         return cfg
     # reject raw model ids
-    if alias.startswith('gpt-') or alias.startswith('o3'):
+    if alias.startswith("gpt-") or alias.startswith("o3"):
         raise ValueError("Raw model IDs are not allowed. Use an alias.")
     raise ValueError(f"Unknown copilot alias: {alias}")
 
@@ -90,6 +95,6 @@ def guard_automation(alias: str) -> str:
 def _AUTOMATION_SAFE_MODELS_set():  # pyright: ignore[reportUnusedFunction]
     return set(_AUTOMATION_SAFE_MODELS)
 
+
 # Expose internals used by tests
 _AUTOMATION_SAFE_MODELS = set(_AUTOMATION_SAFE_MODELS)  # pyright: ignore[reportConstantRedefinition]
-

@@ -21,7 +21,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from rich.console import Group, RenderableType
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.rule import Rule
+from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 from obscura.agent.definitions import resolve_all_definitions
 from obscura.auth import secrets as _secrets
@@ -848,8 +854,6 @@ async def cmd_cat(args: str, _ctx: REPLContext) -> str | None:
     text = data.decode("utf-8", errors="replace")
 
     # Use Rich Syntax for highlighting based on file extension
-    from rich.syntax import Syntax
-
     suffix = target.suffix.lstrip(".")
     lexer = suffix or "text"
     try:
@@ -1300,10 +1304,6 @@ async def _diff_accept_reject(
 
 async def _diff_side_by_side(ctx: REPLContext) -> str | None:
     """Render side-by-side diff overlay for all file changes."""
-    from rich.panel import Panel
-    from rich.syntax import Syntax
-    from rich.text import Text
-
     if not ctx.file_changes:
         print_info("No file changes to display.")
         return None

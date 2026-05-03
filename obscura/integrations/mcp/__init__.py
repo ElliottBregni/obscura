@@ -117,9 +117,7 @@ def __getattr__(name: str) -> Any:
         from obscura.integrations.mcp import server as _server
 
         return getattr(_server, name)
-    raise AttributeError(
-        f"module 'obscura.integrations.mcp' has no attribute {name!r}"
-    )
+    raise AttributeError(f"module 'obscura.integrations.mcp' has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:

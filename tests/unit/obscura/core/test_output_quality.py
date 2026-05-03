@@ -40,9 +40,7 @@ class TestScanText:
         assert any(v.pattern_name == "allowed_tools_slash" for v in violations)
 
     def test_allowed_tools_flag(self) -> None:
-        text = (
-            "Restart obscura with claude --allowedTools mcp__obs__prognostic_*"
-        )
+        text = "Restart obscura with claude --allowedTools mcp__obs__prognostic_*"
         violations = scan_text(text)
         assert any(v.pattern_name == "allowed_tools_flag" for v in violations)
 
@@ -52,17 +50,12 @@ class TestScanText:
         assert any(v.pattern_name == "policy_allow_slash" for v in violations)
 
     def test_one_time_permission_grant(self) -> None:
-        text = (
-            "The prognostic tools need a one-time permission grant from you."
-        )
+        text = "The prognostic tools need a one-time permission grant from you."
         violations = scan_text(text)
         assert any(v.pattern_name == "grant_one_time_permission" for v in violations)
 
     def test_claude_code_permission_wall(self) -> None:
-        text = (
-            "This looks like a Claude Code permission layer sitting above "
-            "Obscura."
-        )
+        text = "This looks like a Claude Code permission layer sitting above Obscura."
         violations = scan_text(text)
         assert any(v.pattern_name == "claude_code_sandbox" for v in violations)
 
@@ -72,9 +65,7 @@ class TestScanText:
         assert any(v.pattern_name == "approve_in_dialog" for v in violations)
 
     def test_reply_grant(self) -> None:
-        text = (
-            'or just reply "grant" or "yes" and I\'ll walk you through it'
-        )
+        text = 'or just reply "grant" or "yes" and I\'ll walk you through it'
         violations = scan_text(text)
         assert any(v.pattern_name == "reply_grant_or_yes" for v in violations)
 
@@ -98,7 +89,9 @@ class TestScanText:
     def test_still_erroring(self) -> None:
         text = "The permission was approved but the tool is still erroring."
         violations = scan_text(text)
-        assert any(v.pattern_name == "still_blocking_after_approval" for v in violations)
+        assert any(
+            v.pattern_name == "still_blocking_after_approval" for v in violations
+        )
 
     def test_full_transcript_finds_multiple(self) -> None:
         """The actual transcript that triggered this work should fire several patterns."""
@@ -142,7 +135,9 @@ class TestBuildCorrectionPrompt:
         from obscura.core.output_quality import build_correction_prompt
 
         result = build_correction_prompt(
-            [Violation(pattern_name="x", snippet="..."),],
+            [
+                Violation(pattern_name="x", snippet="..."),
+            ],
             [],
         )
         assert result == ""
@@ -181,9 +176,7 @@ class TestBuildCorrectionPrompt:
 
 
 class TestLogViolations:
-    def test_logs_warning_per_violation(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_logs_warning_per_violation(self, caplog: pytest.LogCaptureFixture) -> None:
         violations = [
             Violation(pattern_name="x", snippet="snippet a"),
             Violation(pattern_name="y", snippet="snippet b"),
@@ -198,9 +191,7 @@ class TestLogViolations:
         assert "snippet b" in joined
         assert "turn=3" in joined
 
-    def test_no_violations_no_logs(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_no_violations_no_logs(self, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
             log_violations([], turn=1)
         warnings = [r for r in caplog.records if r.levelno == logging.WARNING]

@@ -52,10 +52,7 @@ def _handler_logs(handler: ast.ExceptHandler) -> bool:
             # dlog.<anything>(...) — the deep-log singleton is logger-like.
             if isinstance(func, ast.Attribute):
                 base = func.value
-                if (
-                    isinstance(base, ast.Name)
-                    and base.id in LOGGER_LIKE_NAMES
-                ):
+                if isinstance(base, ast.Name) and base.id in LOGGER_LIKE_NAMES:
                     return True
     return False
 
@@ -106,7 +103,7 @@ def test_no_silent_except_blocks_in_obscura() -> None:
     )
     pytest.fail(
         f"{len(violations)} except handler(s) in obscura/ neither log nor "
-        f"re-raise. Add `logger.debug(\"...\", exc_info=True)` or use "
+        f're-raise. Add `logger.debug("...", exc_info=True)` or use '
         f"`contextlib.suppress(...)` if silence is truly intentional:\n"
         f"{formatted}"
     )

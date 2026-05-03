@@ -1,4 +1,5 @@
 """Test native-messaging framing (encode/decode round-trip)."""
+
 from __future__ import annotations
 
 from typing import Any

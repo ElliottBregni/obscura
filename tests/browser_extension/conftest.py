@@ -3,6 +3,7 @@
 These tests exercise the native-messaging host by simulating Chrome's
 stdin/stdout framing protocol. No actual Chrome instance is needed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -87,9 +88,7 @@ class HostProcess:
             except TimeoutError:
                 continue
 
-    async def recv_until(
-        self, type_: str, timeout: float = 15.0
-    ) -> dict[str, Any]:
+    async def recv_until(self, type_: str, timeout: float = 15.0) -> dict[str, Any]:
         """Read messages until one with the given type arrives."""
         deadline = asyncio.get_event_loop().time() + timeout
         while True:

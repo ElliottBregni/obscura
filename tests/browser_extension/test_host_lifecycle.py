@@ -3,6 +3,7 @@
 These tests spawn the actual host process and exercise the wire protocol.
 Marked as 'browser' so they can be skipped in fast CI runs.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,9 +47,8 @@ class TestHostBoot:
         await host.recv_until("ready", timeout=30)
         await host.send({"type": "send", "id": "empty-1", "prompt": ""})
         err = await host.recv_until("error")
-        assert (
-            "empty" in err.get("message", "").lower()
-            or "Empty" in err.get("message", "")
+        assert "empty" in err.get("message", "").lower() or "Empty" in err.get(
+            "message", ""
         )
 
 

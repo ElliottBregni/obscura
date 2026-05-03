@@ -675,7 +675,9 @@ class CopilotBackend(BackendToolHostMixin):
             request: PermissionRequest,
             _context: dict[str, str],
         ) -> PermissionRequestResult:
-            return PermissionRequestResult(kind=cast("PermissionRequestResultKind", "approved"))
+            return PermissionRequestResult(
+                kind=cast("PermissionRequestResultKind", "approved")
+            )
 
         config["on_permission_request"] = _approve_all
 
