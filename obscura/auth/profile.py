@@ -39,6 +39,8 @@ from typing import Any, cast
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from obscura.auth.cli_session import SupabaseCliConfig, get_access_token
+
 logger = logging.getLogger(__name__)
 
 # user_metadata key. Sibling of obscura_vault / obscura_vault_risk.
@@ -456,10 +458,6 @@ _singleton_config: tuple[str, str] | None = None
 def get_client() -> ProfileClient | None:
     """Return the process-wide profile client, or ``None`` when Supabase isn't configured."""
     global _singleton, _singleton_config
-
-    # lazy: avoid the obscura.auth → obscura.cli import cycle (cli.auth_commands
-    # imports obscura.auth.profile at module level).
-    from obscura.cli.auth_commands import SupabaseCliConfig, get_access_token
 
     cfg = SupabaseCliConfig.from_env()
     if cfg is None:

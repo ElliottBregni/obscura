@@ -87,12 +87,24 @@ from obscura.cli.widgets import (
     confirm_tool,
     render_notification_banner,
 )
+from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
 from obscura.core.client import ObscuraClient
+from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compiler.compiled import ToolRoutingConfig
 from obscura.core.context import load_obscura_memory
+from obscura.core.deep_log import dlog
 from obscura.core.event_store import SQLiteEventStore, SessionStatus
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_home
+from obscura.core.prompt_cache import PromptCacheManager
+from obscura.core.session_utils import (
+    check_concurrent_sessions,
+    generate_session_title,
+    install_signal_handlers,
+    register_session,
+    register_shutdown_handler,
+    unregister_session,
+)
 from obscura.core.settings import load_all_hooks
 from obscura.core.system_prompts import (
     compose_environment_context,
@@ -107,8 +119,14 @@ from obscura.core.types import (
     ToolChoice,
     ToolRouterCapable,
 )
+from obscura.eval.models import EvalRunSummary
+from obscura.eval.store import EvalResultStore
 from obscura.integrations.browser.client import attach_if_running
+from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summary
 from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+from obscura.kairos.frustration import FrustrationDetector
+from obscura.kairos.supervisor_hooks import register_kairos_hooks
+from obscura.kairos.uds_messaging import UDSInbox
 from obscura.memory_channels import (
     ContextRouter,
     TurnClassifier,
@@ -130,6 +148,7 @@ from obscura.tools.memory_tools import (
     make_memory_tool_specs,
 )
 from obscura.tools.system import UI, Session, get_system_tool_specs
+from obscura.voice.session import VoiceSession
 
 _log = logging.getLogger("obscura.cli")
 
@@ -174,8 +193,6 @@ async def repl(
         mcp_configs, mcp_names = _discover_mcp()
 
     # Create authenticated user for vector memory + memory tools
-    from obscura.auth.cli_user import current_cli_user
-
     cli_user = current_cli_user()
 
     # Initialize vector memory store
@@ -190,12 +207,6 @@ async def repl(
     turn_classifier = None
     if vector_store is not None:
         try:
-            from obscura.memory_channels import (
-                ContextRouter,
-                TurnClassifier,
-                load_channels_from_config,
-            )
-
             _channels = load_channels_from_config()
             if _channels:
                 context_router = ContextRouter(_channels, vector_store)
@@ -204,12 +215,6 @@ async def repl(
             pass
 
     # Compose system prompt
-    from obscura.core.context import load_obscura_memory
-    from obscura.core.system_prompts import (
-        compose_environment_context,
-        compose_system_prompt,
-    )
-
     include_default = not no_default_prompt
     if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
         include_default = False
@@ -233,8 +238,6 @@ async def repl(
     # Inject memory channel documentation
     if context_router is not None:
         try:
-            from obscura.tools.memory_tools import build_channels_prompt_section
-
             channels_doc = build_channels_prompt_section(context_router.channels)
             if channels_doc:
                 custom_sections.append(channels_doc)
@@ -247,8 +250,8 @@ async def repl(
 
     # Inject environment context (available plugins, capabilities, agent types)
     try:
+        # lazy: avoid circular dep with obscura.agent.agents via providers chain
         from obscura.agent import AGENT_TYPE_REGISTRY
-        from obscura.plugins.builtins import list_builtin_plugin_ids
 
         env_section = compose_environment_context(
             plugin_ids=list_builtin_plugin_ids(),
@@ -270,11 +273,8 @@ async def repl(
 
     # Inject KAIROS context
     try:
-        from obscura.kairos.engine import KairosEngine as _KairosEngineProbe
-        from obscura.kairos.engine import is_kairos_enabled as _kep
-
-        if _kep():
-            _probe_engine = _KairosEngineProbe()
+        if is_kairos_enabled():
+            _probe_engine = KairosEngine()
             _kairos_sys = _probe_engine.get_system_prompt_addition()
             if _kairos_sys:
                 custom_sections.append(_kairos_sys)
@@ -283,6 +283,7 @@ async def repl(
 
     # Inject coordinator system prompt
     try:
+        # lazy: avoid circular dep with obscura.agent.agents via providers chain
         from obscura.agent.coordinator import (
             get_coordinator_system_prompt,
             is_coordinator_mode,
@@ -291,6 +292,7 @@ async def repl(
         if is_coordinator_mode():
             custom_sections.append(get_coordinator_system_prompt())
             try:
+                # lazy: avoid circular dep with obscura.agent.agents via providers chain
                 from obscura.tools.swarm import build_agent_catalog, load_agent_configs
 
                 catalog = build_agent_catalog(load_agent_configs())
@@ -313,16 +315,12 @@ async def repl(
     system_tools: list[Any] = []
     if tools_enabled:
         try:
-            from obscura.tools.system import get_system_tool_specs
-
             system_tools = get_system_tool_specs()
         except Exception:
             pass
 
         if vector_store is not None:
             try:
-                from obscura.tools.memory_tools import make_memory_tool_specs
-
                 system_tools.extend(make_memory_tool_specs(cli_user))
             except Exception:
                 pass
@@ -354,12 +352,8 @@ async def repl(
             )
 
             if _ws_include or _ws_exclude:
-                from obscura.plugins.loader import get_filtered_builtin_tool_specs
-
                 plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
             else:
-                from obscura.plugins.loader import get_all_builtin_tool_specs
-
                 plugin_tools = get_all_builtin_tool_specs()
 
             for tool in plugin_tools:
@@ -372,8 +366,6 @@ async def repl(
     # Backfill capability field
     if tools_enabled and system_tools:
         try:
-            from obscura.plugins.loader import get_capability_map
-
             _cap_map = get_capability_map()
             system_tools = [
                 _dc_replace(t, capability=_cap_map[t.name])
@@ -387,8 +379,6 @@ async def repl(
     # Filter tools by capability grants
     if tools_enabled and system_tools:
         try:
-            from obscura.plugins.capabilities import resolve_allowed_tools_from_config
-
             _allowed = resolve_allowed_tools_from_config()
             if _allowed is not None:
                 system_tools = [
@@ -404,20 +394,11 @@ async def repl(
     # Wire the ask_user callback
     if tools_enabled:
         try:
-            from obscura.tools.system import UI as _UI_for_ask
-
             async def _ask_user_handler(
                 question: str,
                 choices: list[str],
                 allow_custom: bool = False,
             ) -> str:
-                from obscura.cli.widgets import (
-                    AttentionWidgetRequest,
-                    ModelQuestionRequest,
-                    ask_model_question,
-                    confirm_attention,
-                )
-
                 if choices:
                     result = await confirm_attention(
                         AttentionWidgetRequest(
@@ -434,26 +415,19 @@ async def repl(
                 )
                 return result.text
 
-            _UI_for_ask.set_ask_user_callback(_ask_user_handler)
+            UI.set_ask_user_callback(_ask_user_handler)
         except Exception:
             pass
 
     # Wire plan-mode callbacks
     if tools_enabled:
         try:
-            from obscura.tools.system import Session as _Session_for_plan
-
             def _set_permission_mode(mode: str) -> None:
                 ctx.permission_mode = mode  # type: ignore[name-defined]  # set later
 
-            _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
+            Session.set_permission_mode_callback(_set_permission_mode)
 
             async def _plan_approval_handler(plan_summary: str) -> bool:
-                from obscura.cli.widgets import (
-                    PermissionWidgetRequest,
-                    confirm_permission,
-                )
-
                 result = await confirm_permission(
                     PermissionWidgetRequest(
                         action="Exit plan mode and begin implementation",
@@ -463,24 +437,17 @@ async def repl(
                 )
                 return result.action == "approve"
 
-            _Session_for_plan.set_plan_approval_callback(_plan_approval_handler)
+            Session.set_plan_approval_callback(_plan_approval_handler)
         except Exception:
             pass
 
     # Wire user_interact callback
     if tools_enabled:
         try:
-            from obscura.tools.system import UI as _UI_for_interact
-
             async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
                 mode = kwargs.get("mode", "question")
 
                 if mode == "permission":
-                    from obscura.cli.widgets import (
-                        PermissionWidgetRequest,
-                        confirm_permission,
-                    )
-
                     result = await confirm_permission(
                         PermissionWidgetRequest(
                             action=kwargs.get("action", ""),
@@ -491,11 +458,6 @@ async def repl(
                     return {"approved": result.action == "approve"}
 
                 if mode == "notify":
-                    from obscura.cli.widgets import (
-                        NotifyWidgetRequest,
-                        render_notification_banner,
-                    )
-
                     render_notification_banner(
                         NotifyWidgetRequest(
                             title=kwargs.get("title", ""),
@@ -506,14 +468,9 @@ async def repl(
                     return {}
 
                 if mode == "multi_select":
-                    from obscura.cli.widgets import (
-                        MultiSelectRequest,
-                        ask_multi_select as _ask_multi_select,
-                    )
-
                     choices = kwargs.get("choices", [])
                     question = kwargs.get("question", "")
-                    result = await _ask_multi_select(
+                    result = await ask_multi_select(
                         MultiSelectRequest(
                             question=question,
                             choices=tuple(choices),
@@ -523,13 +480,6 @@ async def repl(
                     return {"selected": selected}
 
                 # question mode (default)
-                from obscura.cli.widgets import (
-                    AttentionWidgetRequest,
-                    ModelQuestionRequest,
-                    ask_model_question,
-                    confirm_attention,
-                )
-
                 choices = kwargs.get("choices", [])
                 question = kwargs.get("question", "")
                 if choices:
@@ -555,8 +505,6 @@ async def repl(
     # Load project hooks
     project_hooks = None
     try:
-        from obscura.core.settings import load_all_hooks
-
         _hook_registry = load_all_hooks()
         if _hook_registry.count > 0:
             project_hooks = _hook_registry
@@ -566,8 +514,6 @@ async def repl(
     # Wire memory channel TOOL_CALL hook
     _tool_router_ref = None
     if context_router is not None:
-        from obscura.core.hooks import HookRegistry
-
         if project_hooks is None:
             project_hooks = HookRegistry()
 
@@ -583,11 +529,7 @@ async def repl(
     # Wire Kairos tool-call hooks
     _kairos_engine: Any = None
     try:
-        from obscura.kairos.engine import is_kairos_enabled as _kie2
-
-        if _kie2():
-            from obscura.core.hooks import HookRegistry
-
+        if is_kairos_enabled():
             if project_hooks is None:
                 project_hooks = HookRegistry()
 
@@ -618,16 +560,6 @@ async def repl(
         # Wire eval-driven tool router
         if tools_enabled:
             try:
-                from obscura.core.compiler.compiled import ToolRoutingConfig
-                from obscura.core.tool_router import ToolRouter
-                from obscura.core.tool_score_index import ToolScoreIndex
-                from obscura.plugins.loader import (
-                    PluginLoader,
-                    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
-                )
-                from obscura.plugins.models import PluginSpec
-                from obscura.plugins.registries.capability_index import CapabilityIndex
-
                 _routing_config = ToolRoutingConfig()
                 _score_index = ToolScoreIndex()
                 _cap_index = CapabilityIndex()
@@ -647,7 +579,6 @@ async def repl(
                     capability_index=_cap_index,
                     backend=backend,
                 )
-                from obscura.core.types import ToolRouterCapable
 
                 _backend_ref = client._backend  # pyright: ignore[reportPrivateUsage]
                 if isinstance(_backend_ref, ToolRouterCapable):
@@ -718,8 +649,6 @@ async def repl(
         browser_status: dict[str, Any] | None = None
         if tools_enabled:
             try:
-                from obscura.integrations.browser.client import attach_if_running
-
                 browser_bridge_client, browser_status = await attach_if_running(
                     client.register_tool,
                 )
@@ -745,9 +674,6 @@ async def repl(
         supervisor: Any = None
         if supervise and agent_infos:
             try:
-                from obscura.agent.supervisor import AgentSupervisor
-                from obscura.auth.cli_user import current_cli_user
-
                 sup_user = current_cli_user()
                 agents_yaml = resolve_obscura_home() / "agents.yaml"
                 supervisor = AgentSupervisor(
@@ -763,8 +689,6 @@ async def repl(
                 print_warning(f"Supervisor failed to start: {exc}")
 
         # Start iMessage daemon (only when supervisor is NOT running)
-        from obscura.cli._daemon import start_imessage_daemon
-
         daemon_task: asyncio.Task[None] | None = None
         _daemon_client: Any = None
         if supervisor_task is None:
@@ -785,17 +709,13 @@ async def repl(
         ctx._prompt_status = prompt_status  # type: ignore[attr-defined]
 
         def _refresh_prompt_status() -> None:
-            from obscura.cli.prompt import RunningAgentInfo
-
             prompt_status.mode = mm.current.value
             prompt_status.model = ctx.model or ""
             running: list[str] = []
             details: list[RunningAgentInfo] = []
             if ctx.runtime is not None:
                 try:
-                    from obscura.agent.agents import AgentStatus as _AS
-
-                    _active = {_AS.RUNNING, _AS.WAITING, _AS.PENDING}
+                    _active = {AgentStatus.RUNNING, AgentStatus.WAITING, AgentStatus.PENDING}
                     for agent in ctx.runtime.list_agents():
                         if agent.status not in _active:
                             continue
@@ -831,9 +751,7 @@ async def repl(
             task_count = 0
             if ctx.runtime is not None:
                 try:
-                    from obscura.agent.agents import AgentStatus as _AS2
-
-                    _active2 = {_AS2.RUNNING, _AS2.WAITING, _AS2.PENDING}
+                    _active2 = {AgentStatus.RUNNING, AgentStatus.WAITING, AgentStatus.PENDING}
                     task_count += sum(
                         1 for a in ctx.runtime.list_agents() if a.status in _active2
                     )
@@ -842,8 +760,6 @@ async def repl(
             if daemon_task is not None and not daemon_task.done():
                 task_count += 1
             prompt_status.task_count = task_count
-            from obscura.cli.commands import estimate_effective_context_tokens
-
             tokens = estimate_effective_context_tokens(ctx)
             window = ctx.client.context_window
             prompt_status.ctx_tokens = tokens
@@ -864,13 +780,9 @@ async def repl(
         _kairos_engine = None
         _kairos_hooks_registered = False
         try:
-            from obscura.kairos.engine import KairosEngine, is_kairos_enabled
-
             if is_kairos_enabled():
                 _kairos_engine = KairosEngine()
                 if supervisor is not None and hasattr(supervisor, "hooks"):
-                    from obscura.kairos.supervisor_hooks import register_kairos_hooks
-
                     register_kairos_hooks(supervisor.hooks, _kairos_engine)
                     _kairos_hooks_registered = True
                 else:
@@ -888,8 +800,6 @@ async def repl(
 
         # Wire AgentLoop into Arbiter
         try:
-            from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
-
             _al = getattr(client, "_loop", None)
             if _al is not None:
                 _reg_arbiter_loop(_al)
@@ -899,8 +809,6 @@ async def repl(
         # --- Tips scheduler ---
         _tip_scheduler = None
         try:
-            from obscura.cli.tips import TipScheduler
-
             _tip_scheduler = TipScheduler()
         except Exception as _e:
             _swallow("tips_init", _e)
@@ -908,11 +816,7 @@ async def repl(
         # --- Frustration detector ---
         _frustration_detector = None
         try:
-            from obscura.kairos.engine import is_kairos_enabled as _kairos_enabled
-
-            if _kairos_enabled():
-                from obscura.kairos.frustration import FrustrationDetector
-
+            if is_kairos_enabled():
                 _frustration_detector = FrustrationDetector()
         except Exception as _e:
             _swallow("frustration_init", _e)
@@ -920,11 +824,7 @@ async def repl(
         # --- Away summary tracker ---
         _away_tracker = None
         try:
-            from obscura.kairos.engine import is_kairos_enabled as _kairos_enabled2
-
-            if _kairos_enabled2():
-                from obscura.kairos.away_summary import AwaySummaryTracker
-
+            if is_kairos_enabled():
                 _away_tracker = AwaySummaryTracker()
         except Exception as _e:
             _swallow("away_init", _e)
@@ -932,16 +832,12 @@ async def repl(
         # --- Prompt cache ---
         _prompt_cache = None
         try:
-            from obscura.core.prompt_cache import PromptCacheManager
-
             _prompt_cache = PromptCacheManager()
         except Exception:
             pass
 
         # --- Register cleanup tasks ---
         try:
-            from obscura.core.cleanup import cleanup_stale_files, register_cleanup
-
             register_cleanup(
                 "stale_files",
                 lambda: cleanup_stale_files(max_age_days=30),
@@ -951,14 +847,6 @@ async def repl(
 
         # --- Concurrent session detection ---
         try:
-            from obscura.core.session_utils import (
-                check_concurrent_sessions,
-                install_signal_handlers,
-                register_session,
-                register_shutdown_handler,
-                unregister_session,
-            )
-
             register_session(sid, backend=backend_name, model=model_name or "")
             register_shutdown_handler(lambda: unregister_session(sid))
             install_signal_handlers()
@@ -972,8 +860,6 @@ async def repl(
 
         # --- Deep log session start ---
         try:
-            from obscura.core.deep_log import dlog
-
             dlog.session_event(
                 "start",
                 session_id=sid,
@@ -986,8 +872,6 @@ async def repl(
         # --- UDS inbox for cross-session messaging ---
         _uds_inbox = None
         try:
-            from obscura.kairos.uds_messaging import UDSInbox
-
             _uds_inbox = UDSInbox(sid)
 
             def _on_peer_message(msg: dict[str, Any]) -> None:
@@ -1049,8 +933,6 @@ async def repl(
                         console.print("[dim]Voice mode is off. Enable with /voice on[/]")
                         continue
                     try:
-                        from obscura.voice.session import VoiceSession
-
                         _vsession = VoiceSession()
                         if not _vsession.is_available:
                             console.print(
@@ -1084,8 +966,6 @@ async def repl(
                     if getattr(ctx, "effort_level", "medium") != "max":
                         ctx.effort_level = "max"
                         try:
-                            from obscura.cli.tui_effects import ultrathink_banner
-
                             ultrathink_banner()
                         except Exception:
                             console.print("[bold bright_magenta]⚡ ULTRATHINK activated[/]")
@@ -1109,8 +989,6 @@ async def repl(
                 if _away_tracker is not None:
                     try:
                         if _away_tracker.should_generate():
-                            from obscura.kairos.away_summary import generate_away_summary
-
                             _summary = await generate_away_summary(ctx.message_history)
                             if _summary:
                                 console.print(f"[dim]{_summary}[/]")

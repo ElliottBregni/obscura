@@ -38,6 +38,7 @@ from typing import Any, cast
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
+from obscura.auth.cli_session import SupabaseCliConfig, get_access_token
 from obscura.auth.secrets import KEYRING_SERVICE as _KEYRING_SERVICE
 from obscura.auth.secrets import append_audit as _append_audit
 from datetime import UTC
@@ -618,10 +619,6 @@ _singleton_config: tuple[str, str] | None = None
 
 def get_client() -> SupabaseVaultClient | None:
     global _singleton, _singleton_config
-
-    # lazy: avoid the obscura.auth → obscura.cli import cycle (cli.auth_commands
-    # imports obscura.auth.supabase_secrets at module level).
-    from obscura.cli.auth_commands import SupabaseCliConfig, get_access_token
 
     cfg = SupabaseCliConfig.from_env()
     if cfg is None:

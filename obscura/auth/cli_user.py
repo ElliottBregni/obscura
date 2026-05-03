@@ -1,7 +1,7 @@
 """obscura.auth.cli_user — AuthenticatedUser for the CLI/daemon, sourced
 from the Supabase session stored by ``obscura-auth login``.
 
-The session is persisted by :mod:`obscura.cli.auth_commands` after a
+The session is persisted by :mod:`obscura.auth.cli_session` after a
 successful SSO login against ``auth.modernized-ai.com``. This helper loads
 it and projects the JWT claims into the :class:`AuthenticatedUser` shape
 used by tools, daemons, and background workers that run outside a FastAPI
@@ -16,6 +16,7 @@ import base64
 import json
 from typing import Any, cast
 
+from obscura.auth.cli_session import get_access_token, load_session
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.supabase import extract_roles
 
@@ -30,9 +31,6 @@ def current_cli_user() -> AuthenticatedUser:
     Raises :class:`CliAuthError` if no session is stored — run
     ``obscura-auth login`` first.
     """
-    # Local imports to avoid the obscura.auth → obscura.cli import cycle.
-    from obscura.cli.auth_commands import get_access_token, load_session
-
     session = load_session()
     if session is None:
         raise CliAuthError(

@@ -8,19 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from obscura.auth.models import AuthenticatedUser
-from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
-from obscura.cli.auth_commands import (
+from obscura.auth.cli_session import (
     StoredSession,
     SupabaseCliConfig,
+    _sync_provider_secrets_to_supabase,  # pyright: ignore[reportPrivateUsage]
     clear_session,
     get_access_token,
     get_github_token,
     load_session,
 )
-from obscura.cli.auth_commands import (
-    _sync_provider_secrets_to_supabase,  # pyright: ignore[reportPrivateUsage]
-)
+from obscura.auth.models import AuthenticatedUser
+from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.types import Backend
 
