@@ -281,6 +281,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# Vulture whitelist — references-as-statements are intentional (vulture
+# treats them as "uses" to silence false-positive dead-code flags). Don't
+# lint this file as if it were regular Python.
+".vulture_whitelist.py" = ["B018", "F821"]
+
 # Pre-existing ignores
 "scripts/sync.py" = ["F541"]
 "scripts/test_server.py" = ["F541"]

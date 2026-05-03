@@ -24,7 +24,7 @@ async def _discover(params: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=_BASE, timeout=15) as c:
             r = await c.get("/entries", params=params)
             r.raise_for_status()
-            return r.json()  # type: ignore[no-any-return]
+            return r.json()
     except Exception as e:
         logger.debug("suppressed exception in _discover", exc_info=True)
         return {"error": str(e)}
@@ -32,7 +32,7 @@ async def _discover(params: dict[str, Any]) -> dict[str, Any]:
 
 def _load_persisted() -> list[dict[str, Any]]:
     if _PERSIST_PATH.exists():
-        return json.loads(_PERSIST_PATH.read_text())  # type: ignore[no-any-return]
+        return json.loads(_PERSIST_PATH.read_text())
     return []
 
 

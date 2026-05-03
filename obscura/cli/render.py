@@ -423,14 +423,14 @@ class StreamRenderer:
             if hasattr(self._ss, "update"):
                 self._ss.update({"active": True, "text": msg, "preview": ""})
             else:
-                self._ss.active = True  # type: ignore[attr-defined]
-                self._ss.text = msg  # type: ignore[attr-defined]
-                self._ss.preview = ""  # type: ignore[attr-defined]
+                self._ss.active = True
+                self._ss.text = msg
+                self._ss.preview = ""
         except Exception:
             # best-effort
             logger.debug("suppressed exception in _start_thinking", exc_info=True)
             try:
-                self._ss.active = True  # type: ignore[attr-defined]
+                self._ss.active = True
             except Exception:
                 logger.debug("suppressed exception in _start_thinking", exc_info=True)
 
@@ -493,13 +493,13 @@ class StreamRenderer:
                 except Exception:
                     # fallback to attribute assignment
                     logger.debug("suppressed exception in _stop_status", exc_info=True)
-                    self._ss.active = False  # type: ignore[attr-defined]
-                    self._ss.text = ""  # type: ignore[attr-defined]
-                    self._ss.preview = ""  # type: ignore[attr-defined]
+                    self._ss.active = False
+                    self._ss.text = ""
+                    self._ss.preview = ""
             else:
-                self._ss.active = False  # type: ignore[attr-defined]
-                self._ss.text = ""  # type: ignore[attr-defined]
-                self._ss.preview = ""  # type: ignore[attr-defined]
+                self._ss.active = False
+                self._ss.text = ""
+                self._ss.preview = ""
         except Exception:
             logger.debug("suppressed exception in _stop_status", exc_info=True)
 
@@ -639,9 +639,9 @@ class StreamRenderer:
                         {"active": True, "text": f"running {summary}...", "preview": ""}
                     )
                 else:
-                    self._ss.active = True  # type: ignore[attr-defined]
-                    self._ss.text = f"running {summary}..."  # type: ignore[attr-defined]
-                    self._ss.preview = ""  # type: ignore[attr-defined]
+                    self._ss.active = True
+                    self._ss.text = f"running {summary}..."
+                    self._ss.preview = ""
             except Exception:
                 logger.debug("suppressed exception in _show_tool_call", exc_info=True)
 

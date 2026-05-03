@@ -176,21 +176,21 @@ def _ensure_browser_tools() -> list[Any]:
     global _browser_tools_inited
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import browser_tools as _bt  # type: ignore[import-not-found]
+        import browser_tools as _bt
     except Exception as exc:
         log.warning("browser_tools import failed: %r", exc)
         return []
     if not _browser_tools_inited:
-        _bt.init(_write_frame)  # type: ignore[union-attr]
+        _bt.init(_write_frame)
         _browser_tools_inited = True
-    return list(_bt.TOOLS)  # type: ignore[arg-type]
+    return list(_bt.TOOLS)
 
 
 def _resolve_browser_tool(req_id: str, ok: bool, result: Any, error: str = "") -> None:
     try:
-        import browser_tools as _bt  # type: ignore[import-not-found]
+        import browser_tools as _bt
 
-        _bt.resolve(req_id, ok, result, error)  # type: ignore[union-attr]
+        _bt.resolve(req_id, ok, result, error)
     except Exception:
         log.exception("browser tool resolve failed")
 
@@ -671,7 +671,7 @@ async def _ensure_browser_mcp_server() -> str | None:
         return _browser_mcp_url
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import browser_mcp_server as _bms  # type: ignore[import-not-found]
+        import browser_mcp_server as _bms
     except Exception:
         log.exception("browser_mcp_server import failed — Codex browser tools disabled")
         return None
@@ -1422,7 +1422,7 @@ async def _main() -> None:
     # Shut the in-process browser MCP server if it was started for a
     # Codex session. Safe to call when it never ran.
     try:
-        import browser_mcp_server as _bms  # type: ignore[import-not-found]
+        import browser_mcp_server as _bms
 
         await _bms.stop_browser_mcp()
     except Exception:

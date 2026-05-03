@@ -64,7 +64,7 @@ def load_spec_file(path: Path) -> AnySpec:
             stacklevel=2,
         )
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
 
             text = path.read_text(encoding="utf-8")
             raw = yaml.safe_load(text)

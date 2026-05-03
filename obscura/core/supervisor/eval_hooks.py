@@ -222,7 +222,7 @@ async def session_eval_gate_handler(context: dict[str, Any]) -> bool:
             continue
         if f.endswith((".yaml", ".yml")):
             try:
-                import yaml  # type: ignore[import-untyped]
+                import yaml
 
                 with open(f) as fh:
                     yaml.safe_load(fh)

@@ -65,7 +65,7 @@ class Goal:
     progress: int = 0
     last_worked: str | None = None
     body: str = ""
-    path: Path = field(default_factory=lambda: Path())
+    path: Path = field(default_factory=Path)
     project_root: str = ""
 
     @property
@@ -328,7 +328,7 @@ class GoalBoard:
             return None
         if task_id in goal.tasks:
             return goal
-        return self.update(goal_id, tasks=list(goal.tasks) + [task_id])
+        return self.update(goal_id, tasks=[*list(goal.tasks), task_id])
 
     def sync_task_progress(self, goal_id: str) -> Goal | None:
         """Update goal progress based on linked task statuses."""

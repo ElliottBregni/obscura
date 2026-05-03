@@ -103,7 +103,7 @@ async def HFProvider(**kwargs: Any) -> dict[str, Any]:
 
         # Attempt JSON parse; fall back to plain text.
         try:
-            return json.loads(output)  # type: ignore[no-any-return]
+            return json.loads(output)
         except (json.JSONDecodeError, ValueError):
             logger.debug("suppressed exception in HFProvider", exc_info=True)
             return {"output": output.strip()}

@@ -61,7 +61,7 @@ def _find_related_tests(
 
     for fpath in changed_files:
         p = Path(fpath)
-        if not p.suffix == ".py":
+        if p.suffix != ".py":
             continue
         # Skip test files themselves.
         if p.name.startswith("test_"):

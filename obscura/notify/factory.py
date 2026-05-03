@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, cast
 
+from .postgres_impl import PostgresStorage
 from .sqlite_impl import SQLiteStorage
 import logging
 
@@ -28,14 +29,14 @@ def create_storage(db_url: str | None = None) -> Storage:
     """Create a Storage implementation based on db_url or NOTIFY_DATABASE_URL env var.
 
     Defaults to SQLite file at ~/.obscura/notify.db when not provided.
-    If db_url starts with 'postgres' it returns PostgresStorage (lazy import).
+    If db_url starts with 'postgres' returns PostgresStorage; ``postgres_impl``
+    itself already gracefully degrades when asyncpg isn't installed (the
+    optional dependency is wrapped in a try/except at module top), so loading
+    it eagerly here costs nothing in the asyncpg-absent case.
     """
     resolved = db_url or os.environ.get("NOTIFY_DATABASE_URL") or _default_db_url()
 
     if resolved.startswith("postgres"):
-        # lazy import to avoid requiring asyncpg unless used
-        from .postgres_impl import PostgresStorage
-
         return PostgresStorage(resolved)
 
     # treat everything else as sqlite

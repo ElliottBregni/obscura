@@ -155,9 +155,9 @@ class ProfileStore:
                     else entry.text,
                     category=category,
                     confidence=float(meta.get("confidence", 1.0)),
-                    source=meta.get("source", "user_stated"),  # type: ignore[arg-type]
+                    source=meta.get("source", "user_stated"),
                     learned_at=str(meta.get("learned_at", "")),
-                    supersedes=meta.get("supersedes"),  # type: ignore[arg-type]
+                    supersedes=meta.get("supersedes"),
                 )
 
                 score = compute_decay(

@@ -278,7 +278,7 @@ async def microcompact(
     )
 
     compacted: list[Any] = []
-    for seg, summary in zip(segments, summaries):
+    for seg, summary in zip(segments, summaries, strict=False):
         if isinstance(summary, str) and summary:
             compacted.append(_make_microcompact_boundary(summary, len(seg)))
         else:

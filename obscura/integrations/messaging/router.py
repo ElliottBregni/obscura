@@ -36,7 +36,7 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol
 
 from obscura.core.paths import resolve_obscura_home
@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class ChannelMode(str, Enum):
+class ChannelMode(StrEnum):
     """Execution mode for a channel.
 
     CHAT    — standard single-turn AgentLoop (snappy, conversational).

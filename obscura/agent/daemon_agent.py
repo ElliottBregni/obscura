@@ -265,7 +265,7 @@ class DaemonAgent:
         self._last_heartbeat_monotonic: float = 0.0
         self._lock_name = f"daemon:{self._name}"
         self._lock_owner = f"{self._agent_id}:{id(self)}"
-        # 45 s = 4.5× the heartbeat interval (10 s).  A crashed process that
+        # 45 s = 4.5x the heartbeat interval (10 s).  A crashed process that
         # stops sending heartbeats will lose its lock after 45 s, allowing a
         # fresh daemon to start promptly.  The old 300 s window caused the bot
         # to appear "dead" for up to 5 minutes after an unclean exit.

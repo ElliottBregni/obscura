@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 _psycopg2: Any
 _RealDictCursor: Any
 try:
-    import psycopg2  # pyright: ignore[reportMissingImports]
-    import psycopg2.pool  # pyright: ignore[reportMissingImports, reportUnusedImport]  # noqa: F401  needed for psycopg2.pool side-effect load
-    from psycopg2.extras import RealDictCursor  # pyright: ignore[reportMissingImports]
+    import psycopg2
+    import psycopg2.pool  # noqa: F401  # pyright: ignore[reportUnusedImport]  needed for side-effect load
+    from psycopg2.extras import RealDictCursor
 
     _has_psycopg2 = True
     _psycopg2 = psycopg2

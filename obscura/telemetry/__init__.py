@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """obscura.telemetry — Bootstrap for OpenTelemetry tracing, metrics, and structured logging.
 
 Initializes OTel TracerProvider, MeterProvider, and structlog. Safe to call

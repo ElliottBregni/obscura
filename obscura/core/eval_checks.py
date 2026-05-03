@@ -194,7 +194,7 @@ def check_written_yaml_toml(
         return None
     if path.endswith((".yaml", ".yml")):
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
 
             with open(path) as f:
                 yaml.safe_load(f)

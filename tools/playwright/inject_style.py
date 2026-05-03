@@ -1,4 +1,4 @@
-from playwright.sync_api import sync_playwright, Browser, BrowserContext
+from playwright.sync_api import sync_playwright, BrowserContext
 
 STYLE = """
 /* Green theme injected by inject_style.py */
@@ -18,7 +18,7 @@ def get_style() -> str:
 
 def _load_cookies(context: BrowserContext, cookies_file: str):
     import json
-    with open(cookies_file, 'r', encoding='utf-8') as f:
+    with open(cookies_file, encoding='utf-8') as f:
         data = json.load(f)
     # Expect a list of cookie dicts compatible with Playwright add_cookies
     if not isinstance(data, list):

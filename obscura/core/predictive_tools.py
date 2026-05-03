@@ -136,7 +136,7 @@ class ToolPrediction:
 
     tool: str
     args: dict[str, Any]
-    confidence: float  # 0.0 – 1.0
+    confidence: float  # 0.0 - 1.0
 
 
 # Patterns: model text → likely tool call.

@@ -129,7 +129,7 @@ def turn_summary(
         tool_parts: list[str] = []
         for name, count in counts.items():
             if count > 1:
-                tool_parts.append(f"{name} ×{count}")
+                tool_parts.append(f"{name} x{count}")
             else:
                 tool_parts.append(name)
         parts.append(

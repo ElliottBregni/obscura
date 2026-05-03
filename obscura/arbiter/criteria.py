@@ -52,7 +52,7 @@ class CriterionResult:
 
     criterion: str
     satisfied: bool
-    confidence: float  # 0.0 – 1.0
+    confidence: float  # 0.0 - 1.0
     reason: str
     method: str  # "tests" | "lint" | "file_exists" | "no_errors" | "keyword"
 

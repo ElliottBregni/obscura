@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """obscura.tools.browser — Browser automation tool via Playwright.
 
 Provides page navigation, content extraction, screenshots, and

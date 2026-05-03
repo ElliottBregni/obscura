@@ -508,7 +508,7 @@ class TurnState:
 
     def add_tool_call(self, tc: ToolCallInfo) -> TurnState:
         """Return a new state with *tc* appended to tool_calls."""
-        return self.replace(tool_calls=self.tool_calls + (tc,))
+        return self.replace(tool_calls=(*self.tool_calls, tc))
 
     def add_emitted_key(self, key: str) -> TurnState:
         """Return a new state with *key* added to emitted_keys."""
@@ -2876,7 +2876,7 @@ class AgentLoop:
             content=[ContentBlock(kind="text", text=summary_text)],
         )
 
-        new_messages = [summary_msg] + keep
+        new_messages = [summary_msg, *keep]
         new_kwargs = {**kwargs, "messages": new_messages}
 
         # Reset accumulated chars/tokens and mark compaction as attempted
@@ -2943,7 +2943,7 @@ class AgentLoop:
             content=[ContentBlock(kind="text", text=summary)],
         )
 
-        new_kwargs = {**kwargs, "messages": [summary_msg] + keep}
+        new_kwargs = {**kwargs, "messages": [summary_msg, *keep]}
         self._accumulated_chars = sum(
             len(getattr(b, "text", "") or "") for m in keep for b in m.content
         )

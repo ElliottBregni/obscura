@@ -38,7 +38,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any, Awaitable, Callable
+from typing import Any
+from collections.abc import Awaitable, Callable
 
 from obscura.core.types import ToolSpec
 
@@ -92,7 +93,7 @@ async def _call(op: str, args: dict[str, Any], *, timeout: float | None = None) 
             {"type": "browser-tool", "id": req_id, "op": op, "args": args},
         )
         return await asyncio.wait_for(fut, timeout=timeout or _DEFAULT_TIMEOUT)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         msg = f"browser tool '{op}' timed out"
         raise RuntimeError(msg) from exc
     finally:

@@ -40,8 +40,8 @@ import logging
 import socket
 from typing import TYPE_CHECKING, Any
 
-import uvicorn  # type: ignore[import-untyped]
-from mcp.server.fastmcp import FastMCP  # type: ignore[import-untyped]
+import uvicorn
+from mcp.server.fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -97,7 +97,7 @@ async def start_browser_mcp(
     # so callers don't race the first connection.
     try:
         await asyncio.wait_for(_wait_started(server), timeout=ready_timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         await stop_browser_mcp()
         msg = f"browser MCP server failed to start within {ready_timeout}s"
         raise RuntimeError(msg) from None
@@ -121,7 +121,7 @@ async def stop_browser_mcp() -> None:
     if task is not None:
         try:
             await asyncio.wait_for(task, timeout=3.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             task.cancel()
             with _suppress_exc():
                 await task
@@ -154,7 +154,7 @@ def _build_fastmcp_app() -> Any:
     """Create a FastMCP instance populated with the browser tools."""
     # Lazy import so this module can be unit-tested without browser_tools
     # being on sys.path.
-    import browser_tools  # type: ignore[import-not-found]
+    import browser_tools
 
     mcp = FastMCP("obscura-browser", stateless_http=True)
 

@@ -393,7 +393,7 @@ def decode_jwt_payload(token: str) -> dict[str, Any]:
         if len(parts) != 3:
             return {}
         padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
-        return json.loads(base64.urlsafe_b64decode(padded))  # type: ignore[no-any-return]
+        return json.loads(base64.urlsafe_b64decode(padded))
     except Exception:
         logger.debug("suppressed exception in decode_jwt_payload", exc_info=True)
         return {}

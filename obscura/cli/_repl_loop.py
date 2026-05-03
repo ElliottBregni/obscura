@@ -416,7 +416,7 @@ async def repl(
         try:
 
             def _set_permission_mode(mode: str) -> None:
-                ctx.permission_mode = mode  # type: ignore[name-defined]  # set later
+                ctx.permission_mode = mode  # set later
 
             Session.set_permission_mode_callback(_set_permission_mode)
 

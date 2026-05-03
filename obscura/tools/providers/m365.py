@@ -57,7 +57,7 @@ async def M365Provider(**kwargs: Any) -> dict[str, Any]:
             }
 
         try:
-            return json.loads(output)  # type: ignore[no-any-return]
+            return json.loads(output)
         except (json.JSONDecodeError, ValueError):
             logger.debug("suppressed exception in M365Provider", exc_info=True)
             return {"output": output.strip()}

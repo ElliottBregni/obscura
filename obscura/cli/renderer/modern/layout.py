@@ -159,7 +159,7 @@ class LayoutEngine:
         """
         result = LayoutResult()
         root_region = Region(x=0, y=0, width=terminal_width, height=terminal_height)
-        self._layout_node(root, root_region, result)  # type: ignore[arg-type]
+        self._layout_node(root, root_region, result)
         return result
 
     def _layout_node(

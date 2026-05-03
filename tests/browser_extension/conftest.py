@@ -11,9 +11,9 @@ import json
 import struct
 import sys
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
+from collections.abc import AsyncGenerator
 
-import pytest
 import pytest_asyncio
 
 HOST_SCRIPT = (
@@ -84,7 +84,7 @@ class HostProcess:
                 if not chunk:
                     raise EOFError("Host process closed stdout")
                 self._buf += chunk
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def recv_until(
@@ -126,7 +126,7 @@ class HostProcess:
 
 
 @pytest_asyncio.fixture
-async def host() -> AsyncGenerator[HostProcess, None]:
+async def host() -> AsyncGenerator[HostProcess]:
     """Launch the native host as a subprocess and yield a HostProcess wrapper."""
     proc = await asyncio.create_subprocess_exec(
         sys.executable,

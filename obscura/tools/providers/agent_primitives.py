@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 """High-leverage internet/infra/data primitive handlers for plugin manifests."""
 
 from __future__ import annotations

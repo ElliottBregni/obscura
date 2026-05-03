@@ -73,7 +73,7 @@ def try_load_config(
 
 def dump_toml(data: dict[str, Any], path: Path) -> None:
     """Write *data* as TOML to *path*."""
-    import tomli_w  # type: ignore[import-untyped]
+    import tomli_w
 
     with open(path, "wb") as f:
         tomli_w.dump(data, f)
@@ -81,7 +81,7 @@ def dump_toml(data: dict[str, Any], path: Path) -> None:
 
 def dumps_toml(data: dict[str, Any]) -> str:
     """Serialize *data* to a TOML string."""
-    import tomli_w  # type: ignore[import-untyped]
+    import tomli_w
 
     return tomli_w.dumps(data)
 
@@ -264,7 +264,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
     except ImportError as exc:
         msg = f"PyYAML is required to read {path.name}; install it or convert to TOML."
         raise ValueError(

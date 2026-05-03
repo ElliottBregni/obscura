@@ -111,7 +111,7 @@ def parse_frontmatter(
     metadata = {}
     if yaml_text.strip():
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
 
             parsed: Any = yaml.safe_load(yaml_text)
             if isinstance(parsed, dict):

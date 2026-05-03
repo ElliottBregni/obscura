@@ -673,7 +673,7 @@ def make_send_message_tool(ctx: SwarmToolContext) -> ToolSpec:
         # Resolve target by name or ID
         target_agent = None
         for agent in runtime.agents.values():
-            if agent.config.name == to or agent.id == to:
+            if to in (agent.config.name, agent.id):
                 target_agent = agent
                 break
 

@@ -114,9 +114,7 @@ def _binding_drift(entry: _Seen, ua: str, ip: str) -> bool:
     """
     if entry.ua and ua and _ua_product(entry.ua) != _ua_product(ua):
         return True
-    if entry.ip and ip and _ip_prefix(entry.ip) != _ip_prefix(ip):
-        return True
-    return False
+    return bool(entry.ip and ip and _ip_prefix(entry.ip) != _ip_prefix(ip))
 
 
 def _ua_product(ua: str) -> str:

@@ -687,7 +687,7 @@ def create_prompt_session(
         if _status is not None and _status.active:
             return HTML("<status-line>\u276f </status-line>")
 
-        # Idle: clean ❯ prompt — no borders, no decoration
+        # Idle: clean prompt - no borders, no decoration
         return HTML("<prompt>\u276f </prompt>")
 
     # If a static hud_provider was supplied, compute a one-shot toolbar
