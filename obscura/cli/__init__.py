@@ -249,13 +249,13 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
                 before = ""
-            ctx._pending_file_reads[ev.tool_use_id] = (path, before)
+            ctx.pending_file_reads[ev.tool_use_id] = (path, before)
 
     elif (
         ev.kind == AgentEventKind.TOOL_RESULT
-        and ev.tool_use_id in ctx._pending_file_reads
+        and ev.tool_use_id in ctx.pending_file_reads
     ):
-        path, before = ctx._pending_file_reads.pop(ev.tool_use_id)
+        path, before = ctx.pending_file_reads.pop(ev.tool_use_id)
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
@@ -292,7 +292,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
 
 def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     """If in PLAN mode, attempt to parse a structured plan from the response."""
-    mm = ctx._mode_manager
+    mm = ctx.mode_manager
     if mm is None:
         return
 
@@ -341,7 +341,7 @@ async def send_message(
                 text,
                 inline_agent_response,
                 turn_number=turn_num,
-                classifier=ctx._turn_classifier,
+                classifier=ctx.turn_classifier,
             )
         return inline_agent_response
 
@@ -377,7 +377,7 @@ async def send_message(
                 PermissionModeEngine,
             )
 
-            mode_str = getattr(ctx, "_permission_mode", "default")
+            mode_str = getattr(ctx, "permission_mode", "default")
             engine = PermissionModeEngine(PermissionMode(mode_str))
             decision = engine.evaluate(tc.name, tc.input)
             if not decision.allowed:
@@ -414,8 +414,8 @@ async def send_message(
         augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
     if ctx.vector_store is not None:
-        if ctx._context_router is not None:
-            vm_context = search_with_router(ctx._context_router, text)
+        if ctx.context_router is not None:
+            vm_context = search_with_router(ctx.context_router, text)
         else:
             vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
         if vm_context:
@@ -473,11 +473,11 @@ async def send_message(
         _buf: list[str] = []
         # Inject effort-level thinking budget if set.
         _effective_kwargs = dict(loop_kwargs)
-        if hasattr(ctx, "_effort_level") and ctx._effort_level:
+        if hasattr(ctx, "effort_level") and ctx.effort_level:
             try:
                 from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
-                _lvl = EffortLevel(ctx._effort_level)
+                _lvl = EffortLevel(ctx.effort_level)
                 _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[_lvl]
             except (ValueError, KeyError):
                 pass
@@ -541,9 +541,9 @@ async def send_message(
                     try:
                         from obscura.cli.tool_collapse import ToolCollapser
 
-                        if not hasattr(ctx, "_collapser"):
-                            ctx._collapser = ToolCollapser()
-                        ctx._collapser.record(tool_name, tool_input)
+                        if not hasattr(ctx, "collapser"):
+                            ctx.collapser = ToolCollapser()
+                        ctx.collapser.record(tool_name, tool_input)
                     except Exception:
                         pass
                     # Tips: record tool type for targeted tips.
@@ -560,7 +560,7 @@ async def send_message(
                             _tip_scheduler.record_search()
                 elif event.kind == AgentEventKind.TEXT_DELTA:
                     # Flush collapsed tools before text output.
-                    collapser = getattr(ctx, "_collapser", None)
+                    collapser = getattr(ctx, "collapser", None)
                     if collapser is not None and collapser.pending:
                         try:
                             summary = collapser.flush_summary()
@@ -680,7 +680,7 @@ async def send_message(
             text,
             response_text,
             turn_number=turn_num,
-            classifier=ctx._turn_classifier,
+            classifier=ctx.turn_classifier,
         )
 
     # Post-send: update token tracker and show nudge
@@ -981,8 +981,8 @@ async def _repl(
         run_startup_maintenance(vector_store)
 
     # Initialize memory channel router (dynamic context injection)
-    _context_router = None
-    _turn_classifier = None
+    context_router = None
+    turn_classifier = None
     if vector_store is not None:
         try:
             from obscura.memory_channels import (
@@ -993,8 +993,8 @@ async def _repl(
 
             _channels = load_channels_from_config()
             if _channels:
-                _context_router = ContextRouter(_channels, vector_store)
-                _turn_classifier = TurnClassifier(_channels)
+                context_router = ContextRouter(_channels, vector_store)
+                turn_classifier = TurnClassifier(_channels)
         except Exception:
             pass
 
@@ -1026,15 +1026,15 @@ async def _repl(
             custom_sections.append(vm_startup)
 
     # Inject memory channel documentation and system-level channel context
-    if _context_router is not None:
+    if context_router is not None:
         try:
             from obscura.tools.memory_tools import build_channels_prompt_section
 
-            channels_doc = build_channels_prompt_section(_context_router.channels)
+            channels_doc = build_channels_prompt_section(context_router.channels)
             if channels_doc:
                 custom_sections.append(channels_doc)
 
-            sys_channel_ctx = _context_router.get_system_channels()
+            sys_channel_ctx = context_router.get_system_channels()
             if sys_channel_ctx:
                 custom_sections.append(sys_channel_ctx)
         except Exception:
@@ -1283,7 +1283,7 @@ async def _repl(
             from obscura.tools.system import Session as _Session_for_plan
 
             def _set_permission_mode(mode: str) -> None:
-                ctx._permission_mode = mode
+                ctx.permission_mode = mode
 
             _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
 
@@ -1407,7 +1407,7 @@ async def _repl(
     # Wire memory channel TOOL_CALL hook to capture file paths + tool names.
     # Also feeds file_context to the tool router for context-aware tool selection.
     _tool_router_ref = None  # set after client creation
-    if _context_router is not None:
+    if context_router is not None:
         from obscura.core.hooks import HookRegistry
         from obscura.core.types import AgentEventKind as _AEK
 
@@ -1415,11 +1415,11 @@ async def _repl(
             project_hooks = HookRegistry()
 
         def _channel_tool_signal(event: Any) -> None:
-            _context_router.update_signals_from_event(event)
+            context_router.update_signals_from_event(event)
             # Sync file paths to tool router for context-aware recall
-            if _tool_router_ref is not None and _context_router.signals.file_paths:
+            if _tool_router_ref is not None and context_router.signals.file_paths:
                 _tool_router_ref.set_file_context(
-                    list(_context_router.signals.file_paths),
+                    list(context_router.signals.file_paths),
                 )
 
         project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)
@@ -1526,7 +1526,7 @@ async def _repl(
         # Wire effort level → thinking budget if set on context.
         def _inject_effort(kwargs: dict[str, Any], ctx_ref: Any) -> dict[str, Any]:
             """Inject max_thinking_tokens from effort level into loop kwargs."""
-            effort_val = getattr(ctx_ref, "_effort_level", None)
+            effort_val = getattr(ctx_ref, "effort_level", None)
             if effort_val:
                 try:
                     from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
@@ -1550,8 +1550,8 @@ async def _repl(
             mcp_configs=mcp_configs,
             confirm_enabled=confirm,
             vector_store=vector_store,
-            _context_router=_context_router,
-            _turn_classifier=_turn_classifier,
+            context_router=context_router,
+            turn_classifier=turn_classifier,
         )
 
         # --- Single-shot mode ---
@@ -1589,7 +1589,7 @@ async def _repl(
 
         # Start supervisor if --supervise (default) and agents.yaml has agents
         supervisor_task: asyncio.Task[None] | None = None
-        _supervisor: Any = None
+        supervisor: Any = None
         if supervise and agent_infos:
             try:
                 import os as _os
@@ -1606,12 +1606,12 @@ async def _repl(
                     raw_token="",
                 )
                 agents_yaml = resolve_obscura_home() / "agents.yaml"
-                _supervisor = AgentSupervisor(
+                supervisor = AgentSupervisor(
                     config_path=agents_yaml,
                     user=sup_user,
                 )
                 supervisor_task = asyncio.create_task(
-                    _supervisor.run_forever(),
+                    supervisor.run_forever(),
                     name="supervisor",
                 )
                 print_ok(f"Supervisor started — {len(agent_infos)} agent(s) launching")
@@ -1651,14 +1651,14 @@ async def _repl(
             # Collect running agents from runtime (if active)
             running: list[str] = []
             details: list[RunningAgentInfo] = []
-            if ctx._runtime is not None:
+            if ctx.runtime is not None:
                 try:
                     from datetime import UTC, datetime
 
                     from obscura.agent.agents import AgentStatus as _AS
 
                     _active = {_AS.RUNNING, _AS.WAITING, _AS.PENDING}
-                    for agent in ctx._runtime.list_agents():
+                    for agent in ctx.runtime.list_agents():
                         if agent.status not in _active:
                             continue
                         running.append(agent.config.name)
@@ -1693,13 +1693,13 @@ async def _repl(
             prompt_status.agent_details = details
             # Count active tasks (agents in non-terminal states + daemon)
             task_count = 0
-            if ctx._runtime is not None:
+            if ctx.runtime is not None:
                 try:
                     from obscura.agent.agents import AgentStatus as _AS2
 
                     _active = {_AS2.RUNNING, _AS2.WAITING, _AS2.PENDING}
                     task_count += sum(
-                        1 for a in ctx._runtime.list_agents() if a.status in _active
+                        1 for a in ctx.runtime.list_agents() if a.status in _active
                     )
                 except Exception:
                     pass
@@ -1734,10 +1734,10 @@ async def _repl(
 
             if is_kairos_enabled():
                 _kairos_engine = KairosEngine()
-                if _supervisor is not None and hasattr(_supervisor, "hooks"):
+                if supervisor is not None and hasattr(supervisor, "hooks"):
                     from obscura.kairos.supervisor_hooks import register_kairos_hooks
 
-                    register_kairos_hooks(_supervisor.hooks, _kairos_engine)
+                    register_kairos_hooks(supervisor.hooks, _kairos_engine)
                     _kairos_hooks_registered = True
                 else:
                     # No supervisor — start directly (fallback)
@@ -1914,7 +1914,7 @@ async def _repl(
 
                 # Voice input: intercept __VOICE_RECORD__ marker from Ctrl+Space.
                 if user_input == "__VOICE_RECORD__":
-                    voice_enabled = getattr(ctx, "_voice_enabled", False)
+                    voice_enabled = getattr(ctx, "voice_enabled", False)
                     if not voice_enabled:
                         console.print(
                             "[dim]Voice mode is off. Enable with /voice on[/]",
@@ -1956,8 +1956,8 @@ async def _repl(
                 if "ultrathink" in user_input.lower() and not user_input.startswith(
                     "/",
                 ):
-                    if getattr(ctx, "_effort_level", "medium") != "max":
-                        ctx._effort_level = "max"
+                    if getattr(ctx, "effort_level", "medium") != "max":
+                        ctx.effort_level = "max"
                         try:
                             from obscura.cli.tui_effects import ultrathink_banner
 
@@ -2401,9 +2401,9 @@ async def _repl(
             spinner_task.cancel()
             # Stop supervisor fleet
             if supervisor_task is not None:
-                if _supervisor is not None:
+                if supervisor is not None:
                     with contextlib.suppress(Exception):
-                        await _supervisor.stop()
+                        await supervisor.stop()
                 if not supervisor_task.done():
                     supervisor_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError, Exception):

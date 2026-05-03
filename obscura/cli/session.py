@@ -82,13 +82,13 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
                 before = Path(path).read_text()
             except (FileNotFoundError, OSError):
                 before = ""
-            ctx._pending_file_reads[ev.tool_use_id] = (path, before)  # pyright: ignore[reportPrivateUsage]
+            ctx.pending_file_reads[ev.tool_use_id] = (path, before)  # pyright: ignore[reportPrivateUsage]
 
     elif (
         ev.kind == AgentEventKind.TOOL_RESULT
-        and ev.tool_use_id in ctx._pending_file_reads  # pyright: ignore[reportPrivateUsage]
+        and ev.tool_use_id in ctx.pending_file_reads  # pyright: ignore[reportPrivateUsage]
     ):
-        path, before = ctx._pending_file_reads.pop(ev.tool_use_id)  # pyright: ignore[reportPrivateUsage]
+        path, before = ctx.pending_file_reads.pop(ev.tool_use_id)  # pyright: ignore[reportPrivateUsage]
         try:
             after = Path(path).read_text()
         except (FileNotFoundError, OSError):
@@ -120,7 +120,7 @@ def _track_file_event(event: AgentEventKind, ctx: REPLContext, ev: Any) -> None:
 
 def _maybe_parse_plan(response_text: str, ctx: REPLContext) -> None:
     """If in PLAN mode, attempt to parse a structured plan from the response."""
-    mm = ctx._mode_manager  # pyright: ignore[reportPrivateUsage]
+    mm = ctx.mode_manager  # pyright: ignore[reportPrivateUsage]
     if mm is None:
         return
 
@@ -195,16 +195,16 @@ class ObscuraSession:
     _client: ObscuraClient
     _client_cm: Any  # the async-context-manager wrapper
     _vector_store: Any
-    _context_router: Any
-    _turn_classifier: Any
+    context_router: Any
+    turn_classifier: Any
     _combined_system: str
     _loop_kwargs: dict[str, Any]
     _tool_count: int
     _kairos_engine: Any
     _kairos_hooks_registered: bool
     _tip_scheduler: Any
-    _supervisor: Any
-    _supervisor_task: asyncio.Task[None] | None
+    supervisor: Any
+    supervisor_task: asyncio.Task[None] | None
     _daemon_task: asyncio.Task[None] | None
     _uds_inbox: Any
     _background_tasks: set[asyncio.Task[str]]
@@ -221,8 +221,8 @@ class ObscuraSession:
         """
         self = cls()
         self._config = config
-        self._supervisor = None
-        self._supervisor_task = None
+        self.supervisor = None
+        self.supervisor_task = None
         self._daemon_task = None
         self._uds_inbox = None
         self._kairos_engine = None
@@ -280,8 +280,8 @@ class ObscuraSession:
             mcp_configs=mcp_configs,
             confirm_enabled=config.confirm,
             vector_store=self._vector_store,
-            _context_router=self._context_router,
-            _turn_classifier=self._turn_classifier,
+            context_router=self.context_router,
+            turn_classifier=self.turn_classifier,
         )
 
         # Hydrate context from prior session when backend resume failed
@@ -377,7 +377,7 @@ class ObscuraSession:
                     text,
                     inline_agent_response,
                     turn_number=turn_num,
-                    classifier=ctx._turn_classifier,  # pyright: ignore[reportPrivateUsage]
+                    classifier=ctx.turn_classifier,  # pyright: ignore[reportPrivateUsage]
                 )
             return inline_agent_response
 
@@ -412,7 +412,7 @@ class ObscuraSession:
                     PermissionModeEngine,
                 )
 
-                mode_str = getattr(ctx, "_permission_mode", "default")
+                mode_str = getattr(ctx, "permission_mode", "default")
                 engine = PermissionModeEngine(PermissionMode(mode_str))
                 decision = engine.evaluate(tc.name, tc.input)
                 if not decision.allowed:
@@ -442,8 +442,8 @@ class ObscuraSession:
             augmented_text = f"{slash_skill_context}\n\n---\n\n{augmented_text}"
 
         if ctx.vector_store is not None:
-            if ctx._context_router is not None:  # pyright: ignore[reportPrivateUsage]
-                vm_context = search_with_router(ctx._context_router, text)  # pyright: ignore[reportPrivateUsage]
+            if ctx.context_router is not None:  # pyright: ignore[reportPrivateUsage]
+                vm_context = search_with_router(ctx.context_router, text)  # pyright: ignore[reportPrivateUsage]
             else:
                 vm_context = search_relevant_context(ctx.vector_store, text, top_k=3)
             if vm_context:
@@ -497,11 +497,11 @@ class ObscuraSession:
             nonlocal _stream_output_chars
             _buf: list[str] = []
             _effective_kwargs = dict(effective_kwargs)
-            if hasattr(ctx, "_effort_level") and ctx._effort_level:  # pyright: ignore[reportPrivateUsage]
+            if hasattr(ctx, "effort_level") and ctx.effort_level:  # pyright: ignore[reportPrivateUsage]
                 try:
                     from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 
-                    _lvl = EffortLevel(ctx._effort_level)  # pyright: ignore[reportPrivateUsage]
+                    _lvl = EffortLevel(ctx.effort_level)  # pyright: ignore[reportPrivateUsage]
                     _effective_kwargs["max_thinking_tokens"] = EFFORT_THINKING_BUDGETS[
                         _lvl
                     ]
@@ -571,9 +571,9 @@ class ObscuraSession:
                         try:
                             from obscura.cli.tool_collapse import ToolCollapser
 
-                            if not hasattr(ctx, "_collapser"):
-                                ctx._collapser = ToolCollapser()  # pyright: ignore[reportPrivateUsage]
-                            ctx._collapser.record(tool_name, tool_input)  # pyright: ignore[reportPrivateUsage]
+                            if not hasattr(ctx, "collapser"):
+                                ctx.collapser = ToolCollapser()  # pyright: ignore[reportPrivateUsage]
+                            ctx.collapser.record(tool_name, tool_input)  # pyright: ignore[reportPrivateUsage]
                         except Exception:
                             pass
                         # Tips
@@ -589,7 +589,7 @@ class ObscuraSession:
                             elif tool_name in _SEARCH_TOOLS:
                                 _tip_scheduler.record_search()
                     elif event.kind == AgentEventKind.TEXT_DELTA:
-                        collapser = getattr(ctx, "_collapser", None)
+                        collapser = getattr(ctx, "collapser", None)
                         if collapser is not None and collapser.pending:
                             try:
                                 summary = collapser.flush_summary()
@@ -711,7 +711,7 @@ class ObscuraSession:
                 text,
                 response_text,
                 turn_number=turn_num,
-                classifier=ctx._turn_classifier,  # pyright: ignore[reportPrivateUsage]
+                classifier=ctx.turn_classifier,  # pyright: ignore[reportPrivateUsage]
             )
 
         # Post-send: update token tracker
@@ -811,14 +811,14 @@ class ObscuraSession:
         ctx = self._ctx
 
         # Stop supervisor fleet
-        if self._supervisor_task is not None:
-            if self._supervisor is not None:
+        if self.supervisor_task is not None:
+            if self.supervisor is not None:
                 with contextlib.suppress(Exception):
-                    await self._supervisor.stop()
-            if not self._supervisor_task.done():
-                self._supervisor_task.cancel()
+                    await self.supervisor.stop()
+            if not self.supervisor_task.done():
+                self.supervisor_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await self._supervisor_task
+                    await self.supervisor_task
         if self._daemon_task is not None:
             if not self._daemon_task.done():
                 self._daemon_task.cancel()
@@ -1061,8 +1061,8 @@ class ObscuraSession:
         if self._vector_store is not None:
             run_startup_maintenance(self._vector_store)
 
-        self._context_router = None
-        self._turn_classifier = None
+        self.context_router = None
+        self.turn_classifier = None
         if self._vector_store is not None:
             try:
                 from obscura.memory_channels import (
@@ -1073,8 +1073,8 @@ class ObscuraSession:
 
                 _channels = load_channels_from_config()
                 if _channels:
-                    self._context_router = ContextRouter(_channels, self._vector_store)
-                    self._turn_classifier = TurnClassifier(_channels)
+                    self.context_router = ContextRouter(_channels, self._vector_store)
+                    self.turn_classifier = TurnClassifier(_channels)
             except Exception:
                 pass
 
@@ -1112,17 +1112,17 @@ class ObscuraSession:
                 custom_sections.append(vm_startup)
 
         # Memory channel documentation
-        if self._context_router is not None:
+        if self.context_router is not None:
             try:
                 from obscura.tools.memory_tools import build_channels_prompt_section
 
                 channels_doc = build_channels_prompt_section(
-                    self._context_router.channels,
+                    self.context_router.channels,
                 )
                 if channels_doc:
                     custom_sections.append(channels_doc)
 
-                sys_channel_ctx = self._context_router.get_system_channels()
+                sys_channel_ctx = self.context_router.get_system_channels()
                 if sys_channel_ctx:
                     custom_sections.append(sys_channel_ctx)
             except Exception:
@@ -1394,7 +1394,7 @@ class ObscuraSession:
                 from obscura.tools.system import Session as _Session_for_plan
 
                 def _set_permission_mode(mode: str) -> None:
-                    self._ctx._permission_mode = mode  # pyright: ignore[reportPrivateUsage]
+                    self._ctx.permission_mode = mode  # pyright: ignore[reportPrivateUsage]
 
                 _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
 
@@ -1516,23 +1516,23 @@ class ObscuraSession:
 
         # Memory channel TOOL_CALL hook
         self._tool_router_ref = None
-        if self._context_router is not None:
+        if self.context_router is not None:
             from obscura.core.hooks import HookRegistry
             from obscura.core.types import AgentEventKind as _AEK
 
             if project_hooks is None:
                 project_hooks = HookRegistry()
 
-            _context_router = self._context_router
+            context_router = self.context_router
 
             def _channel_tool_signal(event: Any) -> None:
-                _context_router.update_signals_from_event(event)
+                context_router.update_signals_from_event(event)
                 if (
                     self._tool_router_ref is not None
-                    and _context_router.signals.file_paths
+                    and context_router.signals.file_paths
                 ):
                     self._tool_router_ref.set_file_context(
-                        list(_context_router.signals.file_paths),
+                        list(context_router.signals.file_paths),
                     )
 
             project_hooks.add_after(_channel_tool_signal, _AEK.TOOL_CALL)

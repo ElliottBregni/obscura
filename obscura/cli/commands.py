@@ -244,35 +244,35 @@ class REPLContext:
     message_history: list[tuple[str, str]] = field(default_factory=_empty_history)
 
     # File change tracking for /diff (path -> {path, original, modified})
-    _file_changes: list[dict[str, str]] = field(
+    file_changes: list[dict[str, str]] = field(
         default_factory=_empty_str_str_dict_list, repr=False
     )
-    _pending_file_reads: dict[str, tuple[str, str]] = field(
+    pending_file_reads: dict[str, tuple[str, str]] = field(
         default_factory=_empty_pending_reads,
         repr=False,
     )
 
     # Mode manager (lazy)
-    _mode_manager: Any = field(default=None, repr=False)
+    mode_manager: Any = field(default=None, repr=False)
 
     # Vector memory store (None if disabled)
     vector_store: Any = field(default=None, repr=False)
 
     # Memory channel router and classifier (None if no channels configured)
-    _context_router: Any = field(default=None, repr=False)
-    _turn_classifier: Any = field(default=None, repr=False)
+    context_router: Any = field(default=None, repr=False)
+    turn_classifier: Any = field(default=None, repr=False)
 
     # Agent runtime (lazy-created on first /agent or /fleet command)
-    _runtime: Any = field(default=None, repr=False)
+    runtime: Any = field(default=None, repr=False)
 
     # Background swarm tasks: {swarm_id: {task, assignments, results, ...}}
-    _swarm_runs: dict[str, dict[str, Any]] = field(
+    swarm_runs: dict[str, dict[str, Any]] = field(
         default_factory=_empty_swarm_runs, repr=False
     )
 
     # Supervisor reference (set when --supervise is active)
-    _supervisor: Any = field(default=None, repr=False)
-    _supervisor_task: Any = field(default=None, repr=False)
+    supervisor: Any = field(default=None, repr=False)
+    supervisor_task: Any = field(default=None, repr=False)
 
     # Slash-skill state (metadata lazy-loaded, bodies loaded on activation)
     _lazy_skill_loader: LazySkillLoader | None = field(default=None, repr=False)
@@ -282,32 +282,32 @@ class REPLContext:
     _lazy_command_loader: LazyCommandLoader | None = field(default=None, repr=False)
 
     # Wave 2+ feature state
-    _permission_mode: str = field(default="default", repr=False)
-    _effort_level: str = field(default="medium", repr=False)
-    _voice_enabled: bool = field(default=False, repr=False)
-    _vim_mode: bool = field(default=False, repr=False)
-    _collapser: Any = field(default=None, repr=False)
+    permission_mode: str = field(default="default", repr=False)
+    effort_level: str = field(default="medium", repr=False)
+    voice_enabled: bool = field(default=False, repr=False)
+    vim_mode: bool = field(default=False, repr=False)
+    collapser: Any = field(default=None, repr=False)
 
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
-        if self._mode_manager is None:
+        if self.mode_manager is None:
             from obscura.cli.app.modes import ModeManager, TUIMode
 
-            self._mode_manager = ModeManager(TUIMode.CODE)
-        return self._mode_manager
+            self.mode_manager = ModeManager(TUIMode.CODE)
+        return self.mode_manager
 
     def get_effective_system_prompt(self) -> str:
         """Combine mode system prompt with user system prompt."""
         mode_prompt = ""
-        if self._mode_manager is not None:
-            mode_prompt = self._mode_manager.get_system_prompt()
+        if self.mode_manager is not None:
+            mode_prompt = self.mode_manager.get_system_prompt()
         if mode_prompt and self.system_prompt:
             return f"{mode_prompt}\n\n{self.system_prompt}"
         return mode_prompt or self.system_prompt
 
     async def get_runtime(self) -> Any:
         """Get or create the AgentRuntime, wiring InteractionBus to CLI."""
-        if self._runtime is None:
+        if self.runtime is None:
             from obscura.agent.agents import AgentRuntime
             from obscura.auth.models import AuthenticatedUser
 
@@ -319,11 +319,11 @@ class REPLContext:
                 token_type="user",
                 raw_token="",
             )
-            self._runtime = AgentRuntime(user)
-            await self._runtime.start()
+            self.runtime = AgentRuntime(user)
+            await self.runtime.start()
 
             # Wire InteractionBus → CLI
-            bus = self._runtime.interaction_bus
+            bus = self.runtime.interaction_bus
 
             async def _cli_attention_handler(request: AttentionRequest) -> None:
                 """Prompt user inline via TUI widget when an agent requests attention."""
@@ -350,13 +350,13 @@ class REPLContext:
             bus.on_attention(_cli_attention_handler)
             bus.on_output(_cli_output_handler)
 
-        return self._runtime
+        return self.runtime
 
     async def stop_runtime(self) -> None:
         """Stop the runtime if it was created."""
-        if self._runtime is not None:
-            await self._runtime.stop()
-            self._runtime = None
+        if self.runtime is not None:
+            await self.runtime.stop()
+            self.runtime = None
 
     async def recreate_client(self, backend: str, model: str | None) -> None:
         """Stop old client, create a new one for a different backend."""
@@ -373,7 +373,7 @@ class REPLContext:
             from obscura.tools.system import get_system_tool_specs
 
             all_specs = get_system_tool_specs()
-            mm = self._mode_manager
+            mm = self.mode_manager
             mode_allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
             # Also apply capability-based filtering from config.toml
             cap_allowed: set[str] | None = None
@@ -400,8 +400,8 @@ class REPLContext:
 
     def add_file_change(self, path: str, original: str, modified: str) -> None:
         """Track a file change for /diff. Dedupes by path."""
-        self._file_changes = [c for c in self._file_changes if c["path"] != path]
-        self._file_changes.append(
+        self.file_changes = [c for c in self.file_changes if c["path"] != path]
+        self.file_changes.append(
             {"path": path, "original": original, "modified": modified},
         )
 
@@ -1175,7 +1175,7 @@ async def cmd_diff(args: str, ctx: REPLContext) -> str | None:
 
     if not sub:
         # Show diff summary
-        render_diff_summary(ctx._file_changes)
+        render_diff_summary(ctx.file_changes)
         return None
 
     if sub in ("overlay", "side-by-side", "sbs"):
@@ -1200,14 +1200,14 @@ async def _diff_accept_reject(
     """Accept or reject hunks."""
     from obscura.cli.app.diff_engine import DiffEngine
 
-    if not ctx._file_changes:
+    if not ctx.file_changes:
         print_info("No file changes.")
         return None
 
     engine = DiffEngine()
     # Build flat hunk list
     all_hunks = []
-    for fc in ctx._file_changes:
+    for fc in ctx.file_changes:
         diff_fc = engine.compute_change(
             Path(fc["path"]),
             fc["original"],
@@ -1242,13 +1242,13 @@ async def _diff_side_by_side(ctx: REPLContext) -> str | None:
 
     from obscura.cli.app.diff_engine import DiffEngine
 
-    if not ctx._file_changes:
+    if not ctx.file_changes:
         print_info("No file changes to display.")
         return None
 
     engine = DiffEngine(context_lines=3)
 
-    for fc in ctx._file_changes:
+    for fc in ctx.file_changes:
         path = fc["path"]
         original = fc["original"]
         modified = fc["modified"]
@@ -1281,7 +1281,7 @@ async def _diff_side_by_side(ctx: REPLContext) -> str | None:
         )
 
     # Also show unified diff with syntax highlighting for each file.
-    for fc in ctx._file_changes:
+    for fc in ctx.file_changes:
         unified = engine.format_unified(
             engine.compute_change(Path(fc["path"]), fc["original"], fc["modified"]),
         )
@@ -1295,13 +1295,13 @@ async def _diff_apply(ctx: REPLContext) -> str | None:
     """Apply accepted hunks to disk."""
     from obscura.cli.app.diff_engine import DiffEngine
 
-    if not ctx._file_changes:
+    if not ctx.file_changes:
         print_info("No file changes.")
         return None
 
     engine = DiffEngine()
     applied = 0
-    for fc in ctx._file_changes:
+    for fc in ctx.file_changes:
         diff_fc = engine.compute_change(
             Path(fc["path"]),
             fc["original"],
@@ -1316,7 +1316,7 @@ async def _diff_apply(ctx: REPLContext) -> str | None:
         print_ok(f"  Applied {len(accepted)} hunks to {fc['path']}")
 
     if applied:
-        ctx._file_changes.clear()
+        ctx.file_changes.clear()
         print_ok(f"Applied changes to {applied} file(s).")
     else:
         print_info("No accepted hunks to apply. Use /diff accept first.")
@@ -2164,10 +2164,10 @@ async def cmd_attention(args: str, ctx: REPLContext) -> str | None:
         action = rest[0]
         text = rest[1] if len(rest) > 1 else ""
 
-        if ctx._runtime is None:
+        if ctx.runtime is None:
             print_error("No runtime active.")
             return None
-        bus = ctx._runtime.interaction_bus
+        bus = ctx.runtime.interaction_bus
         # Match request_id by prefix
         matched = [r for r in bus.pending_requests if r.startswith(rid_prefix)]
         if not matched:
@@ -2179,11 +2179,11 @@ async def cmd_attention(args: str, ctx: REPLContext) -> str | None:
         return None
 
     # Default: list pending attention requests
-    if ctx._runtime is None:
+    if ctx.runtime is None:
         print_info("No runtime active. Use /fleet spawn first.")
         return None
 
-    bus = ctx._runtime.interaction_bus
+    bus = ctx.runtime.interaction_bus
     pending = bus.pending_requests
     if not pending:
         print_info("No pending attention requests.")
@@ -2813,7 +2813,7 @@ async def _swarm_background(
     """Background coroutine that runs all swarm agents and collects results."""
     import asyncio as _aio
 
-    run = ctx._swarm_runs[swarm_id]
+    run = ctx.swarm_runs[swarm_id]
     run["status"] = "running"
 
     coros = [
@@ -2885,7 +2885,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
 
     # --- /swarm status ---
     if sub == "status":
-        if not ctx._swarm_runs:
+        if not ctx.swarm_runs:
             print_info("No swarm runs.")
             return None
         table = Table(show_header=True, header_style="bold", title="Swarm Runs")
@@ -2893,7 +2893,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
         table.add_column("Task", style="dim", max_width=40)
         table.add_column("Agents", style="yellow", width=8)
         table.add_column("Status", style="green")
-        for sid, run in ctx._swarm_runs.items():
+        for sid, run in ctx.swarm_runs.items():
             agent_names = ", ".join(a.agent_name for a in run["assignments"])
             status = run["status"]
             if status == "running":
@@ -2910,7 +2910,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
         from rich.rule import Rule
 
         target = tokens[1] if len(tokens) > 1 else None
-        runs = ctx._swarm_runs
+        runs = ctx.swarm_runs
         if target:
             matches = {k: v for k, v in runs.items() if k.startswith(target)}
         else:
@@ -2941,7 +2941,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
     # --- /swarm stop [id|all] ---
     if sub == "stop":
         target = tokens[1] if len(tokens) > 1 else "all"
-        for sid, run in list(ctx._swarm_runs.items()):
+        for sid, run in list(ctx.swarm_runs.items()):
             if target == "all" or sid.startswith(target):
                 task_obj = run.get("_task")
                 if task_obj and not task_obj.done():
@@ -3021,7 +3021,7 @@ async def cmd_swarm(args: str, ctx: REPLContext) -> str | None:
         "error": None,
         "_task": None,
     }
-    ctx._swarm_runs[swarm_id] = run_state
+    ctx.swarm_runs[swarm_id] = run_state
 
     bg_task = _aio.create_task(
         _swarm_background(
@@ -4575,8 +4575,8 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
     stopped = 0
 
     # 1. Stop all agents in the runtime
-    if ctx._runtime is not None:
-        for agent in ctx._runtime.list_agents():
+    if ctx.runtime is not None:
+        for agent in ctx.runtime.list_agents():
             try:
                 await agent.stop()
                 stopped += 1
@@ -4584,22 +4584,22 @@ async def cmd_kill(args: str, ctx: REPLContext) -> str | None:
                 pass
 
     # 2. Cancel all swarm tasks
-    for _sid, run in list(ctx._swarm_runs.items()):
+    for _sid, run in list(ctx.swarm_runs.items()):
         task_obj = run.get("_task")
         if task_obj and not task_obj.done():
             task_obj.cancel()
             stopped += 1
             run["status"] = "cancelled"
-    ctx._swarm_runs.clear()
+    ctx.swarm_runs.clear()
 
     # 3. Stop supervisor (kills all managed daemons)
-    if ctx._supervisor_task is not None and not ctx._supervisor_task.done():
-        ctx._supervisor_task.cancel()
+    if ctx.supervisor_task is not None and not ctx.supervisor_task.done():
+        ctx.supervisor_task.cancel()
         with contextlib.suppress(_asyncio.CancelledError, Exception):
-            await ctx._supervisor_task
+            await ctx.supervisor_task
         stopped += 1
-        ctx._supervisor = None
-        ctx._supervisor_task = None
+        ctx.supervisor = None
+        ctx.supervisor_task = None
 
     if stopped:
         print_ok(f"Killed {stopped} task(s).")
@@ -4641,9 +4641,9 @@ async def cmd_running(args: str, ctx: REPLContext) -> str | None:
     # 2. Agents from AgentRuntime
     # ------------------------------------------------------------------
     agents_list: list[Any] = []
-    if ctx._runtime is not None:
+    if ctx.runtime is not None:
         with contextlib.suppress(Exception):
-            agents_list = ctx._runtime.list_agents()
+            agents_list = ctx.runtime.list_agents()
 
     active_set = {
         AgentStatus.RUNNING,
@@ -4884,8 +4884,8 @@ async def cmd_audit(args: str, _ctx: REPLContext) -> str | None:
     broker: ToolBroker | None = None
     try:
         # Supervisor keeps a broker reference
-        if _ctx._supervisor and hasattr(_ctx._supervisor, "_broker"):
-            broker = _ctx._supervisor._broker  # noqa: SLF001
+        if _ctx.supervisor and hasattr(_ctx.supervisor, "_broker"):
+            broker = _ctx.supervisor._broker  # noqa: SLF001
     except Exception:
         pass
 
@@ -5033,8 +5033,8 @@ async def cmd_broker(_args: str, _ctx: REPLContext) -> str | None:
 
     broker: ToolBroker | None = None
     try:
-        if _ctx._supervisor and hasattr(_ctx._supervisor, "_broker"):
-            broker = _ctx._supervisor._broker  # noqa: SLF001
+        if _ctx.supervisor and hasattr(_ctx.supervisor, "_broker"):
+            broker = _ctx.supervisor._broker  # noqa: SLF001
     except Exception:
         pass
 
@@ -5167,7 +5167,7 @@ async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
 
     mode_str = args.strip().lower()
     if not mode_str:
-        current = getattr(ctx, "_permission_mode", "default")
+        current = getattr(ctx, "permission_mode", "default")
         print_info(f"Permission mode: {current}")
         print_info("Usage: /permissions default|plan|accept_edits|bypass")
         return None
@@ -5182,7 +5182,7 @@ async def cmd_permissions(args: str, ctx: REPLContext) -> str | None:
         if not os.environ.get("OBSCURA_BYPASS_PERMISSIONS"):
             print_warning("Set OBSCURA_BYPASS_PERMISSIONS=1 to enable bypass mode.")
             return None
-    ctx._permission_mode = mode_str
+    ctx.permission_mode = mode_str
     print_ok(f"Permission mode set to: {mode.value}")
     return None
 
@@ -5364,9 +5364,9 @@ async def cmd_doctor(_args: str, _ctx: REPLContext) -> str | None:
 
 async def cmd_vim(_args: str, ctx: REPLContext) -> str | None:
     """Toggle vim keybindings in the REPL."""
-    current = getattr(ctx, "_vim_mode", False)
-    ctx._vim_mode = not current
-    mode = "enabled" if ctx._vim_mode else "disabled"
+    current = getattr(ctx, "vim_mode", False)
+    ctx.vim_mode = not current
+    mode = "enabled" if ctx.vim_mode else "disabled"
     print_ok(f"Vim mode {mode}. Takes effect on next prompt.")
     return None
 
@@ -5377,7 +5377,7 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
 
     level_str = args.strip().lower()
     if not level_str:
-        current = getattr(ctx, "_effort_level", "medium")
+        current = getattr(ctx, "effort_level", "medium")
         print_info(f"Effort level: {current}")
         print_info("Usage: /effort low|medium|high|max")
         return None
@@ -5386,7 +5386,7 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
     except ValueError:
         print_error(f"Unknown level: {level_str}. Options: low, medium, high, max")
         return None
-    ctx._effort_level = level.value
+    ctx.effort_level = level.value
     budget = EFFORT_THINKING_BUDGETS[level]
 
     # Show ultrathink banner for max effort.
@@ -5409,12 +5409,12 @@ async def cmd_effort(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
     """Toggle fast/terse mode (low effort + concise output)."""
-    current = getattr(ctx, "_effort_level", "medium")
+    current = getattr(ctx, "effort_level", "medium")
     if current == "low":
-        ctx._effort_level = "medium"
+        ctx.effort_level = "medium"
         print_ok("Fast mode OFF (effort: medium)")
     else:
-        ctx._effort_level = "low"
+        ctx.effort_level = "low"
         print_ok("Fast mode ON (effort: low, terse responses)")
     return None
 
@@ -6079,7 +6079,7 @@ async def cmd_coordinator(args: str, ctx: REPLContext) -> str | None:
 async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
     """Toggle voice input (push-to-talk). Usage: /voice [on|off]."""
     sub = args.strip().lower()
-    current = getattr(ctx, "_voice_enabled", False)
+    current = getattr(ctx, "voice_enabled", False)
 
     if sub == "on" or (not sub and not current):
         # Check dependencies
@@ -6093,10 +6093,10 @@ async def cmd_voice(args: str, ctx: REPLContext) -> str | None:
                 "Install: brew install sox  (macOS) or apt install sox alsa-utils  (Linux)",
             )
             return None
-        ctx._voice_enabled = True
+        ctx.voice_enabled = True
         print_ok("Voice mode ON. Hold Ctrl+Space to record, release to transcribe.")
     elif sub == "off" or (not sub and current):
-        ctx._voice_enabled = False
+        ctx.voice_enabled = False
         print_ok("Voice mode OFF.")
     else:
         print_info(f"Voice mode: {'ON' if current else 'OFF'}")
@@ -6159,7 +6159,7 @@ async def cmd_template(args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
     """Show tool use summary for the current session."""
-    collapser = getattr(ctx, "_collapser", None)
+    collapser = getattr(ctx, "collapser", None)
     if collapser is None:
         print_info("No tool usage recorded yet.")
         return None
@@ -6833,20 +6833,20 @@ async def cmd_files(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_rewind(args: str, ctx: REPLContext) -> str | None:
     """Undo recent changes by reverting modified files. Usage: /rewind [n]."""
-    if not ctx._file_changes:
+    if not ctx.file_changes:
         print_info("No file changes to rewind.")
         return None
 
-    n = int(args.strip()) if args.strip().isdigit() else len(ctx._file_changes)
+    n = int(args.strip()) if args.strip().isdigit() else len(ctx.file_changes)
     rewound = 0
-    for fc in ctx._file_changes[-n:]:
+    for fc in ctx.file_changes[-n:]:
         try:
             Path(fc["path"]).write_text(fc["original"])
             rewound += 1
         except Exception as exc:
             print_error(f"Failed to rewind {fc['path']}: {exc}")
 
-    ctx._file_changes = ctx._file_changes[:-n] if n < len(ctx._file_changes) else []
+    ctx.file_changes = ctx.file_changes[:-n] if n < len(ctx.file_changes) else []
     print_ok(f"Rewound {rewound} file(s) to their original state.")
     return None
 
@@ -6967,12 +6967,12 @@ async def cmd_copy(_args: str, ctx: REPLContext) -> str | None:
 
 async def cmd_brief(_args: str, ctx: REPLContext) -> str | None:
     """Toggle brief output mode (concise responses)."""
-    current = getattr(ctx, "_effort_level", "medium")
+    current = getattr(ctx, "effort_level", "medium")
     if current == "low":
-        ctx._effort_level = "medium"
+        ctx.effort_level = "medium"
         print_ok("Brief mode OFF (standard responses)")
     else:
-        ctx._effort_level = "low"
+        ctx.effort_level = "low"
         print_ok("Brief mode ON (concise, terse responses)")
     return None
 
@@ -7005,9 +7005,9 @@ async def cmd_stats(_args: str, ctx: REPLContext) -> str | None:
     table.add_row("Estimated cost", f"${tracker.session_total_usd():.4f}")
     table.add_row("Files modified", str(len(modified)))
     table.add_row("Files read", str(len(read_files)))
-    table.add_row("File changes tracked", str(len(ctx._file_changes)))
-    table.add_row("Permission mode", getattr(ctx, "_permission_mode", "default"))
-    table.add_row("Effort level", getattr(ctx, "_effort_level", "medium"))
+    table.add_row("File changes tracked", str(len(ctx.file_changes)))
+    table.add_row("Permission mode", getattr(ctx, "permission_mode", "default"))
+    table.add_row("Effort level", getattr(ctx, "effort_level", "medium"))
     console.print(table)
     return None
 
@@ -7263,14 +7263,14 @@ async def cmd_stash(_args: str, ctx: REPLContext) -> str | None:
         (
             list(ctx.message_history),
             ctx.session_id,
-            list(ctx._file_changes),
+            list(ctx.file_changes),
         ),
     )
     stash_idx = len(_stash_stack) - 1
 
     # Clear current context.
     ctx.message_history.clear()
-    ctx._file_changes.clear()
+    ctx.file_changes.clear()
     new_sid = uuid.uuid4().hex
     ctx.session_id = new_sid
 
@@ -7290,8 +7290,8 @@ async def cmd_pop(_args: str, ctx: REPLContext) -> str | None:
     ctx.message_history.clear()
     ctx.message_history.extend(history)
     ctx.session_id = session_id
-    ctx._file_changes.clear()
-    ctx._file_changes.extend(file_changes)
+    ctx.file_changes.clear()
+    ctx.file_changes.extend(file_changes)
 
     print_ok(
         f"Popped stash. Restored {len(history)} messages, {len(file_changes)} file changes.",
@@ -8762,7 +8762,7 @@ async def cmd_checkpoint(args: str, ctx: REPLContext) -> str | None:
         checkpoints[name] = {
             "history": list(ctx.message_history),
             "system_prompt": ctx.system_prompt,
-            "file_changes": list(ctx._file_changes),
+            "file_changes": list(ctx.file_changes),
             "msg_count": len(ctx.message_history),
             "saved_at": datetime.datetime.now(UTC).strftime("%H:%M:%S"),
         }
@@ -8781,8 +8781,8 @@ async def cmd_checkpoint(args: str, ctx: REPLContext) -> str | None:
         ctx.message_history.clear()
         ctx.message_history.extend(cp["history"])
         ctx.system_prompt = cp["system_prompt"]
-        ctx._file_changes.clear()
-        ctx._file_changes.extend(cp["file_changes"])
+        ctx.file_changes.clear()
+        ctx.file_changes.extend(cp["file_changes"])
         print_ok(f"Restored checkpoint '{rest}' ({cp['msg_count']} messages).")
         return None
 
