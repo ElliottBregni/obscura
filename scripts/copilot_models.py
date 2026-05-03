@@ -87,9 +87,9 @@ def guard_automation(alias: str) -> str:
     return cfg.model_id
 
 
-def _AUTOMATION_SAFE_MODELS_set():
+def _AUTOMATION_SAFE_MODELS_set():  # pyright: ignore[reportUnusedFunction]
     return set(_AUTOMATION_SAFE_MODELS)
 
 # Expose internals used by tests
-_AUTOMATION_SAFE_MODELS = set(_AUTOMATION_SAFE_MODELS)
+_AUTOMATION_SAFE_MODELS = set(_AUTOMATION_SAFE_MODELS)  # pyright: ignore[reportConstantRedefinition]
 

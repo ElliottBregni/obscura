@@ -308,7 +308,7 @@ class BackendThrottle:
             else None
         )
 
-    @contextlib.asynccontextmanager
+    @contextlib.asynccontextmanager  # pyright: ignore[reportDeprecated]
     async def gate(
         self,
         priority: Priority = Priority.INTERACTIVE,

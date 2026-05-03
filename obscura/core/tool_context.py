@@ -102,7 +102,7 @@ def current_tool_context() -> ToolContext | None:
     return _current.get()
 
 
-@contextlib.contextmanager
+@contextlib.contextmanager  # pyright: ignore[reportDeprecated]
 def bind_tool_context(ctx: ToolContext) -> Iterator[None]:
     """Bind *ctx* for the duration of the with block.
 

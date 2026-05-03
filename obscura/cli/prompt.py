@@ -815,7 +815,7 @@ class PromptHUDState:
     )
 
 
-def _build_prompt_message_html(
+def _build_prompt_message_html(  # pyright: ignore[reportUnusedFunction]
     width: int,
     model_text: str,
     cfg: PromptLayoutConfig,

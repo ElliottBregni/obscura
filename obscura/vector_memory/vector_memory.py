@@ -93,7 +93,7 @@ def _make_default_embedding_fn(dim: int = 384):
     2. simple_embedding (hash-based fallback, deterministic but not semantic)
     """
     try:
-        from sentence_transformers import SentenceTransformer
+        from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 
         _log = logging.getLogger(__name__)
         # Suppress noisy model loading output (position_ids warning, progress bars, HF auth)

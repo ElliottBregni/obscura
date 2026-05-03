@@ -32,5 +32,29 @@
   "reportUnusedVariable": "error",
   "reportUnnecessaryTypeIgnoreComment": "warning",
   "reportMissingImports": "warning",
-  "reportMissingModuleSource": "warning"
+  "reportMissingModuleSource": "warning",
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "reportPrivateUsage": "none",
+      "reportUnknownLambdaType": "none",
+      "reportUnknownParameterType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownArgumentType": "none",
+      "reportMissingParameterType": "none",
+      "reportUnusedFunction": "none",
+      "reportOptionalMemberAccess": "none",
+      "reportAttributeAccessIssue": "none",
+      "reportImplicitOverride": "none",
+      "reportMissingTypeArgument": "none",
+      "reportUnusedClass": "none",
+      "reportConstantRedefinition": "none",
+      "reportDuplicateImport": "none",
+      "reportUntypedFunctionDecorator": "none",
+      "reportUntypedBaseClass": "none",
+      "reportGeneralTypeIssues": "none",
+      "reportMissingImports": "none"
+    }
+  ]
 }

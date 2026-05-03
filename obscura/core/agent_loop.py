@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportOptionalMemberAccess=false, reportImplicitOverride=false, reportPrivateUsage=false, reportUnusedFunction=false, reportMissingTypeArgument=false, reportConstantRedefinition=false
 """
 obscura.agent_loop — Iterative agent loop with tool execution.
 

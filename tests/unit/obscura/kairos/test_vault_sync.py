@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -440,7 +441,7 @@ def test_export_queue_snapshot_retries_on_write_failure(
     write_calls: list[int] = []
     original_write_text = Path.write_text
 
-    def patched_write_text(self: Path, content: str, **kwargs: object) -> None:
+    def patched_write_text(self: Path, content: str, **kwargs: Any) -> int:
         if self == snapshot_path:
             write_calls.append(len(write_calls) + 1)
             if len(write_calls) < 3:  # noqa: PLR2004

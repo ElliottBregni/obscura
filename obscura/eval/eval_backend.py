@@ -123,6 +123,9 @@ class AnthropicEvalBackend:
 
         yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
+        if self._client is None:
+            msg = "anthropic client not initialized"
+            raise RuntimeError(msg)
         try:
             async with self._client.messages.stream(**create_kwargs) as stream:
                 async for event in stream:

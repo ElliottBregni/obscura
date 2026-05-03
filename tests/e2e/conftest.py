@@ -339,7 +339,7 @@ def _reset_fakes() -> Iterator[None]:  # pyright: ignore[reportUnusedFunction]
     _shared_runtime = _FakeAgentRuntime()
     _FakeMemoryStore.reset()
     _FakeVectorMemoryStore.reset()
-    return
+    yield
 
 
 @pytest.fixture
