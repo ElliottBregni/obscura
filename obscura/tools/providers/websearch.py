@@ -6,9 +6,16 @@ import asyncio
 import json
 import logging
 import shutil
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "_handler_images",
+    "_handler_news",
+    "_handler_search",
+    "_handler_summarize",
+]
 
 
 async def _run_websearch(*args: str) -> dict[str, Any]:
@@ -33,7 +40,10 @@ async def _run_websearch(*args: str) -> dict[str, Any]:
                 "output": out,
             }
         try:
-            return json.loads(out)  # type: ignore[no-any-return]
+            parsed = json.loads(out)
+            if isinstance(parsed, dict):
+                return cast(dict[str, Any], parsed)
+            return {"output": parsed}
         except (json.JSONDecodeError, ValueError):
             return {"output": out.strip()}
     except Exception as e:
