@@ -612,7 +612,6 @@ class AgentLoop:
         compiled_agent: Any | None = None,
         tool_output_level: str = "standard",
         tool_output_overrides: dict[str, str] | None = None,
-        host_callbacks: dict[str, Any] | None = None,
     ) -> None:
         self._backend = backend
         self._tools = tool_registry
@@ -636,7 +635,6 @@ class AgentLoop:
         self._arbiter_killed = False  # Set by Arbiter to force-stop the loop.
         self._arbiter_kill_reason = ""
         self._tool_output_overrides = tool_output_overrides or {}
-        self._host_callbacks: dict[str, Any] = host_callbacks or {}
 
         # Apply compiled agent settings if provided
         if compiled_agent is not None:
@@ -1477,22 +1475,26 @@ class AgentLoop:
             # (model inventing UX flows like "click Allow" or
             # "/allowed-tools" that don't exist in obscura). Logs at
             # WARNING so violations surface in default-level logs without
-            # changing the output the user sees. The correction message
-            # itself is built later, after wait_for_all() drains any
-            # in-flight streaming tools — otherwise tools that finish
-            # after the model's text but before tool execution completes
-            # would be missing from _this_turn_successful_tools and the
-            # correction would have nothing to point at as ground truth.
-            _turn_violations: list[Any] = []
+            # changing the output the user sees. When a hallucination
+            # contradicts a successful tool call from the same turn, also
+            # build a corrective message that the next turn will inject.
             try:
                 from obscura.core.output_quality import (
+                    build_correction_prompt,
                     log_violations,
                     scan_text,
                 )
 
-                _turn_violations = scan_text(state.turn_text)
-                if _turn_violations:
-                    log_violations(_turn_violations, turn=state.turn)
+                violations = scan_text(state.turn_text)
+                if violations:
+                    log_violations(violations, turn=state.turn)
+                    if self._this_turn_successful_tools:
+                        correction = build_correction_prompt(
+                            violations,
+                            self._this_turn_successful_tools,
+                        )
+                        if correction:
+                            self._pending_correction = correction
             except Exception:
                 # Quality scan must never break the turn — best-effort.
                 pass
@@ -1655,25 +1657,6 @@ class AgentLoop:
                 # happen when tool_calls is non-empty, but be defensive)
                 tool_calls_list = list(state.tool_calls)
                 tool_results = await self._execute_tools(tool_calls_list)
-
-            # Build hallucination correction now that wait_for_all has
-            # drained any in-flight tools, so _this_turn_successful_tools
-            # reflects every tool that returned ok this turn — not just
-            # the ones that happened to finish before TURN_COMPLETE.
-            if _turn_violations and self._this_turn_successful_tools:
-                try:
-                    from obscura.core.output_quality import (
-                        build_correction_prompt,
-                    )
-
-                    correction = build_correction_prompt(
-                        _turn_violations,
-                        self._this_turn_successful_tools,
-                    )
-                    if correction:
-                        self._pending_correction = correction
-                except Exception:
-                    pass
 
             # Yield tool result events (and TOOL_CALL_FAILURE for errors)
             for result in tool_results:
@@ -2006,13 +1989,25 @@ class AgentLoop:
 
         return list(await asyncio.gather(*[limited(c) for c in coros]))
 
-    def _read_host_callbacks(self) -> dict[str, Any]:
-        """Return the host callbacks registered with this loop.
+    @staticmethod
+    def _read_host_callbacks() -> dict[str, Any]:
+        """Snapshot the legacy module-level host callbacks.
 
-        Filters out None entries so unset callbacks don't override
-        ToolContext defaults.
+        Returns a dict suitable for splatting into ToolContext(...). Reads
+        each global lazily via the system tools module so failures during
+        early import don't block the agent loop.
         """
-        return {k: v for k, v in self._host_callbacks.items() if v is not None}
+        try:
+            from obscura.tools.system import UI, Session
+
+            return {
+                "ask_user_callback": UI.ask_user_callback,
+                "user_interact_callback": UI.user_interact_callback,
+                "permission_mode_callback": Session.permission_mode_callback,
+                "plan_approval_callback": Session.plan_approval_callback,
+            }
+        except Exception:
+            return {}
 
     async def _execute_single_tool(
         self,
@@ -2189,6 +2184,9 @@ class AgentLoop:
                 bind_tool_context,
             )
 
+            # Pull current host callbacks from the legacy module-level globals
+            # so tools migrated to ToolContext keep working without any change
+            # to the REPL's wiring code.
             ctx = ToolContext(
                 registry=self._tools,
                 history=self._current_messages,
@@ -2899,11 +2897,83 @@ class AgentLoop:
         )
         return new_kwargs, dropped_pairs, old_chars
 
+    # Fix #5: _format_tool_results and _format_tool_results_envelopes are
+    # kept for backward compatibility (public test wrappers, reconstruct_state)
+    # but are no longer used in the main loop.  The loop now uses only
+    # structured messages with an empty continuation prompt.
+
+    @staticmethod
+    def _format_tool_results(
+        results: list[tuple[ToolCallInfo, str, bool]],
+    ) -> str:
+        """Format tool results as a prompt for the next model turn.
+
+        .. deprecated::
+            Retained for backward compatibility with tests and
+            ``reconstruct_state``.  The main loop now uses only
+            structured messages (Fix #5).
+        """
+        envelopes: list[ToolResultEnvelope] = []
+        for tc, result_text, is_error in results:
+            envelopes.append(
+                ToolResultEnvelope(
+                    call_id=tc.tool_use_id,
+                    tool=tc.name,
+                    status="error" if is_error else "ok",
+                    result=None if is_error else result_text,
+                    error=(
+                        ToolExecutionError(
+                            type=ToolErrorType.UNKNOWN,
+                            message=result_text,
+                            safe_to_retry=False,
+                        )
+                        if is_error
+                        else None
+                    ),
+                    tool_use_id=tc.tool_use_id,
+                    raw=tc.raw,
+                )
+            )
+        return AgentLoop._format_tool_results_envelopes(envelopes)
+
+    @staticmethod
+    def _format_tool_results_envelopes(results: list[ToolResultEnvelope]) -> str:
+        """Format canonical tool result envelopes as prompt text.
+
+        .. deprecated::
+            Retained for backward compatibility with tests and
+            ``reconstruct_state``.  The main loop now uses only
+            structured messages (Fix #5).
+        """
+        parts: list[str] = [
+            "<system>The following are results from the tool calls you just made. "
+            "Do NOT repeat or echo these results back to the user.</system>",
+        ]
+        for result in results:
+            status = "error" if result.status == "error" else "success"
+            result_text = AgentLoop._render_tool_result_text(result)
+            # Include an explicit status marker line for LLM-facing formatting
+            # so tests and downstream parsers can look for "OK" / "ERROR".
+            status_label = "ERROR" if status == "error" else "OK"
+            parts.append(
+                f'<tool_result tool="{result.tool}" '
+                f'id="{result.tool_use_id}" status="{status}">\n'
+                f"{status_label}\n"
+                f"{result_text}\n"
+                f"</tool_result>"
+            )
+        return "\n\n".join(parts)
+
     # Public test/observability wrappers ---------------------------------
     @staticmethod
     def parse_tool_call(name: str, input_json: str, raw: Any) -> ToolCallInfo:
         """Public wrapper to parse a tool call (testing)."""
         return AgentLoop._parse_tool_call(name, input_json, raw)
+
+    @staticmethod
+    def format_tool_results(results: list[tuple[ToolCallInfo, str, bool]]) -> str:
+        """Public wrapper to format tool results (testing)."""
+        return AgentLoop._format_tool_results(results)
 
     @staticmethod
     def reconstruct_state(

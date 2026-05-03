@@ -405,7 +405,7 @@ async def send_message(
     _warn_threshold = ctx.client.context_warn_threshold  # 50% of window
 
     # Update the system tool's token tracker so the LLM can introspect
-    from obscura.tools.system import update_token_usage
+    from obscura.tools.system import Session
 
     # ── Vector memory pre-search ──────────────────────────────────────────
     augmented_text = text
@@ -425,7 +425,7 @@ async def send_message(
         ctx,
         pending_user_text=augmented_text,
     )
-    update_token_usage(
+    Session.update_token_usage(
         input_tokens=_pre_tokens,
         context_window=_context_window,
         compact_threshold=_compact_threshold,
@@ -444,7 +444,7 @@ async def send_message(
                 return
             if now - _last_usage_push < 0.75:
                 return
-        update_token_usage(
+        Session.update_token_usage(
             input_tokens=_pre_tokens,
             output_tokens=est_output_tokens,
             context_window=_context_window,
@@ -686,7 +686,7 @@ async def send_message(
     # Post-send: update token tracker and show nudge
     _push_stream_token_usage(force=True)
     _post_tokens = estimate_effective_context_tokens(ctx)
-    update_token_usage(
+    Session.update_token_usage(
         input_tokens=_post_tokens,
         output_tokens=len(response_text) // 4,
         context_window=_context_window,
@@ -743,10 +743,10 @@ async def send_message(
     # Auto-detect question choices and present interactive widget.
     # Skip if the ask_user tool already presented a widget this turn.
     try:
-        from obscura.tools.system import reset_ask_user_called, was_ask_user_called
+        from obscura.tools.system import UI
 
-        _tool_asked = was_ask_user_called()
-        reset_ask_user_called()
+        _tool_asked = UI.was_ask_user_called()
+        UI.reset_ask_user_called()
 
         if not _tool_asked:
             from obscura.cli.widgets import (
@@ -1240,66 +1240,55 @@ async def _repl(
 
     tool_count = len(system_tools)
 
-    # Build host callbacks (ask_user, plan-mode, user_interact) — passed to
-    # ObscuraClient and surfaced to tool handlers via ToolContext.
-    host_callbacks: dict[str, Any] = {}
+    # Wire the ask_user callback so the tool can present TUI widgets
     if tools_enabled:
-        async def _ask_user_handler(
-            question: str,
-            choices: list[str],
-            allow_custom: bool = False,
-        ) -> str:
-            from obscura.cli.widgets import (
-                AttentionWidgetRequest,
-                ModelQuestionRequest,
-                ask_model_question,
-                confirm_attention,
-            )
+        try:
+            from obscura.tools.system import UI as _UI_for_ask
 
-            if choices:
-                result = await confirm_attention(
-                    AttentionWidgetRequest(
-                        request_id="ask_user",
-                        agent_name="assistant",
-                        message=question,
-                        priority="normal",
-                        actions=tuple(choices),
-                    ),
+            async def _ask_user_handler(
+                question: str,
+                choices: list[str],
+                allow_custom: bool = False,
+            ) -> str:
+                from obscura.cli.widgets import (
+                    AttentionWidgetRequest,
+                    ModelQuestionRequest,
+                    ask_model_question,
+                    confirm_attention,
                 )
-                return result.action
-            result = await ask_model_question(
-                ModelQuestionRequest(question=question),
-            )
-            return result.text
 
-        host_callbacks["ask_user_callback"] = _ask_user_handler
+                if choices:
+                    result = await confirm_attention(
+                        AttentionWidgetRequest(
+                            request_id="ask_user",
+                            agent_name="assistant",
+                            message=question,
+                            priority="normal",
+                            actions=tuple(choices),
+                        ),
+                    )
+                    return result.action
+                result = await ask_model_question(
+                    ModelQuestionRequest(question=question),
+                )
+                return result.text
 
-        def _set_permission_mode(mode: str) -> None:
-            ctx._permission_mode = mode
+            _UI_for_ask.set_ask_user_callback(_ask_user_handler)
+        except Exception:
+            pass
 
-        async def _plan_approval_handler(plan_summary: str) -> bool:
-            """Gate plan-mode exit on user approval via the renderer."""
-            from obscura.cli.widgets import (
-                PermissionWidgetRequest,
-                confirm_permission,
-            )
+    # Wire the plan-mode toggle so enter_plan_mode / exit_plan_mode tools work
+    if tools_enabled:
+        try:
+            from obscura.tools.system import Session as _Session_for_plan
 
-            result = await confirm_permission(
-                PermissionWidgetRequest(
-                    action="Exit plan mode and begin implementation",
-                    reason=plan_summary or "Agent wants to leave plan mode.",
-                    risk="medium",
-                ),
-            )
-            return result.action == "approve"
+            def _set_permission_mode(mode: str) -> None:
+                ctx._permission_mode = mode
 
-        host_callbacks["permission_mode_callback"] = _set_permission_mode
-        host_callbacks["plan_approval_callback"] = _plan_approval_handler
+            _Session_for_plan.set_permission_mode_callback(_set_permission_mode)
 
-        async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
-            mode = kwargs.get("mode", "question")
-
-            if mode == "permission":
+            async def _plan_approval_handler(plan_summary: str) -> bool:
+                """Gate plan-mode exit on user approval via the renderer."""
                 from obscura.cli.widgets import (
                     PermissionWidgetRequest,
                     confirm_permission,
@@ -1307,72 +1296,102 @@ async def _repl(
 
                 result = await confirm_permission(
                     PermissionWidgetRequest(
-                        action=kwargs.get("action", ""),
-                        reason=kwargs.get("reason", ""),
-                        risk=kwargs.get("risk", "low"),
+                        action="Exit plan mode and begin implementation",
+                        reason=plan_summary or "Agent wants to leave plan mode.",
+                        risk="medium",
                     ),
                 )
-                return {"approved": result.action == "approve"}
+                return result.action == "approve"
 
-            if mode == "notify":
+            _Session_for_plan.set_plan_approval_callback(_plan_approval_handler)
+        except Exception:
+            pass
+
+    # Wire the user_interact callback for permission/notify/question modes
+    if tools_enabled:
+        try:
+            from obscura.tools.system import UI as _UI_for_interact
+
+            async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
+                mode = kwargs.get("mode", "question")
+
+                if mode == "permission":
+                    from obscura.cli.widgets import (
+                        PermissionWidgetRequest,
+                        confirm_permission,
+                    )
+
+                    result = await confirm_permission(
+                        PermissionWidgetRequest(
+                            action=kwargs.get("action", ""),
+                            reason=kwargs.get("reason", ""),
+                            risk=kwargs.get("risk", "low"),
+                        ),
+                    )
+                    return {"approved": result.action == "approve"}
+
+                if mode == "notify":
+                    from obscura.cli.widgets import (
+                        NotifyWidgetRequest,
+                        render_notification_banner,
+                    )
+
+                    render_notification_banner(
+                        NotifyWidgetRequest(
+                            title=kwargs.get("title", ""),
+                            message=kwargs.get("message", ""),
+                            priority=kwargs.get("priority", "normal"),
+                        ),
+                    )
+                    return {}
+
+                if mode == "multi_select":
+                    from obscura.cli.widgets import (
+                        MultiSelectRequest,
+                        ask_multi_select as _ask_multi_select,
+                    )
+
+                    choices = kwargs.get("choices", [])
+                    question = kwargs.get("question", "")
+                    result = await _ask_multi_select(
+                        MultiSelectRequest(
+                            question=question,
+                            choices=tuple(choices),
+                        ),
+                    )
+                    # result.text is comma-separated selections
+                    selected = [s.strip() for s in result.text.split(",") if s.strip()]
+                    return {"selected": selected}
+
+                # question mode (default)
                 from obscura.cli.widgets import (
-                    NotifyWidgetRequest,
-                    render_notification_banner,
-                )
-
-                render_notification_banner(
-                    NotifyWidgetRequest(
-                        title=kwargs.get("title", ""),
-                        message=kwargs.get("message", ""),
-                        priority=kwargs.get("priority", "normal"),
-                    ),
-                )
-                return {}
-
-            if mode == "multi_select":
-                from obscura.cli.widgets import (
-                    MultiSelectRequest,
-                    ask_multi_select as _ask_multi_select,
+                    AttentionWidgetRequest,
+                    ModelQuestionRequest,
+                    ask_model_question,
+                    confirm_attention,
                 )
 
                 choices = kwargs.get("choices", [])
                 question = kwargs.get("question", "")
-                result = await _ask_multi_select(
-                    MultiSelectRequest(
-                        question=question,
-                        choices=tuple(choices),
-                    ),
+                if choices:
+                    result = await confirm_attention(
+                        AttentionWidgetRequest(
+                            request_id="user_interact",
+                            agent_name="assistant",
+                            message=question,
+                            priority="normal",
+                            actions=tuple(choices),
+                        ),
+                    )
+                    return {"selected": result.action}
+                result = await ask_model_question(
+                    ModelQuestionRequest(question=question),
                 )
-                selected = [s.strip() for s in result.text.split(",") if s.strip()]
-                return {"selected": selected}
+                return {"selected": result.text}
 
-            # question mode (default)
-            from obscura.cli.widgets import (
-                AttentionWidgetRequest,
-                ModelQuestionRequest,
-                ask_model_question,
-                confirm_attention,
-            )
-
-            choices = kwargs.get("choices", [])
-            question = kwargs.get("question", "")
-            if choices:
-                result = await confirm_attention(
-                    AttentionWidgetRequest(
-                        request_id="user_interact",
-                        agent_name="assistant",
-                        message=question,
-                        priority="normal",
-                        actions=tuple(choices),
-                    ),
-                )
-                return {"selected": result.action}
-            result = await ask_model_question(
-                ModelQuestionRequest(question=question),
-            )
-            return {"selected": result.text}
-
-        host_callbacks["user_interact_callback"] = _user_interact_handler
+            _UI_for_interact.set_user_interact_callback(_user_interact_handler)
+        except Exception:
+            pass
 
     # Load project hooks from .obscura/settings.json and .obscura/hooks/
     project_hooks = None
@@ -1442,7 +1461,6 @@ async def _repl(
         tools=system_tools or None,
         mcp_servers=mcp_configs or None,
         hooks=project_hooks,
-        host_callbacks=host_callbacks,
     ) as client:
         # Wire eval-driven tool router so the backend selects a relevant
         # subset of tools per turn (pinned core tools + capability matches).
@@ -1558,23 +1576,6 @@ async def _repl(
         agent_infos = _discover_agent_infos()
         available_agents = [a.name for a in agent_infos] or None
 
-        # Best-effort attach to a running browser-extension host so terminal
-        # prompts can drive the user's existing Chrome. Silently skipped when
-        # no host is running or when tools are disabled.
-        browser_bridge_client: Any = None
-        browser_status: dict[str, Any] | None = None
-        if tools_enabled:
-            try:
-                from obscura.integrations.browser.client import attach_if_running
-
-                browser_bridge_client, browser_status = await attach_if_running(
-                    client.register_tool,
-                )
-            except Exception:
-                browser_bridge_client, browser_status = None, None
-        if browser_status is not None:
-            tool_count += int(browser_status.get("tool_count") or 0)
-
         print_banner(
             backend,
             model,
@@ -1584,7 +1585,6 @@ async def _repl(
             mode=mm.current.value,
             available_agents=available_agents,
             agent_infos=agent_infos or None,
-            browser_status=browser_status,
         )
 
         # Start supervisor if --supervise (default) and agents.yaml has agents
@@ -2399,12 +2399,6 @@ async def _repl(
 
         finally:
             spinner_task.cancel()
-            # Detach the browser bridge before tearing down the rest of the
-            # session — the bridge socket is fast to close and avoids leaving
-            # a stale FD if anything below this raises.
-            if browser_bridge_client is not None:
-                with contextlib.suppress(Exception):
-                    await browser_bridge_client.close()
             # Stop supervisor fleet
             if supervisor_task is not None:
                 if _supervisor is not None:
@@ -2892,21 +2886,28 @@ from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E
 main.add_command(_kairos_group)
 
 
-from obscura.cli.revoke_commands import revoke_group as _revoke_group  # noqa: E402
+# Backwards-compat aliases added by test harness
+def _emit_context_warnings(*args, **kwargs):
+    from .warnings import emit_context_warnings as _impl
 
-main.add_command(_revoke_group)
-
-
-from obscura.cli.secrets_commands import secrets_group as _secrets_group  # noqa: E402
-
-main.add_command(_secrets_group)
+    return _impl(*args, **kwargs)
 
 
-from obscura.cli.admin_commands import admin_group as _admin_group  # noqa: E402
+def _copilot_budget_pct(tokens: int, context_window: int):
+    from .warnings import get_copilot_budget_pct as _impl
 
-main.add_command(_admin_group)
-
-
-
+    return _impl(tokens, context_window)
 
 
+def _parse_confirm_decision(answer: str) -> str | None:
+    a = (answer or "").lower()
+    if "approve" in a or a.strip().startswith("yes") or "accept" in a:
+        return "approve"
+    if "deny" in a or a.strip().startswith("no") or "do not" in a or "dont" in a:
+        return "deny"
+    return None
+
+
+def _track_task_surface_event(ctx, ev) -> None:
+    """Compatibility stub: track a task-surface event (no-op)."""
+    return
