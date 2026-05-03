@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -41,23 +41,26 @@ async def _ckan_search(q: str, rows: int, start: int) -> dict[str, Any]:
     if not body.get("success"):
         raise RuntimeError(body.get("error", "CKAN returned success=false"))
 
-    result_block = body.get("result", {})
-    datasets = [
+    result_block = cast(dict[str, Any], body.get("result", {}))
+    raw_results = cast(list[dict[str, Any]], result_block.get("results", []))
+    datasets: list[dict[str, Any]] = [
         {
             "name": ds.get("name"),
             "title": ds.get("title"),
             "notes": (ds.get("notes") or "")[:300],
             "url": ds.get("url"),
-            "organization": (ds.get("organization") or {}).get("title"),
+            "organization": cast(
+                dict[str, Any], ds.get("organization") or {}
+            ).get("title"),
             "formats": sorted(
                 {
                     r.get("format", "").upper()
-                    for r in ds.get("resources", [])
+                    for r in cast(list[dict[str, Any]], ds.get("resources", []))
                     if r.get("format")
                 },
             ),
         }
-        for ds in result_block.get("results", [])
+        for ds in raw_results
     ]
 
     return {

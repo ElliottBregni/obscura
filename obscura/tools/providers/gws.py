@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import shutil
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
             if val:
                 cmd.append(flag)
         elif isinstance(val, list):
-            for item in val:
+            for item in cast(list[Any], val):
                 cmd.extend([flag, str(item)])
         else:
             cmd.extend([flag, str(val)])
@@ -123,7 +123,7 @@ async def GWSProvider(**kwargs: Any) -> dict[str, Any]:
             }
 
         try:
-            return json.loads(output)  # type: ignore[no-any-return]
+            return cast(dict[str, Any], json.loads(output))
         except (json.JSONDecodeError, ValueError):
             return {"output": output.strip()}
     except Exception as e:

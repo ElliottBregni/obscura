@@ -51,7 +51,7 @@ class AuditEvent:
     resource: str  # "backend:copilot", "tool:read_file", "sync:vault"
     action: str  # "read", "write", "execute", "delete"
     outcome: str  # "success", "denied", "error"
-    details: dict[str, object] = field(default_factory=dict)
+    details: dict[str, object] = field(default_factory=dict[str, object])
     timestamp: str = ""
     trace_id: str = ""
 

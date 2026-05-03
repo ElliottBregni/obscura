@@ -80,20 +80,15 @@ async def MSGraphProvider(**kwargs: Any) -> dict[str, Any]:
                 return {"messages": data.get("value", [])}
 
             if tool_name == "msgraph.calendar.events.list":
-                params = []
                 top = int(kwargs.get("top", 50))
-                params.append(("$top", str(top)))
+                params: dict[str, str] = {"$top": str(top)}
                 if kwargs.get("start") and kwargs.get("end"):
                     start = kwargs["start"]
                     end = kwargs["end"]
                     tz = kwargs.get("timezone", "UTC")
-                    params.extend(
-                        [
-                            ("startDateTime", start),
-                            ("endDateTime", end),
-                            ("Prefer", f'outlook.timezone="{tz}"'),
-                        ],
-                    )
+                    params["startDateTime"] = str(start)
+                    params["endDateTime"] = str(end)
+                    params["Prefer"] = f'outlook.timezone="{tz}"'
                     url = "https://graph.microsoft.com/v1.0/me/calendarView"
                 else:
                     url = "https://graph.microsoft.com/v1.0/me/events"
