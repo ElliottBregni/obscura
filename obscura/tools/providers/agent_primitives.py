@@ -298,7 +298,7 @@ def fd_find(pattern: str, path: str = ".", **_: Any) -> dict[str, Any]:
 def duckdb_query(query: str, database: str = ":memory:", **_: Any) -> dict[str, Any]:
     t0 = time.monotonic()
     try:
-        import duckdb  # type: ignore
+        import duckdb
 
         conn = duckdb.connect(database=database)
         rows = conn.execute(query).fetchall()
@@ -330,11 +330,11 @@ def duckdb_query(query: str, database: str = ":memory:", **_: Any) -> dict[str, 
 def datafusion_query(query: str, **_: Any) -> dict[str, Any]:
     t0 = time.monotonic()
     try:
-        from datafusion import SessionContext  # type: ignore
+        from datafusion import SessionContext
 
         ctx = SessionContext()
-        df = ctx.sql(query)
-        batches = df.collect()
+        df: Any = ctx.sql(query)
+        batches: list[Any] = list(df.collect())
         return {
             "ok": True,
             "query": query,
@@ -484,7 +484,7 @@ async def datadog_list_logs(
 ) -> dict[str, Any]:
     import datetime
 
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     body: dict[str, Any] = {
@@ -534,7 +534,7 @@ async def datadog_list_traces(
 ) -> dict[str, Any]:
     import datetime
 
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     default_from = (now - datetime.timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
     default_to = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     body: dict[str, Any] = {
