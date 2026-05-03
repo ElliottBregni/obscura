@@ -19,7 +19,7 @@ import json
 import logging
 import threading
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.pg_config import PGPoolManager
 
@@ -167,7 +167,9 @@ class PostgreSQLMemoryStore:
             self.delete(key, namespace=namespace)
             return default
 
-        return value_raw if isinstance(value_raw, (dict, list)) else json.loads(value_raw)
+        if isinstance(value_raw, (dict, list)):
+            return cast(Any, value_raw)
+        return json.loads(value_raw)
 
     def delete(self, key: str, namespace: str = "default") -> bool:
         """Delete a key. Returns True if deleted."""
@@ -234,9 +236,9 @@ class PostgreSQLMemoryStore:
                         "ORDER BY updated_at DESC",
                         (self.user_id, pattern, pattern),
                     )
-                results = []
+                results: list[dict[str, Any]] = []
                 for row in cur.fetchall():
-                    val = row["value"]
+                    val: Any = row["value"]
                     if isinstance(val, str):
                         val = json.loads(val)
                     results.append({
