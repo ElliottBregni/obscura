@@ -3347,7 +3347,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
     if sub == "health":
         plugins = registry.list_plugins()
         for p in plugins:
-            status = p.get("status", "unknown")
+            status = p.state or "unknown"
             icon = "✓" if status == "enabled" else "✗" if status == "failed" else "○"
             color = (
                 "green"
@@ -3356,7 +3356,7 @@ async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:
                 if status == "failed"
                 else "dim"
             )
-            console.print(f"  {icon} [{color}]{p.get('id', '?')}[/] — {status}")
+            console.print(f"  {icon} [{color}]{p.id or '?'}[/] — {status}")
         return None
 
     if sub == "marketplace":
