@@ -213,6 +213,12 @@ markers = [
 
 [tool.ruff]
 target-version = "py313"
+# Stand-alone code that hasn't been folded into the obscura package yet —
+# excluded from ruff until it finds a permanent home under obscura/*.
+extend-exclude = [
+    "packages/browser-extension/native-host",
+    "tools/playwright",
+]
 
 [tool.ruff.lint]
 select = [
