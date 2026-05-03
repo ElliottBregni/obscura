@@ -214,19 +214,17 @@ class SQLiteBackend:
 
         rows = conn.execute(query, params).fetchall()
 
-        results: list[VectorEntry] = []
+        results = []
         for row in rows:
-            embedding: list[float] = json.loads(row["embedding"])
+            embedding = json.loads(row["embedding"])
             similarity = cosine_similarity(query_embedding, embedding)
 
             if threshold is not None and similarity < threshold:
                 continue
 
-            metadata: dict[str, Any] = (
-                json.loads(row["metadata"]) if row["metadata"] else {}
-            )
+            metadata = json.loads(row["metadata"]) if row["metadata"] else {}
 
-            if filters and not match_metadata_filters(filters, metadata):
+            if filters and not match_metadata_filters(metadata, filters):
                 continue
 
             created_at = datetime.fromisoformat(row["created_at"])
