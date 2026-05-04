@@ -11,6 +11,11 @@ A2APartKind.TEXT.value`` rather than the enum member directly. Pydantic v2's
 ``.value`` rather than the member object keeps the JSON output as
 ``"kind": "text"`` instead of ``"kind": A2APartKind.TEXT``.
 
+``A2ATask`` and ``A2ATaskStatus`` use a non-frozen base because the in-memory
+task store mutates them in place (``task.status = ...``). The serialised wire
+format is still fully validated on egress through ``model_dump``. Boundary
+parts and stream events stay frozen — they're constructed once and shipped.
+
 Re-exported from :mod:`obscura.integrations.a2a.types` so existing imports
 keep resolving.
 """
@@ -21,7 +26,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from obscura.core.enums.protocol import (
     A2APartKind,
@@ -30,6 +35,23 @@ from obscura.core.enums.protocol import (
     A2ATaskState,
 )
 from obscura.core.models._base import BoundaryModel
+
+
+class _MutableA2AModel(BaseModel):
+    """Non-frozen variant of :class:`BoundaryModel`.
+
+    Used for the few internal-state aggregate types (``A2ATask``,
+    ``A2ATaskStatus``) that the in-memory store rebinds in place. Wire
+    semantics are otherwise identical: lenient ``extra="ignore"`` for forward
+    compat, populate-by-name so aliased camelCase keys round-trip.
+    """
+
+    model_config = ConfigDict(
+        frozen=False,
+        extra="ignore",
+        strict=False,
+        populate_by_name=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -114,16 +136,23 @@ class Artifact(BoundaryModel):
 # ---------------------------------------------------------------------------
 
 
-class A2ATaskStatus(BoundaryModel):
-    """Current task status with optional message."""
+class A2ATaskStatus(_MutableA2AModel):
+    """Current task status with optional message.
+
+    Non-frozen because :class:`A2ATask` rebinds it during state transitions.
+    """
 
     state: A2ATaskState
     message: A2AMessage | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class A2ATask(BoundaryModel):
-    """The primary unit of work in A2A."""
+class A2ATask(_MutableA2AModel):
+    """The primary unit of work in A2A.
+
+    Non-frozen because the in-memory store mutates ``status`` and appends to
+    ``history`` / ``artifacts`` in place during the task lifecycle.
+    """
 
     kind: Literal["task"] = A2ATaskMessageKind.TASK.value
     id: str
