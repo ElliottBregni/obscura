@@ -876,16 +876,10 @@ class ObscuraMCPServer:
 
     async def shutdown(self) -> None:
         """Shutdown the MCP server."""
-        if self._runtime:
-            stop_fn = getattr(self._runtime, "shutdown", None) or getattr(
-                self._runtime,
-                "stop",
-                None,
-            )
-            if stop_fn:
-                stop_result = stop_fn()
-                if asyncio.iscoroutine(stop_result):
-                    await stop_result
+        if self._runtime is not None:
+            stop_result = self._runtime.stop()
+            if asyncio.iscoroutine(stop_result):
+                await stop_result
             self._runtime = None
 
         self._initialized = False
