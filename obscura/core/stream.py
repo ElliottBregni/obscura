@@ -305,15 +305,31 @@ class ClaudeIteratorAdapter:
         if type_name == "UserMessage":
             return []
 
-        # Unknown → text fallback
-        return [
-            StreamChunk(
-                kind=ChunkKind.TEXT_DELTA,
-                text=str(item),
-                raw=item,
-                native_event=item,
-            ),
-        ]
+        # RateLimitEvent → surface as a structured chunk so the renderer
+        # can decide what to do (status line, log, suppress) instead of
+        # dumping repr() into the chat.
+        if type_name == "RateLimitEvent":
+            info = getattr(item, "rate_limit_info", None)
+            logger.info(
+                "claude rate-limit: status=%s type=%s utilization=%s resets_at=%s",
+                getattr(info, "status", None),
+                getattr(info, "rate_limit_type", None),
+                getattr(info, "utilization", None),
+                getattr(info, "resets_at", None),
+            )
+            return [
+                StreamChunk(
+                    kind=ChunkKind.RATE_LIMIT,
+                    raw=item,
+                    native_event=item,
+                ),
+            ]
+
+        logger.warning(
+            "ClaudeIteratorAdapter: unrecognized SDK message type %r; dropping",
+            type_name,
+        )
+        return []
 
     def _adapt_stream_event(self, event: Any) -> list[StreamChunk]:
         """Adapt a Claude StreamEvent to StreamChunks."""

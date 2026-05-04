@@ -84,6 +84,8 @@ class ChunkKind(StrEnum):
 
     ERROR = "error"
 
+    RATE_LIMIT = "rate_limit"
+
 
 class HookPoint(StrEnum):
     """Lifecycle hook points common to both backends."""
