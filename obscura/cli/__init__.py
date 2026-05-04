@@ -60,6 +60,7 @@ from obscura.cli._tool_confirm import (
     maybe_parse_plan as maybe_parse_plan,
     track_file_event as track_file_event,
 )
+from obscura.cli.bootstrap import _discover_mcp as _discover_mcp  # pyright: ignore[reportPrivateUsage]
 
 # ---------------------------------------------------------------------------
 # Internal aliases kept for callers that used the private names

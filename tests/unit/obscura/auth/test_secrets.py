@@ -138,6 +138,9 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(secrets_module, "_dotenv_loaded", True)
     monkeypatch.setattr(secrets_module, "_shell_env_snapshot", {})
+    # ``resolve()`` caches results process-wide; without this, the first
+    # test to look up a name pins that value for every later test.
+    secrets_module.clear_cache()
 
 
 def _set_shell_env(

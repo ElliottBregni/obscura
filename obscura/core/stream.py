@@ -121,7 +121,7 @@ class EventToIteratorBridge:
         """Map tool execution start."""
         name = ""
         tool_id = ""
-        data = getattr(event, "data", None)
+        data: Any = getattr(event, "data", None)
         if data is not None:
             name = getattr(data, "tool_name", "") or getattr(data, "name", "") or ""
             # Copilot may surface the call id under a few different names;
@@ -162,7 +162,7 @@ class EventToIteratorBridge:
         if data is not None:
             tool_input: Any = None
             for attr in ("tool_input", "input", "arguments", "parameters"):
-                val = getattr(data, attr, None)
+                val = getattr(cast(Any, data), attr, None)
                 if val is not None:
                     tool_input = val
                     break
