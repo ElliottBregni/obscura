@@ -6,7 +6,13 @@ Based on the Model Context Protocol specification.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, override
+from typing import Any, Literal, TypeAlias, override
+
+from obscura.core.enums.protocol import (
+    MCPLogLevel as MCPLogLevel,
+    MCPMethod as MCPMethod,
+    MCPTransport as MCPTransport,
+)
 
 # ---------------------------------------------------------------------------
 # JSON-RPC Types
@@ -17,6 +23,9 @@ class JSONRPCVersion(Enum):
     """JSON-RPC version constants."""
 
     V2_0 = "2.0"
+
+
+# JSON-RPC standard error codes — see obscura.core.enums.protocol.JSONRPCErrorCode
 
 
 @dataclass(frozen=True)
@@ -60,35 +69,6 @@ class JSONRPCError:
 # ---------------------------------------------------------------------------
 # MCP Protocol Types
 # ---------------------------------------------------------------------------
-
-
-class MCPMethod(Enum):
-    """MCP protocol methods."""
-
-    # Lifecycle
-    INITIALIZE = "initialize"
-    INITIALIZED = "notifications/initialized"
-    PING = "ping"
-
-    # Tools
-    TOOLS_LIST = "tools/list"
-    TOOLS_CALL = "tools/call"
-
-    # Resources
-    RESOURCES_LIST = "resources/list"
-    RESOURCES_READ = "resources/read"
-    RESOURCES_SUBSCRIBE = "resources/subscribe"
-    RESOURCES_UNSUBSCRIBE = "resources/unsubscribe"
-
-    # Prompts
-    PROMPTS_LIST = "prompts/list"
-    PROMPTS_GET = "prompts/get"
-
-    # Roots (client -> server)
-    ROOTS_LIST = "roots/list"
-
-    # Sampling (server -> client)
-    SAMPLING_CREATE_MESSAGE = "sampling/createMessage"
 
 
 @dataclass(frozen=True)
@@ -193,16 +173,7 @@ class MCPPromptResult:
 class MCPLoggingMessage:
     """MCP logging message."""
 
-    level: Literal[
-        "debug",
-        "info",
-        "notice",
-        "warning",
-        "error",
-        "critical",
-        "alert",
-        "emergency",
-    ]
+    level: MCPLogLevel
     logger: str | None = None
     data: Any = None
 
@@ -212,12 +183,10 @@ class MCPLoggingMessage:
 # ---------------------------------------------------------------------------
 
 
-class MCPTransportType(Enum):
-    """MCP transport types."""
-
-    STDIO = "stdio"
-    SSE = "sse"
-    WEBSOCKET = "websocket"
+# Backwards-compatible alias for the canonical MCPTransport StrEnum.
+# UP040 ignored: `type X = ...` produces a TypeAliasType that strips enum
+# member access; we need the runtime to stay the actual enum class.
+MCPTransportType: TypeAlias = MCPTransport  # noqa: UP040
 
 
 @dataclass

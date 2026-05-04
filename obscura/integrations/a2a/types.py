@@ -8,28 +8,28 @@ Conforms to the A2A Protocol Specification v0.3.
 
 from __future__ import annotations
 
-import enum
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, Field
+
+from obscura.core.enums.protocol import (
+    A2AMethod as A2AMethod,
+    A2APartKind,
+    A2ARole as A2ARole,
+    A2ATaskMessageKind,
+    A2ATaskState as A2ATaskState,
+)
 
 # ---------------------------------------------------------------------------
 # Task state machine
 # ---------------------------------------------------------------------------
 
 
-class TaskState(enum.StrEnum):
-    """A2A task lifecycle states."""
-
-    PENDING = "pending"
-    WORKING = "working"
-    INPUT_REQUIRED = "input-required"
-    AUTH_REQUIRED = "auth-required"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELED = "canceled"
-    REJECTED = "rejected"
+# Backwards-compatible alias for the canonical A2ATaskState StrEnum.
+# UP040 ignored: `type X = ...` produces a TypeAliasType that strips enum
+# member access; we need the runtime to stay the actual enum class.
+TaskState: TypeAlias = A2ATaskState  # noqa: UP040
 
 
 # Valid state transitions enforced by the task store.
@@ -84,7 +84,8 @@ TERMINAL_STATES: frozenset[TaskState] = frozenset(
 class TextPart(BaseModel):
     """Plain text content."""
 
-    kind: Literal["text"] = "text"
+    # Discriminator literal — value sourced from A2APartKind for single source of truth.
+    kind: Literal["text"] = A2APartKind.TEXT.value
     text: str
     metadata: dict[str, Any] | None = None
 
@@ -101,7 +102,7 @@ class FileContent(BaseModel):
 class FilePart(BaseModel):
     """File content (inline bytes or URI reference)."""
 
-    kind: Literal["file"] = "file"
+    kind: Literal["file"] = A2APartKind.FILE.value
     file: FileContent
     metadata: dict[str, Any] | None = None
 
@@ -109,7 +110,7 @@ class FilePart(BaseModel):
 class DataPart(BaseModel):
     """Structured JSON data."""
 
-    kind: Literal["data"] = "data"
+    kind: Literal["data"] = A2APartKind.DATA.value
     data: dict[str, Any]
     metadata: dict[str, Any] | None = None
 
@@ -126,6 +127,7 @@ Part = TextPart | FilePart | DataPart
 class A2AMessage(BaseModel):
     """A single communication turn between client and agent."""
 
+    # Wire string ("user"/"agent") — see A2ARole for the canonical enum.
     role: Literal["user", "agent"]
     messageId: str
     parts: list[Part]
@@ -171,7 +173,7 @@ class Task(BaseModel):
     status: TaskStatus
     artifacts: list[Artifact] = Field(default_factory=list[Artifact])
     history: list[A2AMessage] = Field(default_factory=list[A2AMessage])
-    kind: Literal["task"] = "task"
+    kind: Literal["task"] = A2ATaskMessageKind.TASK.value
     metadata: dict[str, Any] | None = None
 
 
@@ -187,7 +189,7 @@ class TaskStatusUpdateEvent(BaseModel):
     contextId: str
     status: TaskStatus
     final: bool = False
-    kind: Literal["status-update"] = "status-update"
+    kind: Literal["status-update"] = A2ATaskMessageKind.STATUS_UPDATE.value
 
 
 class TaskArtifactUpdateEvent(BaseModel):
@@ -198,7 +200,7 @@ class TaskArtifactUpdateEvent(BaseModel):
     artifact: Artifact
     append: bool = False
     lastChunk: bool = False
-    kind: Literal["artifact-update"] = "artifact-update"
+    kind: Literal["artifact-update"] = A2ATaskMessageKind.ARTIFACT_UPDATE.value
 
 
 # Union for stream responses.
@@ -285,24 +287,8 @@ class SendMessageConfiguration(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# JSON-RPC
+# JSON-RPC method names — see obscura.core.enums.protocol.A2AMethod
 # ---------------------------------------------------------------------------
-
-
-class A2AMethod(enum.StrEnum):
-    """A2A JSON-RPC method names."""
-
-    MESSAGE_SEND = "message/send"
-    MESSAGE_STREAM = "message/stream"
-    TASKS_GET = "tasks/get"
-    TASKS_LIST = "tasks/list"
-    TASKS_CANCEL = "tasks/cancel"
-    TASKS_SUBSCRIBE = "tasks/subscribe"
-    PUSH_CONFIG_CREATE = "tasks/pushNotificationConfig/create"
-    PUSH_CONFIG_GET = "tasks/pushNotificationConfig/get"
-    PUSH_CONFIG_LIST = "tasks/pushNotificationConfig/list"
-    PUSH_CONFIG_DELETE = "tasks/pushNotificationConfig/delete"
-    AGENT_CARD = "agent/authenticatedExtendedCard"
 
 
 # ---------------------------------------------------------------------------
