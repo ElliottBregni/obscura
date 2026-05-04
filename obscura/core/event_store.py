@@ -19,22 +19,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.lifecycle import (
     SESSION_VALID_TRANSITIONS as VALID_TRANSITIONS,
 )
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.models.lifecycle import SessionRecord as SessionRecord
 from obscura.core.session_utils import list_active_sessions
-from obscura.core.enums.agent import AgentEventKind
 from obscura.core.types import AgentEvent
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,7 @@ class EventStoreProtocol(Protocol):
         parent_session_id: str = "",
         project: str = "",
         summary: str = "",
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> SessionRecord: ...
 
     async def get_session(self, session_id: str) -> SessionRecord | None: ...
@@ -92,7 +93,7 @@ class EventStoreProtocol(Protocol):
         *,
         summary: str | None = None,
         message_count: int | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None: ...
 
     async def append(
@@ -143,9 +144,7 @@ def _serialize_event(event: AgentEvent) -> str:
 
 
 def _deserialize_payload(raw: str) -> dict[str, Any]:
-    """Deserialize a JSON payload string."""
-    from typing import cast
-
+    """Deserialize a JSON payload string into a heterogeneous wire dict."""
     result: object = json.loads(raw)
     if not isinstance(result, dict):
         return {}
@@ -258,10 +257,11 @@ class SQLiteEventStore:
         parent_session_id: str = "",
         project: str = "",
         summary: str = "",
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> SessionRecord:
         now = datetime.now(UTC).isoformat()
-        meta_json = json.dumps(metadata or {}, default=str)
+        meta_dict: dict[str, Any] = dict(metadata) if metadata else {}
+        meta_json = json.dumps(meta_dict, default=str)
         conn = self._conn()
         conn.execute(
             "INSERT INTO sessions "
@@ -295,7 +295,7 @@ class SQLiteEventStore:
             project=project,
             summary=summary,
             message_count=0,
-            metadata=metadata or {},
+            metadata=meta_dict,
             created_at=datetime.fromisoformat(now),
             updated_at=datetime.fromisoformat(now),
         )
@@ -347,7 +347,7 @@ class SQLiteEventStore:
         *,
         summary: str | None = None,
         message_count: int | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         conn = self._conn()
         sets: list[str] = []
@@ -361,7 +361,7 @@ class SQLiteEventStore:
             params.append(message_count)
         if metadata is not None:
             sets.append("metadata = ?")
-            params.append(json.dumps(metadata, default=str))
+            params.append(json.dumps(dict(metadata), default=str))
 
         if not sets:
             return
@@ -481,7 +481,7 @@ class SQLiteEventStore:
         parent_session_id: str = "",
         project: str = "",
         summary: str = "",
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> SessionRecord:
         return await asyncio.to_thread(
             self._create_session_sync,
@@ -552,7 +552,7 @@ class SQLiteEventStore:
         *,
         summary: str | None = None,
         message_count: int | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
         await asyncio.to_thread(
             self._update_session_sync,
