@@ -123,6 +123,29 @@ _TOOL_CTX_KNOWN_FIELDS: frozenset[str] = frozenset(
 )
 
 
+# Kwargs callers historically passed to ``loop.run()`` that are loop-level
+# concerns, NOT backend params. Stripped before forwarding kwargs to
+# ``backend.stream()`` so the backend doesn't receive callbacks / event
+# stores / etc. that it doesn't know what to do with.
+_LOOP_ONLY_KWARGS: frozenset[str] = frozenset(
+    {
+        "auto_complete",
+        "event_store",
+        "on_confirm",
+        "max_turns",
+        "agent_name",
+        "context_budget",
+        "tool_allowlist",
+        "tool_output_level",
+        "tool_output_overrides",
+        "host_callbacks",
+        "compiled_agent",
+        "capability_token",
+        "hooks",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Middleware + hook types
 # ---------------------------------------------------------------------------
@@ -298,21 +321,29 @@ class AgentLoopV2:
         session_id: str = "",
         history: list[Message] | None = None,
         initial_messages: list[Message] | None = None,
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Drive the agent until the model emits no tool calls or ``max_turns``.
 
-        ``initial_messages`` is a v1-compat alias for ``history``. ``**_kwargs``
-        absorbs other v1-shape parameters (e.g. ``max_turns`` overrides) that
-        the v1 ``run()`` accepted; they're silently ignored under v2 because
-        v2 reads them from the ``AgentLoopV2Config`` set at construction.
-        Caller migration to the v2 signature can happen incrementally.
+        ``initial_messages`` is a v1-compat alias for ``history``.
+        Unrecognized loop-level kwargs (``auto_complete``, ``event_store``,
+        ``on_confirm``, ``max_turns``) are silently dropped — those should
+        be set at construction time via the factory or AgentLoopV2Config.
+        Everything else is forwarded to ``backend.stream()`` so per-call
+        backend params (``max_thinking_tokens``, model overrides, etc.)
+        flow through to the SDK.
         """
         session_id = session_id or str(uuid.uuid4())
         # initial_messages takes precedence over history when both are passed
         # (matches v1's behavior). Either supplies the prefix conversation.
         history_arg = initial_messages if initial_messages is not None else history
         messages: list[Message] = list(history_arg or [])
+
+        # Strip loop-level kwargs that shouldn't reach the backend.
+        # Everything else flows through to backend.stream() as **kwargs.
+        backend_kwargs = {
+            k: v for k, v in kwargs.items() if k not in _LOOP_ONLY_KWARGS
+        }
         # Prepend the system prompt only when no history was provided —
         # if the caller already passed a history, assume it includes any
         # system message they wanted.
@@ -328,7 +359,7 @@ class AgentLoopV2:
             Message(role=Role.USER, content=[ContentBlock(kind="text", text=prompt)])
         )
 
-        async for event in self._run_inner(messages, session_id):
+        async for event in self._run_inner(messages, session_id, backend_kwargs):
             yield event
 
     # -- Internal --------------------------------------------------------------
@@ -337,7 +368,9 @@ class AgentLoopV2:
         self,
         messages: list[Message],
         session_id: str,
+        backend_kwargs: dict[str, Any] | None = None,
     ) -> AsyncIterator[AgentEvent]:
+        bk_kwargs = backend_kwargs or {}
         for turn in range(1, self._config.max_turns + 1):
             if self._cancel_event.is_set():
                 yield AgentEvent(
@@ -410,7 +443,7 @@ class AgentLoopV2:
             # Real backends declare ``stream(prompt, **kwargs)`` and pick
             # it up by name correctly.
             async for chunk in self._backend.stream(
-                prompt=latest_user_text, messages=messages
+                prompt=latest_user_text, messages=messages, **bk_kwargs
             ):
                 if self._cancel_event.is_set():
                     break
@@ -432,6 +465,31 @@ class AgentLoopV2:
                             await obs(chunk.text)
                         except Exception:
                             logger.exception("text_delta_observer raised — swallowing")
+                elif kind == ChunkKind.THINKING_DELTA:
+                    # Forward thinking-delta chunks as their own AgentEvent
+                    # so the renderer can show the "thinking..." preview.
+                    # Without this, extended-thinking output silently
+                    # disappears under v2.
+                    yield AgentEvent(
+                        kind=AgentEventKind.THINKING_DELTA,
+                        turn=turn,
+                        text=chunk.text,
+                        raw=getattr(chunk, "raw", None),
+                    )
+                elif kind == ChunkKind.MESSAGE_START:
+                    # Some renderers use this to start a new turn frame.
+                    # Forward as TURN_START so the modern renderer's
+                    # frame-buffer can clear / reset for the new turn.
+                    yield AgentEvent(
+                        kind=AgentEventKind.TURN_START,
+                        turn=turn,
+                    )
+                elif kind == ChunkKind.ERROR:
+                    yield AgentEvent(
+                        kind=AgentEventKind.ERROR,
+                        turn=turn,
+                        text=chunk.text or "stream error",
+                    )
                 elif kind == ChunkKind.TOOL_USE_START:
                     partial_names[chunk.tool_use_id] = chunk.tool_name
                     partial_inputs[chunk.tool_use_id] = []
@@ -457,7 +515,8 @@ class AgentLoopV2:
                             input=parsed_input,
                         )
                     )
-                # MESSAGE_END / other kinds: ignore.
+                # ChunkKind.DONE / TOOL_RESULT (echoes from backend): ignore.
+                # We compute our own DONE/TOOL_RESULT from local state.
 
             full_text = "".join(text_buf)
 
