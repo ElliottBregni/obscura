@@ -57,7 +57,8 @@ from obscura.core.client import ObscuraClient
 from obscura.core.enums.protocol import MCPTransport
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_mcp_dir
-from obscura.core.types import AgentEvent, AgentEventKind, ToolSpec
+from obscura.core.enums.agent import AgentEventKind
+from obscura.core.types import AgentEvent, ToolSpec
 from obscura.integrations.mcp.config_loader import (
     build_runtime_server_configs,
     discover_mcp_servers,
@@ -785,7 +786,7 @@ class Agent:
                     make_eval_memory_inject_hook,
                     make_tool_eval_hook,
                 )
-                from obscura.core.types import AgentEventKind as _AEK
+                from obscura.core.enums.agent import AgentEventKind as _AEK
 
                 hook_reg: HookRegistry | None = getattr(self._client, "_hooks", None)
                 if hook_reg is None:
@@ -832,7 +833,7 @@ class Agent:
             try:
                 from obscura.core.hooks import HookRegistry
                 from obscura.core.lifecycle import make_tool_pace_hook
-                from obscura.core.types import AgentEventKind as _AEK
+                from obscura.core.enums.agent import AgentEventKind as _AEK
 
                 hook_reg_: HookRegistry | None = getattr(self._client, "_hooks", None)
                 if hook_reg_ is None:

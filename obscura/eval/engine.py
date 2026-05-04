@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.hooks import HookRegistry
-from obscura.core.types import AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
 from obscura.eval.models import (
     EvalCaseResult,
     EvalRunSummary,

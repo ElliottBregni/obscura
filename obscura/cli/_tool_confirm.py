@@ -28,7 +28,7 @@ from obscura.cli.render import render_plan
 from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.enums.ui import TUIMode
-from obscura.core.types import AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
 from obscura.tools.system.file_state import record_file_access
 
 if TYPE_CHECKING:

@@ -349,7 +349,7 @@ class BrowserRenderer:
 
     def handle(self, event: Any) -> None:
         try:
-            from obscura.core.types import AgentEventKind
+            from obscura.core.enums.agent import AgentEventKind
         except Exception:
             return
         kind = getattr(event, "kind", None)
@@ -1034,7 +1034,7 @@ def _git_commit() -> str | None:
 
 def _available_backends() -> list[str]:
     try:
-        from obscura.core.types import Backend
+        from obscura.core.enums.agent import Backend
 
         return [b.value for b in Backend]
     except Exception:

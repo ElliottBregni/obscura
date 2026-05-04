@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.event_store import EventRecord, SessionRecord, SessionStatus
-from obscura.core.types import AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
 
 logger = logging.getLogger(__name__)
 

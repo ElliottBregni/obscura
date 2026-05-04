@@ -33,7 +33,7 @@ def register_telemetry_hooks(agent: BaseAgent) -> None:
     Creates spans for each APER phase and for tool use. Records phase
     durations and tool call counts/durations as metrics.
     """
-    from obscura.core.types import HookPoint
+    from obscura.core.enums.agent import HookPoint
 
     # Shared state for timing phases and tool calls
     _phase_starts: dict[str, float] = {}

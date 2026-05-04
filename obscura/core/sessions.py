@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import cast
 
-from obscura.core.types import Backend, SessionRef
+from obscura.core.enums.agent import Backend
+from obscura.core.types import SessionRef
 
 # ---------------------------------------------------------------------------
 # Session store

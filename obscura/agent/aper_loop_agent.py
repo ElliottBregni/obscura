@@ -61,8 +61,8 @@ from obscura.agent.interaction import (
     InteractionBus,
     UserResponse,
 )
-from obscura.core.enums.agent import APERMode
-from obscura.core.types import AgentContext, AgentEventKind, AgentPhase, HookPoint
+from obscura.core.enums.agent import APERMode, AgentEventKind, AgentPhase, HookPoint
+from obscura.core.types import AgentContext
 
 if TYPE_CHECKING:
     from obscura.core.client import ObscuraClient

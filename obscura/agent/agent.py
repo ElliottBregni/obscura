@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.agent.aper_loop_agent import APERMode, _should_use_aper  # pyright: ignore[reportPrivateUsage]
 from obscura.agent.interaction import AttentionPriority
-from obscura.core.types import AgentContext, AgentPhase, HookPoint
+from obscura.core.enums.agent import AgentPhase, HookPoint
+from obscura.core.types import AgentContext
 
 if TYPE_CHECKING:
     from obscura.agent.interaction import InteractionBus, UserResponse

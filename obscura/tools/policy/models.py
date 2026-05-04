@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.core.hooks import HookRegistry
 from obscura.core.system_prompts import SUBAGENT_SYSTEM_PROMPT
-from obscura.core.types import AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -21,7 +21,7 @@ from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.enums.auth import AuthProvider
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 import logging
 
 logger = logging.getLogger(__name__)

@@ -12,7 +12,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from obscura.core.auth import resolve_auth
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 from obscura.eval.eval_backend import AnthropicEvalBackend
 
 if TYPE_CHECKING:

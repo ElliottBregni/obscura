@@ -16,7 +16,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict
 
 from obscura.auth import secrets as _secrets
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 import logging
 
 logger = logging.getLogger(__name__)

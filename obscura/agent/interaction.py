@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from obscura.core.types import AgentEventKind
+    from obscura.core.enums.agent import AgentEventKind
 
 __all__ = [
     "AgentInput",

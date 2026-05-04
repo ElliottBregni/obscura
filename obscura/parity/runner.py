@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.hooks import HookRegistry
-from obscura.core.types import AgentEvent, AgentEventKind, BackendProtocol
+from obscura.core.enums.agent import AgentEventKind
+from obscura.core.types import AgentEvent, BackendProtocol
 from obscura.parity.models import ScenarioExpectation, ScenarioResult, ScenarioSpec
 from obscura.parity.tool_middleware import ToolRecordReplayMiddleware
 

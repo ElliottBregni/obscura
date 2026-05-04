@@ -12,7 +12,8 @@ from fastapi.responses import JSONResponse
 from obscura.auth.rbac import require_role
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home
-from obscura.core.types import Backend, SessionRef
+from obscura.core.enums.agent import Backend
+from obscura.core.types import SessionRef
 from obscura.deps import ClientFactory, audit, get_oauth_github_token
 from obscura.routes.session_ingest import (
     preflight_system_session_ingest,

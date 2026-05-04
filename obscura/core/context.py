@@ -26,13 +26,14 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.core.context_lazy import LazySkillLoader, SkillMetadata
 from obscura.core.frontmatter import parse_frontmatter
 from obscura.core.paths import resolve_all_skills_dirs
-from obscura.core.types import ContentBlock, Message, Role
+from obscura.core.enums.agent import Role
+from obscura.core.types import ContentBlock, Message
 
 logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from obscura.core.types import Backend
+    from obscura.core.enums.agent import Backend
 
 # Agent target mapping — must match sync.py AGENT_TARGET_MAP
 _DEFAULT_TARGET_MAP: dict[str, str] = {

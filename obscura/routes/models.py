@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import get_current_user
 from obscura.core.auth import AuthConfig
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 from obscura.providers.claude import ClaudeBackend
 from obscura.providers.codex import CodexBackend
 from obscura.providers.copilot import CopilotBackend

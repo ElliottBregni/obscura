@@ -16,7 +16,8 @@ from typing import Any, Protocol
 
 from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.hooks import HookRegistry
-from obscura.core.types import AgentEventKind, ContentBlock, Message, Role
+from obscura.core.enums.agent import AgentEventKind, Role
+from obscura.core.types import ContentBlock, Message
 
 
 class AgentRunnerProtocol(Protocol):

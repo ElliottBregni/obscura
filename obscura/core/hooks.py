@@ -6,8 +6,9 @@ only).
 
 Usage::
 
+    from obscura.core.enums.agent import AgentEventKind
     from obscura.core.hooks import HookRegistry
-    from obscura.core.types import AgentEvent, AgentEventKind
+    from obscura.core.types import AgentEvent
 
     hooks = HookRegistry()
 
@@ -32,8 +33,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.models.configs import HookContext
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent
 
 if TYPE_CHECKING:
     from obscura.manifest.models import HookDefinition

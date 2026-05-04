@@ -8,7 +8,7 @@ Usage::
 
     from obscura.core.lifecycle import make_policy_gate_hook, make_audit_hook
     from obscura.core.hooks import HookRegistry
-    from obscura.core.types import AgentEventKind
+    from obscura.core.enums.agent import AgentEventKind
 
     hooks = HookRegistry()
     hooks.add_before(make_policy_gate_hook(engine), AgentEventKind.TOOL_CALL)
@@ -22,7 +22,8 @@ import re
 import time
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
+from obscura.core.types import AgentEvent
 from obscura.plugins.broker import BrokerAuditEntry
 
 if TYPE_CHECKING:

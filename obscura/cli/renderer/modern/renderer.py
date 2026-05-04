@@ -44,8 +44,9 @@ from obscura.cli.renderer.modern.theme import (
     TOOL_COLOR,
     Style,
 )
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.ui import BorderStyle
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +245,16 @@ class ModernRenderer:
                         banner_id="plan_approval",
                     )
                 )
+            case AgentEventKind.TASK_STARTED:
+                self._notify_task_started(event)
+            case AgentEventKind.TASK_PROGRESS:
+                self._notify_task_progress(event)
+            case AgentEventKind.TASK_NOTIFICATION:
+                self._notify_task_notification(event)
+            case AgentEventKind.RATE_LIMIT_WARNING:
+                self._notify_rate_limit(event)
+            case AgentEventKind.MIRROR_ERROR:
+                self._notify_mirror_error(event)
             case _:
                 pass
 

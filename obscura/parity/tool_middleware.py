@@ -28,7 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
+from obscura.core.types import AgentEvent
 
 if TYPE_CHECKING:
     from obscura.core.hooks import HookRegistry

@@ -44,7 +44,7 @@ from obscura.agent.interaction import (
 )
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.enums.messaging import TriggerKind
-from obscura.core.types import AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
 from obscura.integrations.messaging.factory import get_adapter
 from obscura.integrations.messaging.identity import (
     build_conversation_key,

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from obscura.core.types import Backend
+    from obscura.core.enums.agent import Backend
     from obscura.providers.registry import ModelInfo
 
 logger = logging.getLogger(__name__)

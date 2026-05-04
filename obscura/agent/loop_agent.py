@@ -34,7 +34,7 @@ from obscura.agent.interaction import (
     InteractionBus,
     UserResponse,
 )
-from obscura.core.types import AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
 
 if TYPE_CHECKING:
     from obscura.core.client import ObscuraClient

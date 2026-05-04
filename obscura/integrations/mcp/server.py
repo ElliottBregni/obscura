@@ -37,8 +37,9 @@ from obscura.core.models.protocol import (
     MCPInitializeParams,
     MCPReadResourceParams,
 )
+from obscura.core.enums.agent import Backend
 from obscura.core.sessions import SessionStore
-from obscura.core.types import Backend, SessionRef
+from obscura.core.types import SessionRef
 from obscura.integrations.mcp.file_tools import read_file, search_files
 from obscura.integrations.mcp.tools import (
     create_array_property,

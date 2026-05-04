@@ -552,7 +552,7 @@ class Supervisor:
                             kind_value = "unknown"
 
                         # Count turn completions
-                        from obscura.core.types import AgentEventKind as _AEK
+                        from obscura.core.enums.agent import AgentEventKind as _AEK
 
                         if event_kind == _AEK.TURN_COMPLETE:
                             turn_count += 1

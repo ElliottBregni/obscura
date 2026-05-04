@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from obscura.core.auth import AuthConfig
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 from obscura.providers.openai import OpenAIBackend
 
 

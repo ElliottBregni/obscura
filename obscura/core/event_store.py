@@ -33,7 +33,8 @@ from obscura.core.enums.lifecycle import (
 )
 from obscura.core.models.lifecycle import SessionRecord as SessionRecord
 from obscura.core.session_utils import list_active_sessions
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
+from obscura.core.types import AgentEvent
 import logging
 
 logger = logging.getLogger(__name__)

@@ -31,7 +31,7 @@ from obscura.core.kairos import (
 from obscura.core.kairos.types import KairosConfig
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_settings
 from obscura.core.tools import ToolRegistry
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 from obscura.providers import CopilotBackend
 
 logger = logging.getLogger(__name__)

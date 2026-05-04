@@ -15,8 +15,9 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.protocol import A2ARole, A2ATaskState
-from obscura.core.types import AgentEvent, AgentEventKind, ToolCallInfo
+from obscura.core.types import AgentEvent, ToolCallInfo
 from obscura.integrations.a2a.event_mapper import EventMapper
 from obscura.integrations.a2a.types import (
     A2AMessage,

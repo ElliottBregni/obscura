@@ -12,7 +12,7 @@ from rich.console import Console
 
 from obscura.core.auth import resolve_auth
 from obscura.core.tools import ToolRegistry
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 from obscura.eval.compiler import compile_suite
 from obscura.eval.engine import EvalEngine
 from obscura.eval.eval_backend import AnthropicEvalBackend, ClaudeCliEvalBackend

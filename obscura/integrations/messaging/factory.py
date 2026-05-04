@@ -9,7 +9,7 @@ from typing import Any
 
 from obscura.core.client import ObscuraClient
 from obscura.core.paths import resolve_obscura_home
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 from obscura.integrations.messaging.kairos_runner import (
     KairosAgentRunner,
     KairosRunnerConfig,

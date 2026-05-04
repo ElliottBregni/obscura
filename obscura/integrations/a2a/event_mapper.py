@@ -16,8 +16,9 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.protocol import A2ATaskState
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent
 from obscura.integrations.a2a.types import (
     Artifact,
     StreamEvent,

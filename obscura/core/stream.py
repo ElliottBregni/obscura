@@ -12,7 +12,8 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.types import ChunkKind, StreamChunk, StreamMetadata
+from obscura.core.enums.agent import ChunkKind
+from obscura.core.types import StreamChunk, StreamMetadata
 import logging
 
 logger = logging.getLogger(__name__)

@@ -37,7 +37,7 @@ from typing import Any
 import click
 
 from obscura.core.paths import resolve_obscura_home, resolve_obscura_specs_dir
-from obscura.core.types import Backend
+from obscura.core.enums.agent import Backend
 
 # ---------------------------------------------------------------------------
 # Sub-module public re-exports (keep for backwards compat + single import point)

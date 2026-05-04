@@ -14,7 +14,7 @@ from obscura.parity.models import (
 )
 
 if TYPE_CHECKING:
-    from obscura.core.types import Backend
+    from obscura.core.enums.agent import Backend
 
 
 def _status_multiplier(status: FeatureStatus) -> float:
