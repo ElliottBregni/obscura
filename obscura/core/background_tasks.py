@@ -17,32 +17,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import logging
 import time
-from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from obscura.auth.secrets import safe_subprocess_env
 from obscura.core.enums.lifecycle import BackgroundTaskStatus as BackgroundTaskStatus
-import logging
+from obscura.core.models.lifecycle import BackgroundTaskRecord
 
 logger = logging.getLogger(__name__)
 
-# Backward-compat alias for the previous Literal-based name.
-_TaskStatus = BackgroundTaskStatus
+
+# The runtime in-memory record. Re-exported under the historical name so
+# callers using ``BackgroundTask`` keep resolving without changes.
+BackgroundTask = BackgroundTaskRecord
 
 
-@dataclass
-class BackgroundTask:
-    """A single background shell task."""
-
-    task_id: str
-    command: str
-    cwd: str
-    status: BackgroundTaskStatus = BackgroundTaskStatus.RUNNING
-    stdout: str = ""
-    stderr: str = ""
-    exit_code: int | None = None
-    started_at: float = field(default_factory=time.time)
-    completed_at: float | None = None
+def _now_dt() -> datetime:
+    return datetime.now(UTC)
 
 
 class BackgroundTaskManager:
@@ -52,7 +44,7 @@ class BackgroundTaskManager:
     """
 
     def __init__(self) -> None:
-        self._tasks: dict[str, BackgroundTask] = {}
+        self._tasks: dict[str, BackgroundTaskRecord] = {}
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watchers: dict[str, asyncio.Task[None]] = {}
 
@@ -76,10 +68,13 @@ class BackgroundTaskManager:
             env=safe_subprocess_env(),
         )
 
-        task = BackgroundTask(
-            task_id=task_id,
+        task = BackgroundTaskRecord(
+            id=task_id,
+            status=BackgroundTaskStatus.RUNNING,
+            status_changed_at=_now_dt(),
             command=command,
             cwd=cwd,
+            started_at=time.time(),
         )
         self._tasks[task_id] = task
         self._processes[task_id] = proc
@@ -131,10 +126,11 @@ class BackgroundTaskManager:
             task.exit_code = -1
         finally:
             task.completed_at = time.time()
+            task.status_changed_at = _now_dt()
             self._processes.pop(task_id, None)
             self._watchers.pop(task_id, None)
 
-    def get(self, task_id: str) -> BackgroundTask | None:
+    def get(self, task_id: str) -> BackgroundTaskRecord | None:
         """Retrieve a task by ID, or ``None`` if not found."""
         return self._tasks.get(task_id)
 
@@ -151,10 +147,11 @@ class BackgroundTaskManager:
         task = self._tasks.get(task_id)
         if task is not None:
             task.status = BackgroundTaskStatus.STOPPED
+            task.status_changed_at = _now_dt()
             task.completed_at = time.time()
         return True
 
-    def list_tasks(self) -> list[BackgroundTask]:
+    def list_tasks(self) -> list[BackgroundTaskRecord]:
         """Return all tracked tasks (running and completed)."""
         return list(self._tasks.values())
 

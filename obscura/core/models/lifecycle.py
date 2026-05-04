@@ -689,6 +689,7 @@ class BackgroundTaskRecord(
     (e.g. ``task_output`` JSON responses) can round-trip.
     """
 
+    status_changed_at: datetime = Field(default=None)  # type: ignore[assignment]
     command: str
     cwd: str = ""
     stdout: str = ""
@@ -696,6 +697,18 @@ class BackgroundTaskRecord(
     exit_code: int | None = None
     started_at: float = 0.0
     completed_at: float | None = None
+
+    @property
+    def task_id(self) -> str:
+        """Legacy alias for the historical dataclass field name."""
+        return self.id
+
+    @model_validator(mode="after")
+    def _backfill_status_changed_at(self) -> Self:
+        if self.status_changed_at is None:  # type: ignore[truthy-bool]
+            ts = datetime.fromtimestamp(self.started_at, tz=UTC) if self.started_at else datetime.now(UTC)
+            object.__setattr__(self, "status_changed_at", ts)
+        return self
 
     @classmethod
     def from_row(cls, row: sqlite3.Row | Mapping[str, Any]) -> Self:
