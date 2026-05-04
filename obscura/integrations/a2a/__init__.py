@@ -9,9 +9,9 @@ Task state persisted in Redis for durability across restarts.
 
 from typing import TYPE_CHECKING
 
+from obscura.core.enums.protocol import A2AMethod, A2ATaskState
 from obscura.integrations.a2a.types import (
     A2AMessage,
-    A2AMethod,
     AgentCard,
     AgentSkill,
     Artifact,
@@ -23,7 +23,6 @@ from obscura.integrations.a2a.types import (
     SendMessageConfiguration,
     Task,
     TaskArtifactUpdateEvent,
-    TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
@@ -50,6 +49,7 @@ __all__ = [
     # Service
     "A2AService",
     "A2ASessionManager",
+    "A2ATaskState",
     "AgentCard",
     # Card generation
     "AgentCardGenerator",
@@ -70,7 +70,6 @@ __all__ = [
     "SendMessageConfiguration",
     "Task",
     "TaskArtifactUpdateEvent",
-    "TaskState",
     "TaskStatus",
     "TaskStatusUpdateEvent",
     "TaskStore",

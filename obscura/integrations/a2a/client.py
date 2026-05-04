@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 import httpx
 
-from obscura.core.enums.protocol import A2ARole
+from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
@@ -33,7 +33,6 @@ from obscura.integrations.a2a.types import (
     StreamEvent,
     Task,
     TaskArtifactUpdateEvent,
-    TaskState,
     TaskStatusUpdateEvent,
     TextPart,
 )
@@ -260,7 +259,7 @@ class A2AClient:
         self,
         *,
         context_id: str | None = None,
-        state: TaskState | None = None,
+        state: A2ATaskState | None = None,
         cursor: str | None = None,
         limit: int = 20,
     ) -> tuple[list[Task], str | None]:

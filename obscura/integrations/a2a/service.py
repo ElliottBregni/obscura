@@ -15,7 +15,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.enums.protocol import A2ARole
+from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.core.types import AgentEvent, AgentEventKind, ToolCallInfo
 from obscura.integrations.a2a.event_mapper import EventMapper
 from obscura.integrations.a2a.types import (
@@ -24,7 +24,6 @@ from obscura.integrations.a2a.types import (
     Artifact,
     StreamEvent,
     Task,
-    TaskState,
     TaskStatusUpdateEvent,
     TextPart,
 )
@@ -161,8 +160,8 @@ class A2AService:
         mapper = EventMapper(task.id, ctx_id)
 
         # Transition to WORKING
-        await self._store.transition(task.id, TaskState.WORKING)
-        yield mapper.status_event(TaskState.WORKING)
+        await self._store.transition(task.id, A2ATaskState.WORKING)
+        yield mapper.status_event(A2ATaskState.WORKING)
 
         # Run agent and stream events
         try:
@@ -173,15 +172,15 @@ class A2AService:
                     # Skip redundant WORKING status from mapper since we already sent it
                     if (
                         isinstance(a2a_event, TaskStatusUpdateEvent)
-                        and a2a_event.status.state == TaskState.WORKING
+                        and a2a_event.status.state == A2ATaskState.WORKING
                         and not a2a_event.final
                     ):
                         continue
                     yield a2a_event
         except Exception as e:
             logger.exception("Agent execution failed for task %s: %s", task.id, e)
-            await self._store.transition(task.id, TaskState.FAILED)
-            yield mapper.status_event(TaskState.FAILED, final=True)
+            await self._store.transition(task.id, A2ATaskState.FAILED)
+            yield mapper.status_event(A2ATaskState.FAILED, final=True)
 
     # ------------------------------------------------------------------
     # tasks/get
@@ -198,7 +197,7 @@ class A2AService:
     async def tasks_list(
         self,
         context_id: str | None = None,
-        state: TaskState | None = None,
+        state: A2ATaskState | None = None,
         cursor: str | None = None,
         limit: int = 20,
     ) -> tuple[list[Task], str | None]:
@@ -268,7 +267,7 @@ class A2AService:
             )
             await self._store.transition(
                 task_id,
-                TaskState.INPUT_REQUIRED,
+                A2ATaskState.INPUT_REQUIRED,
                 message=confirm_msg,
             )
 
@@ -310,7 +309,7 @@ class A2AService:
         await self._store.append_message(task_id, message)
 
         # Transition back to WORKING
-        await self._store.transition(task_id, TaskState.WORKING)
+        await self._store.transition(task_id, A2ATaskState.WORKING)
 
         # Wake the agent loop
         confirmation_event.set()
@@ -328,7 +327,7 @@ class A2AService:
         """Run agent synchronously (block until completion)."""
         try:
             prompt = self._extract_text_from_history(task)
-            await self._store.transition(task.id, TaskState.WORKING)
+            await self._store.transition(task.id, A2ATaskState.WORKING)
 
             result_text = await self._execute_agent(task, prompt)
 
@@ -340,16 +339,16 @@ class A2AService:
                 )
                 await self._store.add_artifact(task.id, artifact)
 
-            await self._store.transition(task.id, TaskState.COMPLETED)
+            await self._store.transition(task.id, A2ATaskState.COMPLETED)
 
         except asyncio.CancelledError:
             logger.debug("suppressed exception in _run_agent_blocking", exc_info=True)
             with contextlib.suppress(Exception):
-                await self._store.transition(task.id, TaskState.CANCELED)
+                await self._store.transition(task.id, A2ATaskState.CANCELED)
         except Exception as e:
             logger.exception("Agent execution failed for task %s: %s", task.id, e)
             with contextlib.suppress(Exception):
-                await self._store.transition(task.id, TaskState.FAILED)
+                await self._store.transition(task.id, A2ATaskState.FAILED)
 
     def _run_agent_background(self, task: Task) -> None:
         """Start agent execution as a background asyncio task."""

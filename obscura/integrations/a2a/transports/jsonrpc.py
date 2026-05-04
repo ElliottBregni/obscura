@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Request
 
-from obscura.core.enums.protocol import A2ARole
+from obscura.core.enums.protocol import A2AMethod, A2ARole, A2ATaskState
 from obscura.core.models.protocol import (
     JSONRPCError,
     JSONRPCRequest,
@@ -25,9 +25,7 @@ from obscura.core.models.protocol import (
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
-    A2AMethod,
     TaskNotFoundError,
-    TaskState,
     TextPart,
 )
 
@@ -122,7 +120,7 @@ async def _dispatch(
         limit_raw: Any = params.get("limit", 20) or 20
         tasks, cursor = await service.tasks_list(
             context_id=_optional_str(params, "contextId"),
-            state=TaskState(state_value) if isinstance(state_value, str) else None,
+            state=A2ATaskState(state_value) if isinstance(state_value, str) else None,
             cursor=_optional_str(params, "cursor"),
             limit=int(limit_raw),
         )

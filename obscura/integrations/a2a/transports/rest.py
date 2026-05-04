@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING, Annotated, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from obscura.core.enums.protocol import A2ATaskState
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
-    TaskState,
 )
 
 if TYPE_CHECKING:
@@ -92,7 +92,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
     ) -> dict[str, Any]:
         """List tasks with optional filtering."""
-        task_state = TaskState(state) if state else None
+        task_state = A2ATaskState(state) if state else None
         tasks, next_cursor = await service.tasks_list(
             context_id=contextId,
             state=task_state,

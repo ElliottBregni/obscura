@@ -11,16 +11,11 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, TypeAlias
+from typing import Any
 
 from obscura.core.enums.messaging import PushProvider
 
 logger = logging.getLogger(__name__)
-
-# Backwards-compatible alias for the canonical PushProvider StrEnum.
-# UP040 ignored: `type X = ...` produces a TypeAliasType that strips enum
-# member access; we need the runtime to stay the actual enum class.
-Provider: TypeAlias = PushProvider  # noqa: UP040
 
 
 @dataclass(frozen=True)
@@ -28,7 +23,7 @@ class PushReceipt:
     """Result of a push notification delivery attempt."""
 
     notification_id: str
-    provider: Provider
+    provider: PushProvider
     token: str
     success: bool
     status_code: int = 0

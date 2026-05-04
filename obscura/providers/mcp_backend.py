@@ -4,13 +4,14 @@ Allows agents to use tools from external MCP servers.
 
 Usage::
 
+    from obscura.core.enums.protocol import MCPTransport
     from obscura.providers.mcp_backend import MCPBackend
-    from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+    from obscura.integrations.mcp.types import MCPConnectionConfig
 
     backend = MCPBackend(
         mcp_servers=[
             MCPConnectionConfig(
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="npx",
                 args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
             ),

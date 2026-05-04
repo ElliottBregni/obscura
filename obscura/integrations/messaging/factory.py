@@ -14,8 +14,8 @@ from obscura.integrations.messaging.kairos_runner import (
     KairosAgentRunner,
     KairosRunnerConfig,
 )
+from obscura.core.enums.messaging import ChannelMode
 from obscura.integrations.messaging.router import (
-    ChannelMode,
     ChannelRouter,
     ChannelRouterConfig,
     ObscuraAgentRunner,

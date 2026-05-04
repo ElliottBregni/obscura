@@ -54,6 +54,7 @@ from obscura.agent.peers import (
     PeerRegistry,
 )
 from obscura.core.client import ObscuraClient
+from obscura.core.enums.protocol import MCPTransport
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_mcp_dir
 from obscura.core.types import AgentEvent, AgentEventKind, ToolSpec
@@ -61,7 +62,7 @@ from obscura.integrations.mcp.config_loader import (
     build_runtime_server_configs,
     discover_mcp_servers,
 )
-from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+from obscura.integrations.mcp.types import MCPConnectionConfig
 from obscura.manifest.lazy import LazyManifestProxy
 from obscura.memory import MemoryStore
 from obscura.plugins.broker import ToolBroker
@@ -578,7 +579,7 @@ class Agent:
         if self.config.mcp.enabled and server_configs:
             mcp_configs: list[MCPConnectionConfig] = []
             for server_config in server_configs:
-                transport = MCPTransportType(server_config.get("transport", "stdio"))
+                transport = MCPTransport(server_config.get("transport", "stdio"))
                 config = MCPConnectionConfig(
                     transport=transport,
                     command=server_config.get("command"),
