@@ -137,25 +137,29 @@ def event_store_post_turn(
     """Build a ``post_turn`` hook that records turn results to an event store.
 
     Mirrors v1's ``AgentLoop(event_store=...)`` integration. *event_store*
-    is opaque (anything with an ``append(session_id, kind, payload)``
-    method, sync or async). Each turn produces one ``"turn_complete"``
-    record with the assistant text and the tool result count.
+    must implement ``EventStoreProtocol.append(session_id, AgentEvent)``.
+    Each turn produces one ``TURN_COMPLETE`` record with the assistant
+    text; tool-call / result counts are stashed in ``raw`` for any
+    downstream consumer that wants them.
     """
+    from obscura.core.enums.agent import AgentEventKind
+    from obscura.core.types import AgentEvent
 
     async def hook(ctx: TurnContext, result: TurnResult) -> None:
-        append = getattr(event_store, "append", None) or getattr(
-            event_store, "record", None
-        )
+        append = getattr(event_store, "append", None)
         if append is None:
             return
-        payload = {
-            "turn": ctx.turn_index,
-            "text": result.text,
-            "tool_calls": len(result.tool_calls),
-            "results": len(result.results),
-        }
+        event = AgentEvent(
+            kind=AgentEventKind.TURN_COMPLETE,
+            text=result.text,
+            turn=ctx.turn_index,
+            raw={
+                "tool_calls": len(result.tool_calls),
+                "results": len(result.results),
+            },
+        )
         try:
-            r = append(session_id, "turn_complete", payload)
+            r = append(session_id, event)
             if hasattr(r, "__await__"):
                 await r
         except Exception:
