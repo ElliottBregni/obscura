@@ -47,9 +47,8 @@ from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
 
 import contextlib
 
+from obscura.core.enums.storage import MemoryEventKind, MemorySource
 from obscura.memory.events import (
-    EventKind,
-    EventSource,
     get_default_sink,
     make_event,
 )
@@ -216,11 +215,11 @@ class VectorMemoryStore:
         sink = self._event_sink if self._event_sink is not None else get_default_sink()
         sink.emit(
             make_event(
-                kind=EventKind(kind),
+                kind=MemoryEventKind(kind),
                 key=key,
                 value=value,
                 ttl_seconds=ttl_seconds,
-                source=EventSource.VECTOR,
+                source=MemorySource.VECTOR,
                 user_id=self.user_id,
             ),
         )

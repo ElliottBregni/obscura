@@ -43,10 +43,6 @@ _log = logging.getLogger(__name__)
 # Postgres NOTIFY payload ceiling is 8000 bytes; leave headroom for framing.
 _PG_PAYLOAD_SOFT_LIMIT = 7000
 
-# Backward-compat aliases: existing call sites import these names.
-EventKind = MemoryEventKind
-EventSource = MemorySource
-
 
 @dataclass(frozen=True)
 class MemoryEvent:
@@ -59,11 +55,11 @@ class MemoryEvent:
     dedupe).
     """
 
-    kind: EventKind
+    kind: MemoryEventKind
     key: MemoryKey
     value: Any | None
     ttl_seconds: float | None
-    source: EventSource
+    source: MemorySource
     user_id: str
     at: datetime
     event_id: int
@@ -272,11 +268,11 @@ def next_event_id() -> int:
 
 def make_event(
     *,
-    kind: EventKind,
+    kind: MemoryEventKind,
     key: MemoryKey,
     value: Any | None,
     ttl_seconds: float | None,
-    source: EventSource,
+    source: MemorySource,
     user_id: str,
 ) -> MemoryEvent:
     """Build a :class:`MemoryEvent` with timestamps and ids populated."""
