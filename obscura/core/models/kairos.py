@@ -79,7 +79,9 @@ class PlanResponse(BoundaryModel):
             try:
                 tasks.append(PlanResponseTask.model_validate(entry))
             except Exception:  # noqa: BLE001 - planner output is untrusted
-                logger.debug("suppressed exception in PlanResponse.from_mapping", exc_info=True)
+                logger.debug(
+                    "suppressed exception in PlanResponse.from_mapping", exc_info=True
+                )
                 continue
 
         known = {"rationale", "tasks"}

@@ -235,6 +235,7 @@ select = [
     "TCH", # type-checking-only imports
     "PL",  # pylint subset (incl. PLC0415: no nested imports)
     "RUF", # ruff-specific
+    "ANN401", # ban dict[str, Any] / Any in annotations — scoped via per-file-ignores below to obscura/core/enums and obscura/core/models only
 ]
 ignore = [
     # pycodestyle / pyflakes
@@ -314,6 +315,19 @@ ignore = [
 # every justified runtime-deferred import. Subsequent commits empty the rest
 # of this list as files are cleaned up.
 "obscura/cli/_lazy/*.py" = ["PLC0415"]
+
+# ANN401 (no `Any` in annotations) is enforced ONLY in obscura/core/enums/
+# and obscura/core/models/ — the strict-typed packages introduced by the
+# Round 1/2/4 enum + Pydantic refactor. Existing code elsewhere uses Any
+# legitimately at JSON-RPC / SQLite / plugin manifest / tool-args boundaries
+# (see plans/round-4-typed-cores.md §4.2 for triage rules). This block
+# disables ANN401 everywhere except those two packages.
+"tests/**" = ["ANN401"]
+"scripts/**" = ["ANN401"]
+"obscura/{__init__,approvals,config,lazy,openclaw_bridge,vault_provisioner}.py" = ["ANN401"]
+"obscura/{admin,agent,arbiter,auth,cli,deps,eval,heartbeat,integrations,kairos,manifest,mcp_server,memory,memory_channels,notifications,notify,parity,plugins,profile,prompts,providers,routes,runtime,schemas,server,services,skills,specs,telemetry,testing,tools,vault_gen,vector_memory,voice}/**" = ["ANN401"]
+"obscura/core/*.py" = ["ANN401"]
+"obscura/core/{client,compiler,kairos,supervisor}/**" = ["ANN401"]
 
 # Transitional: silence PLC0415 in CLI files we'll clean up in commits 2-5.
 "obscura/cli/__init__.py" = ["E402", "PLC0415"]
