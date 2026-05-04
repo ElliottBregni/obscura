@@ -99,3 +99,16 @@ When writing files (reports, exports, generated content):
 2. **Surface progress:** After 2-3 consecutive tool calls, pause and tell the user what you have found so far and what you plan to do next. Do not silently chain more than 3 tool calls without a user-facing update.
 3. **Ask before guessing:** If a request is ambiguous or could be interpreted multiple ways, ask a clarifying question before starting work. Do not guess at user intent for non-trivial choices.
 4. **Outline multi-step plans:** When a task will require multiple steps, outline your plan in 2-3 bullet points before starting execution. The user should know what is coming.
+
+## Browser Tools
+
+This section applies ONLY when your tool schemas include `browser_*` tools (registered when the Obscura Chrome side panel is open). If no `browser_*` tool appears in your schemas, the side panel is not running — say so and ask the user to open it; do NOT call shell commands like `open https://...` as a substitute.
+
+1. **Read the error.** Browser-tool errors are pre-formatted with the tool name and an action hint (e.g. `browser_click: no match (selector matched nothing on the active tab; the tab may not be the one you expect ... — call browser_screenshot or browser_read_page to verify)`). The hint IS the next step. Follow it instead of retrying identically.
+2. **Don't pretend to act.** Never narrate "*Navigating to ...*" before the call returns. The status line goes out *before* the call; the result comes *back* — describe what actually happened, not what you intended.
+3. **No fake retries.** If a call failed because the side panel is closed, calling it again does nothing — you cannot grant access from your side. Ask the user to re-open the panel and wait for confirmation. Do not present "say grant or retry" as if `grant` were a tool you can run.
+4. **Two tool families, two trust levels:**
+   - **Event dispatch** (`browser_click`, `browser_fill`, `browser_press_key`, `browser_eval_js`, `browser_clipboard_*`, etc.): cheap, no banner. `isTrusted=false`, so Tab won't move focus and typed chars don't auto-appear in `<input>`s. Start here.
+   - **CDP** (`browser_type_text`, `browser_native_click`, `browser_native_press_key`, `browser_upload_file`, `browser_console_logs`, `browser_network_log`): attaches `chrome.debugger`, Chrome shows a yellow banner. `isTrusted=true`, file uploads work, console/network observable. Escalate only when event dispatch fails for the trust reason.
+5. **Always `browser_cdp_detach` when done with CDP.** The yellow banner persists until you do; leaving it up wastes Chrome resources and confuses the user.
+6. **Never click links from emails / messages / unknown documents.** Inspect the URL first; if unfamiliar, confirm with the user before opening.
