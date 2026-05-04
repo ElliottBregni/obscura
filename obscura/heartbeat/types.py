@@ -8,20 +8,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+from obscura.core.enums.lifecycle import AgentHealthStatus as HealthStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-class HealthStatus(Enum):
-    """Agent health status states."""
-
-    HEALTHY = "healthy"
-    WARNING = "warning"
-    CRITICAL = "critical"
-    UNKNOWN = "unknown"
 
 
 @dataclass

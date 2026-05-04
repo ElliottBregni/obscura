@@ -9,10 +9,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 import logging
 
+from obscura.core.enums.lifecycle import ApprovalStatus as ApprovalStatus
+
 logger = logging.getLogger(__name__)
-
-
-ApprovalStatus = Literal["pending", "approved", "denied", "expired"]
 
 
 @dataclass
@@ -25,7 +24,7 @@ class ToolApprovalRequest:
     tool_use_id: str
     tool_name: str
     tool_input: dict[str, Any]
-    status: ApprovalStatus = "pending"
+    status: ApprovalStatus = ApprovalStatus.PENDING
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
     decision_reason: str | None = None
@@ -39,7 +38,7 @@ class ToolApprovalRequest:
             "tool_use_id": self.tool_use_id,
             "tool_name": self.tool_name,
             "tool_input": self.tool_input,
-            "status": self.status,
+            "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "resolved_at": self.resolved_at.isoformat()
             if self.resolved_at is not None
@@ -76,7 +75,7 @@ async def create_tool_approval_request(
 async def list_tool_approval_requests(
     *,
     user_id: str,
-    status: ApprovalStatus | Literal["all"] = "all",
+    status: ApprovalStatus | Literal["all"] | str = "all",
 ) -> list[ToolApprovalRequest]:
     async with _approvals_lock:
         values = [
@@ -99,9 +98,9 @@ async def resolve_tool_approval_request(
         approval = _approvals_by_id.get(approval_id)
         if approval is None or approval.user_id != user_id:
             return None
-        if approval.status != "pending":
+        if approval.status != ApprovalStatus.PENDING:
             return approval
-        approval.status = "approved" if approved else "denied"
+        approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.DENIED
         approval.resolved_at = datetime.now(UTC)
         approval.decision_reason = reason
         approval.wait_event.set()
@@ -126,8 +125,8 @@ async def wait_for_tool_approval(
         logger.debug("suppressed exception in wait_for_tool_approval", exc_info=True)
         async with _approvals_lock:
             current = _approvals_by_id.get(approval_id)
-            if current is not None and current.status == "pending":
-                current.status = "expired"
+            if current is not None and current.status == ApprovalStatus.PENDING:
+                current.status = ApprovalStatus.EXPIRED
                 current.resolved_at = datetime.now(UTC)
                 current.decision_reason = "approval timeout"
                 current.wait_event.set()
@@ -137,7 +136,7 @@ async def wait_for_tool_approval(
         resolved = _approvals_by_id.get(approval_id)
         if resolved is None:
             return False
-        return resolved.status == "approved"
+        return resolved.status == ApprovalStatus.APPROVED
 
 
 async def get_tool_approval_request(

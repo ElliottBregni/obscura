@@ -25,6 +25,7 @@ from obscura.tools import worktree_observer
 from obscura.tools import worktree_registry
 from obscura.auth.secrets import safe_subprocess_env
 from obscura.core.cleanup import register_cleanup
+from obscura.core.enums.lifecycle import WorktreeStatus
 from obscura.core.tools import tool
 
 if TYPE_CHECKING:
@@ -96,7 +97,7 @@ def _ensure_cleanup_registered() -> None:
 
 
 def _most_recent_active_slug() -> str:
-    entries = [e for e in worktree_registry.load() if e.status == "active"]
+    entries = [e for e in worktree_registry.load() if e.status == WorktreeStatus.ACTIVE]
     entries.sort(key=lambda e: e.created_at, reverse=True)
     return entries[0].slug if entries else ""
 
@@ -279,7 +280,7 @@ async def exit_worktree(
         worktree_registry.remove(slug)
         result["message"] = f"Removed worktree and branch {branch}"
     else:
-        worktree_registry.update(slug, status="kept")
+        worktree_registry.update(slug, status=WorktreeStatus.KEPT)
         result["message"] = f"Kept worktree at {worktree_path} on branch {branch}"
 
     return json.dumps(result)

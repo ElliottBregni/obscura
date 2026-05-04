@@ -12,46 +12,26 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from obscura.core.enums.lifecycle import (
+    GoalStatus as GoalStatus,
+)
+from obscura.core.enums.lifecycle import (
+    KAIROS_VALID_GOAL_TRANSITIONS as KAIROS_VALID_GOAL_TRANSITIONS,
+)
+from obscura.core.enums.lifecycle import (
+    KairosTaskStatus as TaskStatus,
+)
+from obscura.core.enums.lifecycle import (
+    PlanStatus as PlanStatus,
+)
+
+# Backward-compat alias for the old name; same object.
+VALID_GOAL_TRANSITIONS = KAIROS_VALID_GOAL_TRANSITIONS
+
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
-
-
-class GoalStatus(enum.Enum):
-    """Lifecycle state of a Goal."""
-
-    PENDING = "pending"  # Created, not yet started
-    PLANNING = "planning"  # Decomposing into a Plan
-    ACTIVE = "active"  # Has an active Plan being executed
-    PAUSED = "paused"  # Execution suspended (user or system)
-    BLOCKED = "blocked"  # Waiting on Intervention
-    COMPLETED = "completed"  # All success criteria met
-    FAILED = "failed"  # Unrecoverable failure
-    CANCELLED = "cancelled"  # User-cancelled
-
-
-class PlanStatus(enum.Enum):
-    """Lifecycle state of a Plan."""
-
-    DRAFT = "draft"  # Under construction
-    ACTIVE = "active"  # Being executed
-    SUPERSEDED = "superseded"  # Replaced by a revised plan
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class TaskStatus(enum.Enum):
-    """Lifecycle state of a Task."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    RETRYING = "retrying"
-    BLOCKED = "blocked"  # Waiting on Intervention
-    APPROVAL_REQUIRED = "approval_required"
-    SKIPPED = "skipped"
 
 
 class CheckpointKind(enum.Enum):
@@ -113,34 +93,6 @@ class KairosEventKind(enum.Enum):
 
     # Heartbeat
     HEARTBEAT = "heartbeat"
-
-
-# ---------------------------------------------------------------------------
-# Valid goal state transitions
-# ---------------------------------------------------------------------------
-
-VALID_GOAL_TRANSITIONS: dict[GoalStatus, frozenset[GoalStatus]] = {
-    GoalStatus.PENDING: frozenset({GoalStatus.PLANNING, GoalStatus.CANCELLED}),
-    GoalStatus.PLANNING: frozenset(
-        {GoalStatus.ACTIVE, GoalStatus.FAILED, GoalStatus.CANCELLED}
-    ),
-    GoalStatus.ACTIVE: frozenset(
-        {
-            GoalStatus.PAUSED,
-            GoalStatus.BLOCKED,
-            GoalStatus.COMPLETED,
-            GoalStatus.FAILED,
-            GoalStatus.CANCELLED,
-        }
-    ),
-    GoalStatus.PAUSED: frozenset({GoalStatus.ACTIVE, GoalStatus.CANCELLED}),
-    GoalStatus.BLOCKED: frozenset(
-        {GoalStatus.ACTIVE, GoalStatus.FAILED, GoalStatus.CANCELLED}
-    ),
-    GoalStatus.COMPLETED: frozenset(),
-    GoalStatus.FAILED: frozenset(),
-    GoalStatus.CANCELLED: frozenset(),
-}
 
 
 # ---------------------------------------------------------------------------

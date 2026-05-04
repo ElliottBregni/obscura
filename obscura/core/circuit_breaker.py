@@ -6,20 +6,13 @@ cascading failures when an LLM backend goes down.
 
 from __future__ import annotations
 
-import enum
 import threading
 import time
 import logging
 
+from obscura.core.enums.lifecycle import CircuitState as CircuitState
+
 logger = logging.getLogger(__name__)
-
-
-class CircuitState(enum.Enum):
-    """State of a circuit breaker."""
-
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
 
 
 class CircuitOpenError(Exception):

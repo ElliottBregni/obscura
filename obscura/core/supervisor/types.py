@@ -11,58 +11,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Supervisor states
-# ---------------------------------------------------------------------------
+from obscura.core.enums.lifecycle import (
+    SUPERVISOR_VALID_TRANSITIONS as SUPERVISOR_VALID_TRANSITIONS,
+)
+from obscura.core.enums.lifecycle import (
+    SupervisorState as SupervisorState,
+)
 
-
-class SupervisorState(enum.Enum):
-    """Explicit states in the supervisor state machine.
-
-    Transitions are enforced by ``SessionStateMachine``.
-    """
-
-    IDLE = "idle"
-    BUILDING_CONTEXT = "building_context"
-    RUNNING_MODEL = "running_model"
-    RUNNING_TOOLS = "running_tools"
-    COMMITTING_MEMORY = "committing_memory"
-    FINALIZING = "finalizing"
-    FAILED = "failed"
-    EVAL_FAILED = "eval_failed"
-
-
-# Valid transitions: source → set of allowed targets
-VALID_SUPERVISOR_TRANSITIONS: dict[SupervisorState, frozenset[SupervisorState]] = {
-    SupervisorState.IDLE: frozenset({SupervisorState.BUILDING_CONTEXT}),
-    SupervisorState.BUILDING_CONTEXT: frozenset(
-        {SupervisorState.RUNNING_MODEL, SupervisorState.FAILED},
-    ),
-    SupervisorState.RUNNING_MODEL: frozenset(
-        {
-            SupervisorState.RUNNING_TOOLS,
-            SupervisorState.COMMITTING_MEMORY,
-            SupervisorState.FAILED,
-        },
-    ),
-    SupervisorState.RUNNING_TOOLS: frozenset(
-        {
-            SupervisorState.RUNNING_MODEL,
-            SupervisorState.COMMITTING_MEMORY,
-            SupervisorState.FAILED,
-        },
-    ),
-    SupervisorState.COMMITTING_MEMORY: frozenset(
-        {
-            SupervisorState.FINALIZING,
-            SupervisorState.FAILED,
-            SupervisorState.EVAL_FAILED,
-        },
-    ),
-    SupervisorState.FINALIZING: frozenset({SupervisorState.IDLE}),
-    SupervisorState.FAILED: frozenset({SupervisorState.IDLE}),
-    SupervisorState.EVAL_FAILED: frozenset({SupervisorState.IDLE}),
-}
+# Backward-compat alias for the old name; same object.
+VALID_SUPERVISOR_TRANSITIONS = SUPERVISOR_VALID_TRANSITIONS
 
 
 # ---------------------------------------------------------------------------

@@ -21,8 +21,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
+
+from obscura.core.enums.lifecycle import LazyState as LazyState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,15 +31,6 @@ if TYPE_CHECKING:
     from obscura.plugins.models import PluginSpec
 
 logger = logging.getLogger(__name__)
-
-
-class LazyState(StrEnum):
-    DISCOVERED = "discovered"  # manifest read, metadata registered
-    READY = "ready"  # config resolved, can initialize
-    INITIALIZING = "initializing"  # bootstrap/loading in progress
-    ACTIVE = "active"  # fully loaded, tools available
-    SUSPENDED = "suspended"  # was active, now suspended (e.g. healthcheck fail)
-    FAILED = "failed"  # init failed
 
 
 @dataclass

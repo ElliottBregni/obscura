@@ -17,7 +17,6 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import enum
 import json
 import sqlite3
 import threading
@@ -26,62 +25,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
+from obscura.core.enums.lifecycle import (
+    SESSION_VALID_TRANSITIONS as VALID_TRANSITIONS,
+)
+from obscura.core.enums.lifecycle import (
+    SessionStatus as SessionStatus,
+)
 from obscura.core.session_utils import list_active_sessions
 from obscura.core.types import AgentEvent, AgentEventKind
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Session status machine
-# ---------------------------------------------------------------------------
-
-
-class SessionStatus(enum.Enum):
-    """Lifecycle states for a durable session."""
-
-    RUNNING = "running"
-    WAITING_FOR_TOOL = "waiting_for_tool"
-    WAITING_FOR_USER = "waiting_for_user"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-VALID_TRANSITIONS: dict[SessionStatus, frozenset[SessionStatus]] = {
-    SessionStatus.RUNNING: frozenset(
-        {
-            SessionStatus.WAITING_FOR_TOOL,
-            SessionStatus.WAITING_FOR_USER,
-            SessionStatus.PAUSED,
-            SessionStatus.COMPLETED,
-            SessionStatus.FAILED,
-        },
-    ),
-    SessionStatus.WAITING_FOR_TOOL: frozenset(
-        {
-            SessionStatus.RUNNING,
-            SessionStatus.PAUSED,
-            SessionStatus.FAILED,
-        },
-    ),
-    SessionStatus.WAITING_FOR_USER: frozenset(
-        {
-            SessionStatus.RUNNING,
-            SessionStatus.PAUSED,
-            SessionStatus.FAILED,
-        },
-    ),
-    SessionStatus.PAUSED: frozenset(
-        {
-            SessionStatus.RUNNING,
-            SessionStatus.FAILED,
-        },
-    ),
-    SessionStatus.COMPLETED: frozenset(),
-    SessionStatus.FAILED: frozenset(),
-}
 
 
 # ---------------------------------------------------------------------------
