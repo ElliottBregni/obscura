@@ -71,6 +71,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -104,6 +105,61 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Middleware + hook types
+# ---------------------------------------------------------------------------
+
+
+# Per-node executor — the chain that runs for each DAG node. Middleware
+# wraps this. The default chain is ``AgentLoopV2._dispatch_node`` adapted
+# to the Scheduler's NodeExecutor signature.
+NodeExecutorAsync = "Callable[[DAGNode, dict[str, Any]], Awaitable[list[ContentBlock]]]"
+
+
+# A dispatch-level middleware: a function that takes an inner executor
+# and returns a wrapped one. Middleware run outermost-first. They're a
+# cheap, composable extension point — capability gates, confirmation
+# prompts, predictive cache, hook calls, output filters, etc.
+DispatchMiddleware = "Callable[[Callable[..., Any]], Callable[..., Any]]"
+
+
+@dataclass
+class TurnContext:
+    """Mutable per-turn state passed to ``pre_turn`` / ``post_turn`` hooks.
+
+    Hooks may mutate ``messages`` (e.g. compaction trims older turns) and
+    set ``stop_after_turn`` to True to terminate the loop after the
+    current turn finishes (e.g. arbiter kill). Other fields are
+    informational.
+    """
+
+    turn_index: int
+    messages: list[Message]
+    cancel_event: asyncio.Event
+    stop_after_turn: bool = False
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    """Read-only snapshot passed to ``post_turn`` hooks after a turn.
+
+    Captures what the model produced and how the DAG executed, so a
+    post-turn hook (arbiter, telemetry, etc.) can react.
+    """
+
+    turn_index: int
+    text: str
+    tool_calls: tuple[ToolCallInfo, ...]
+    results: tuple[DAGNodeResult, ...]
+
+
+# Hook signatures.
+# pre_turn: invoked once before each model stream.
+# post_turn: invoked once after each turn's tools have all completed.
+PreTurnHook = "Callable[[TurnContext], Awaitable[None]]"
+PostTurnHook = "Callable[[TurnContext, TurnResult], Awaitable[None]]"
 
 
 # ---------------------------------------------------------------------------
@@ -165,11 +221,17 @@ class AgentLoopV2:
         *,
         config: AgentLoopV2Config | None = None,
         cancel_event: asyncio.Event | None = None,
+        dispatch_middleware: list[Callable[[Any], Any]] | None = None,
+        pre_turn: Callable[[TurnContext], Awaitable[None]] | None = None,
+        post_turn: Callable[[TurnContext, TurnResult], Awaitable[None]] | None = None,
     ) -> None:
         self._backend = backend
         self._registry = registry
         self._config = config or AgentLoopV2Config()
         self._cancel_event = cancel_event or asyncio.Event()
+        self._dispatch_middleware = list(dispatch_middleware or [])
+        self._pre_turn = pre_turn
+        self._post_turn = post_turn
 
         # Per-turn dedup keyed by SDK tool_use_id. LOAD-BEARING for
         # correctness — see the extended note on
@@ -224,6 +286,21 @@ class AgentLoopV2:
             # backend, not the loop — v2 doesn't yet implement intra-turn
             # retry; that's a migration TODO).
             self._seen_calls.clear()
+
+            # pre_turn hook — may mutate messages (e.g. compaction trims
+            # older turns) or set stop_after_turn to True (e.g. arbiter
+            # kill).
+            turn_ctx = TurnContext(
+                turn_index=turn,
+                messages=messages,
+                cancel_event=self._cancel_event,
+            )
+            if self._pre_turn is not None:
+                await self._pre_turn(turn_ctx)
+                # The hook may have replaced messages in-place; re-bind the
+                # local ref. (Keeping ``messages`` as the canonical name so
+                # the rest of the function reads the same.)
+                messages = turn_ctx.messages
 
             # Stream the next assistant turn.
             text_buf: list[str] = []
@@ -322,23 +399,35 @@ class AgentLoopV2:
             # declared deps (or the merge produced sibling+plan nodes).
             envelopes_by_id: dict[str, _ToolEnvelopeV2] = {}
 
-            async def _node_executor(
+            async def _core_executor(
                 node: DAGNode, _resolved: dict[str, Any]
             ) -> list[ContentBlock]:
                 # seen_calls dedup: load-bearing for correctness on stream
                 # retries. Skip when tool_use_id is empty — synthesized
                 # parallel_plan children have no SDK identity.
+                #
+                # Note: side-table population (envelopes_by_id) happens
+                # POST-middleware in the result-iteration loop below, so
+                # middleware's return value is what reaches the SDK. That
+                # makes capability_gate, tool_output_level, etc. actually
+                # affect the user-turn content.
                 tu_id = node.tool_use_id
                 if tu_id and tu_id in self._seen_calls:
                     cached = self._seen_calls[tu_id]
-                    envelopes_by_id[node.id] = cached
                     return cached.content
 
                 env = await self._dispatch_node(node)
                 if tu_id:
                     self._seen_calls[tu_id] = env
-                envelopes_by_id[node.id] = env
                 return env.content
+
+            # Compose the dispatch chain: middleware applied outermost-first.
+            # The first entry in self._dispatch_middleware runs FIRST on the
+            # way in (deepest in the call stack on the way out). Wrap inner
+            # to outer by iterating in REVERSE.
+            executor: Callable[..., Any] = _core_executor
+            for mw in reversed(self._dispatch_middleware):
+                executor = mw(executor)
 
             mode = "parallel" if any(n.depends_on for n in dag) else "sequential"
             scheduler = Scheduler(
@@ -348,22 +437,26 @@ class AgentLoopV2:
                 per_tool_concurrency=self._config.per_tool_concurrency,
                 per_capability_concurrency=self._config.per_capability_concurrency,
                 cancel_event=self._cancel_event,
-                executor=_node_executor,
+                executor=executor,
             )
 
             results: list[DAGNodeResult] = []
             async for result in scheduler.run(dag, ctx=None):
                 results.append(result)
-                env = envelopes_by_id.get(result.node_id)
-                if env is None:
-                    # Node was synthesized cancelled — build envelope from result.
-                    env = _ToolEnvelopeV2(
-                        tool_use_id=result.tool_use_id,
-                        content=result.content,
-                        is_error=not result.success,
-                        is_cancelled=result.is_cancelled,
-                    )
-                    envelopes_by_id[result.node_id] = env
+                # Build the envelope from the *post-middleware* result. Any
+                # ContentBlock with is_error=True propagates to the envelope
+                # and the aggregated tool_result block, so capability_gate /
+                # tool_output_level / others affect the user-turn payload.
+                content_has_error = any(
+                    getattr(b, "is_error", False) for b in result.content
+                )
+                env = _ToolEnvelopeV2(
+                    tool_use_id=result.tool_use_id,
+                    content=result.content,
+                    is_error=content_has_error or not result.success,
+                    is_cancelled=result.is_cancelled,
+                )
+                envelopes_by_id[result.node_id] = env
                 origin_tu_id = dag_ctx.node_origins.get(
                     result.node_id, result.tool_use_id
                 )
@@ -384,6 +477,27 @@ class AgentLoopV2:
                 dag_ctx, envelopes_by_id
             )
             messages.append(Message(role=Role.USER, content=user_blocks))
+
+            # post_turn hook — invoked after tools complete and before the
+            # next stream. Hook may set turn_ctx.stop_after_turn = True
+            # (e.g. arbiter kill) to terminate the loop. Hook may also
+            # mutate messages (rare — usually pre_turn handles that).
+            if self._post_turn is not None:
+                turn_result = TurnResult(
+                    turn_index=turn,
+                    text=full_text,
+                    tool_calls=tuple(tool_calls),
+                    results=tuple(results),
+                )
+                await self._post_turn(turn_ctx, turn_result)
+                messages = turn_ctx.messages
+                if turn_ctx.stop_after_turn:
+                    yield AgentEvent(
+                        kind=AgentEventKind.AGENT_DONE,
+                        turn=turn,
+                        text="stopped by post_turn hook",
+                    )
+                    return
 
         # max_turns exceeded.
         yield AgentEvent(
