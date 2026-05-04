@@ -42,7 +42,7 @@ import asyncio
 import re
 import time
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -252,10 +252,8 @@ class TurnDAG:
     def __len__(self) -> int:
         return len(self.nodes)
 
-    def __iter__(self) -> AsyncIterator[DAGNode]:
-        # Type hint says AsyncIterator only because we never need async here;
-        # runtime is a regular iterator and that's what callers use.
-        return iter(self.nodes)  # type: ignore[return-value]
+    def __iter__(self) -> Iterator[DAGNode]:
+        return iter(self.nodes)
 
     def __contains__(self, node_id: object) -> bool:
         return isinstance(node_id, str) and node_id in self._by_id

@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from obscura.core.types import (
@@ -108,13 +108,22 @@ class RetryingBackend:
 
     @property
     def capabilities(self) -> BackendCapabilities:
-        return self._inner.capabilities
+        # ``BackendProtocol.capabilities`` is declared as a method, but some
+        # test stubs expose it as a class attribute. Accept both shapes by
+        # calling when callable.
+        inner_caps: Any = self._inner.capabilities
+        return cast("BackendCapabilities", inner_caps() if callable(inner_caps) else inner_caps)
 
     async def start(self) -> None:
         await self._inner.start()
 
     async def close(self) -> None:
-        await self._inner.close()
+        # Real backends expose ``stop()`` (per ``BackendProtocol``). Test
+        # stubs use ``close()``. Dispatch to whichever is present.
+        inner: Any = self._inner
+        closer = getattr(inner, "close", None) or getattr(inner, "stop", None)
+        if closer is not None:
+            await closer()
 
     async def stream(
         self,
