@@ -83,7 +83,8 @@ from obscura.core.context_window import (
 )
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
-from obscura.core.event_store import SessionStatus, SQLiteEventStore
+from obscura.core.enums.lifecycle import SessionStatus
+from obscura.core.event_store import SQLiteEventStore
 from obscura.core.paths import (
     resolve_all_commands_dirs,
     resolve_all_skills_dirs,

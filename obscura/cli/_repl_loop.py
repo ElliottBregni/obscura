@@ -96,7 +96,8 @@ from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compiler.compiled import ToolRoutingConfig
 from obscura.core.context import load_obscura_memory
 from obscura.core.deep_log import dlog
-from obscura.core.event_store import SQLiteEventStore, SessionStatus
+from obscura.core.enums.lifecycle import SessionStatus
+from obscura.core.event_store import SQLiteEventStore
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.prompt_cache import PromptCacheManager

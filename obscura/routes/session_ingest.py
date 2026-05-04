@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from obscura.core.event_store import SessionStatus, SQLiteEventStore
+from obscura.core.enums.lifecycle import SessionStatus
+from obscura.core.event_store import SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home
 
 from obscura.auth.models import AuthenticatedUser

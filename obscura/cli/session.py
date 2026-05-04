@@ -91,7 +91,8 @@ from obscura.core.compaction import should_auto_compact
 from obscura.core.context import load_obscura_memory
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
-from obscura.core.event_store import SessionStatus, SQLiteEventStore
+from obscura.core.enums.lifecycle import SessionStatus
+from obscura.core.event_store import SQLiteEventStore
 from obscura.core.paths import resolve_obscura_global_home, resolve_obscura_home
 from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
 from obscura.core.session_utils import generate_session_title

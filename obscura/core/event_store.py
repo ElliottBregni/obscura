@@ -28,9 +28,7 @@ from typing import Any, Protocol, runtime_checkable
 from obscura.core.enums.lifecycle import (
     SESSION_VALID_TRANSITIONS as VALID_TRANSITIONS,
 )
-from obscura.core.enums.lifecycle import (
-    SessionStatus as SessionStatus,
-)
+from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.models.lifecycle import SessionRecord as SessionRecord
 from obscura.core.session_utils import list_active_sessions
 from obscura.core.types import AgentEvent, AgentEventKind
