@@ -17,11 +17,13 @@ import json
 import logging
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core.models.supervisor import AgentTemplateBody, AgentVersionBody
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
     SQLiteSupervisorBackend,
@@ -38,49 +40,71 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AgentTemplate:
-    """A reusable, mutable agent template."""
+    """A reusable, mutable agent template.
+
+    ``template_body`` carries the typed JSON body that gets persisted to
+    the ``agent_templates.template_json`` column. It exposes a typed
+    surface (``system_prompt``, ``tool_bundles``, ``extras``) and round-
+    trips through :meth:`AgentTemplateBody.to_mapping` so the on-disk
+    serialization is byte-for-byte compatible with the historical
+    ``json.dumps(template_json, sort_keys=True)`` write path.
+    """
 
     template_id: str
     name: str
     description: str
-    template_json: dict[str, Any]
+    template_body: AgentTemplateBody
     created_at: datetime
     updated_at: datetime
 
     @property
     def system_prompt_template(self) -> str:
-        return self.template_json.get("system_prompt", "")
+        return self.template_body.system_prompt
 
     @property
     def tool_bundles(self) -> list[str]:
-        return self.template_json.get("tool_bundles", [])
+        return list(self.template_body.tool_bundles)
+
+    @property
+    def template_json(self) -> dict[str, Any]:
+        """Wire-format dict view of the template body."""
+        return self.template_body.to_mapping()
 
     @property
     def variables(self) -> list[str]:
         """Extract placeholder variable names from the template."""
-        text = json.dumps(self.template_json)
+        text = json.dumps(self.template_json, sort_keys=True)
         return sorted(set(re.findall(r"\{\{(\w+)\}\}", text)))
 
 
 @dataclass(frozen=True)
 class AgentVersion:
-    """An immutable, rendered agent version."""
+    """An immutable, rendered agent version.
+
+    ``version_body`` is the typed view of the resolved JSON written to
+    ``agent_versions.render_json``.
+    """
 
     agent_id: str
     template_id: str
     version: int
-    render_json: dict[str, Any]
-    variables: dict[str, str]
+    version_body: AgentVersionBody
+    variables: Mapping[str, str]
     hash: str
     created_at: datetime
 
     @property
     def system_prompt(self) -> str:
-        return self.render_json.get("system_prompt", "")
+        return self.version_body.system_prompt
 
     @property
     def tool_names(self) -> list[str]:
-        return self.render_json.get("tools", [])
+        return list(self.version_body.tools)
+
+    @property
+    def render_json(self) -> dict[str, Any]:
+        """Wire-format dict view of the rendered body."""
+        return self.version_body.to_mapping()
 
 
 # ---------------------------------------------------------------------------
@@ -145,12 +169,19 @@ class AgentTemplateStore:
         name: str,
         *,
         description: str = "",
-        template_json: dict[str, Any] | None = None,
+        template_json: Mapping[str, Any] | None = None,
     ) -> AgentTemplate:
-        """Create a new agent template."""
+        """Create a new agent template.
+
+        ``template_json`` is the on-disk JSON shape; it is parsed into an
+        :class:`AgentTemplateBody` for typed access while the persisted
+        column keeps its historical ``json.dumps(..., sort_keys=True)``
+        encoding.
+        """
         template_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        tmpl_json = template_json or {}
+        body = AgentTemplateBody.from_mapping(template_json)
+        tmpl_dict = body.to_mapping()
 
         conn = self._backend.get_conn()
         try:
@@ -164,7 +195,7 @@ class AgentTemplateStore:
                     template_id,
                     name,
                     description,
-                    json.dumps(tmpl_json, sort_keys=True),
+                    json.dumps(tmpl_dict, sort_keys=True),
                     now.isoformat(),
                     now.isoformat(),
                 ),
@@ -177,7 +208,7 @@ class AgentTemplateStore:
             template_id=template_id,
             name=name,
             description=description,
-            template_json=tmpl_json,
+            template_body=body,
             created_at=now,
             updated_at=now,
         )
@@ -229,9 +260,14 @@ class AgentTemplateStore:
         template_id: str,
         *,
         description: str | None = None,
-        template_json: dict[str, Any] | None = None,
+        template_json: Mapping[str, Any] | None = None,
     ) -> AgentTemplate | None:
-        """Update a template (creates new versions, doesn't mutate old ones)."""
+        """Update a template (creates new versions, doesn't mutate old ones).
+
+        ``template_json`` is round-tripped through :class:`AgentTemplateBody`
+        so unknown keys are preserved and the persisted column keeps the
+        historical sort-key encoding.
+        """
         conn = self._backend.get_conn()
         try:
             sets: list[str] = ["updated_at = ?"]
@@ -242,7 +278,8 @@ class AgentTemplateStore:
                 params.append(description)
             if template_json is not None:
                 sets.append("template_json = ?")
-                params.append(json.dumps(template_json, sort_keys=True))
+                body = AgentTemplateBody.from_mapping(template_json)
+                params.append(json.dumps(body.to_mapping(), sort_keys=True))
 
             params.append(template_id)
             conn.execute(
@@ -261,7 +298,7 @@ class AgentTemplateStore:
     def render_version(
         self,
         template_id: str,
-        variables: dict[str, str] | None = None,
+        variables: Mapping[str, str] | None = None,
     ) -> AgentVersion:
         """Render a template into an immutable version.
 
@@ -273,7 +310,7 @@ class AgentTemplateStore:
             msg = f"Template not found: {template_id}"
             raise ValueError(msg)
 
-        vars_ = variables or {}
+        vars_ = dict(variables) if variables else {}
         conn = self._backend.get_conn()
         try:
             # Get next version number
@@ -288,8 +325,12 @@ class AgentTemplateStore:
             next_version = row["max_ver"] + 1
 
             # Render: replace {{var}} in template_json
-            rendered = _render_template(tmpl.template_json, vars_)
-            rendered_str = json.dumps(rendered, sort_keys=True)
+            rendered_dict = _render_template(tmpl.template_json, vars_)
+            rendered_body = AgentVersionBody.from_mapping(
+                cast("Mapping[str, Any]", rendered_dict)
+            )
+            rendered_serialized = rendered_body.to_mapping()
+            rendered_str = json.dumps(rendered_serialized, sort_keys=True)
             content_hash = hashlib.sha256(rendered_str.encode()).hexdigest()
 
             agent_id = str(uuid.uuid4())
@@ -319,7 +360,7 @@ class AgentTemplateStore:
             agent_id=agent_id,
             template_id=template_id,
             version=next_version,
-            render_json=rendered,
+            version_body=rendered_body,
             variables=vars_,
             hash=content_hash,
             created_at=now,
@@ -379,13 +420,13 @@ class AgentTemplateStore:
     @staticmethod
     def _row_to_template(row: Any) -> AgentTemplate:
         raw_json = row["template_json"]
-        tmpl_json: dict[str, Any] = {}
+        tmpl_dict: Mapping[str, Any] = {}
         if raw_json:
             parsed: Any = (
                 json.loads(raw_json) if isinstance(raw_json, str) else raw_json
             )
             if isinstance(parsed, dict):
-                tmpl_json = cast(dict[str, Any], parsed)
+                tmpl_dict = cast("Mapping[str, Any]", parsed)
         created = row["created_at"]
         updated = row["updated_at"]
         if isinstance(created, str):
@@ -396,7 +437,7 @@ class AgentTemplateStore:
             template_id=row["template_id"],
             name=row["name"],
             description=row["description"] or "",
-            template_json=tmpl_json,
+            template_body=AgentTemplateBody.from_mapping(tmpl_dict),
             created_at=created,
             updated_at=updated,
         )
@@ -404,13 +445,13 @@ class AgentTemplateStore:
     @staticmethod
     def _row_to_version(row: Any) -> AgentVersion:
         render_raw = row["render_json"]
-        render_json: dict[str, Any] = {}
+        render_dict: Mapping[str, Any] = {}
         if render_raw:
             parsed: Any = (
                 json.loads(render_raw) if isinstance(render_raw, str) else render_raw
             )
             if isinstance(parsed, dict):
-                render_json = cast(dict[str, Any], parsed)
+                render_dict = cast("Mapping[str, Any]", parsed)
 
         vars_raw = row["variables"]
         variables: dict[str, str] = {}
@@ -420,7 +461,8 @@ class AgentTemplateStore:
             )
             if isinstance(parsed_vars, dict):
                 variables = {
-                    str(k): str(v) for k, v in cast(dict[str, Any], parsed_vars).items()
+                    str(k): str(v)
+                    for k, v in cast("Mapping[str, Any]", parsed_vars).items()
                 }
 
         created = row["created_at"]
@@ -430,7 +472,7 @@ class AgentTemplateStore:
             agent_id=row["agent_id"],
             template_id=row["template_id"],
             version=row["version"],
-            render_json=render_json,
+            version_body=AgentVersionBody.from_mapping(render_dict),
             variables=variables,
             hash=row["hash"],
             created_at=created,
@@ -447,7 +489,7 @@ class AgentTemplateStore:
 
 def _render_template(
     obj: Any,
-    variables: dict[str, str],
+    variables: Mapping[str, str],
 ) -> Any:
     """Recursively render {{placeholders}} in a JSON-like structure."""
     if isinstance(obj, str):
@@ -457,8 +499,8 @@ def _render_template(
     if isinstance(obj, dict):
         return {
             k: _render_template(v, variables)
-            for k, v in cast(dict[Any, Any], obj).items()
+            for k, v in cast("dict[Any, Any]", obj).items()
         }
     if isinstance(obj, list):
-        return [_render_template(item, variables) for item in cast(list[Any], obj)]
+        return [_render_template(item, variables) for item in cast("list[Any]", obj)]
     return obj

@@ -11,11 +11,13 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core.models.supervisor import PolicyBody
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
     SQLiteSupervisorBackend,
@@ -32,41 +34,55 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class PolicyVersion:
-    """An immutable policy snapshot."""
+    """An immutable policy snapshot.
+
+    ``policy_body`` is the typed view of the persisted JSON. Wire-format
+    callers retain access to the historical ``policy_json`` dict via the
+    same-named property; the persisted column keeps its original
+    ``json.dumps(..., sort_keys=True)`` encoding because hashing depends
+    on it.
+    """
 
     policy_id: str
     scope: str  # "global", "agent", "session"
     scope_id: str  # "" for global, agent_id, or session_id
     version: int
-    policy_json: dict[str, Any]
+    policy_body: PolicyBody
     hash: str
     created_at: datetime
 
     @property
+    def policy_json(self) -> dict[str, Any]:
+        """Wire-format dict view of the policy body."""
+        return self.policy_body.to_mapping()
+
+    @property
     def tool_allowlist(self) -> list[str] | None:
         """Explicit tool allowlist (None = all allowed)."""
-        return self.policy_json.get("tool_allowlist")
+        if self.policy_body.tool_allowlist is None:
+            return None
+        return list(self.policy_body.tool_allowlist)
 
     @property
     def tool_denylist(self) -> list[str]:
-        return self.policy_json.get("tool_denylist", [])
+        return list(self.policy_body.tool_denylist)
 
     @property
     def require_confirmation(self) -> list[str]:
         """Tool names that require user confirmation."""
-        return self.policy_json.get("require_confirmation", [])
+        return list(self.policy_body.require_confirmation)
 
     @property
     def max_turns(self) -> int:
-        return self.policy_json.get("max_turns", 10)
+        return self.policy_body.max_turns
 
     @property
     def token_budget(self) -> int:
-        return self.policy_json.get("token_budget", 0)
+        return self.policy_body.token_budget
 
     @property
     def allow_dynamic_tools(self) -> bool:
-        return self.policy_json.get("allow_dynamic_tools", False)
+        return self.policy_body.allow_dynamic_tools
 
 
 # ---------------------------------------------------------------------------
@@ -121,13 +137,20 @@ class PolicyStore:
         *,
         scope: str = "global",
         scope_id: str = "",
-        policy_json: dict[str, Any] | None = None,
+        policy_json: Mapping[str, Any] | None = None,
     ) -> PolicyVersion:
-        """Create a new immutable policy version."""
+        """Create a new immutable policy version.
+
+        ``policy_json`` is round-tripped through :class:`PolicyBody` so
+        unknown keys round-trip and the persisted column keeps the
+        historical ``json.dumps(..., sort_keys=True)`` encoding (which the
+        ``hash`` column hashes over).
+        """
         conn = self._backend.get_conn()
         try:
-            pjson = policy_json or {}
-            pjson_str = json.dumps(pjson, sort_keys=True)
+            body = PolicyBody.from_mapping(policy_json)
+            pjson_dict = body.to_mapping()
+            pjson_str = json.dumps(pjson_dict, sort_keys=True)
             content_hash = hashlib.sha256(pjson_str.encode()).hexdigest()
 
             # Get next version number
@@ -169,7 +192,7 @@ class PolicyStore:
             scope=scope,
             scope_id=scope_id,
             version=next_version,
-            policy_json=pjson,
+            policy_body=body,
             hash=content_hash,
             created_at=now,
         )
@@ -238,11 +261,11 @@ class PolicyStore:
     @staticmethod
     def _row_to_version(row: Any) -> PolicyVersion:
         raw = row["policy_json"]
-        pjson: dict[str, Any] = {}
+        pjson: Mapping[str, Any] = {}
         if raw:
             parsed: Any = json.loads(raw) if isinstance(raw, str) else raw
             if isinstance(parsed, dict):
-                pjson = cast(dict[str, Any], parsed)
+                pjson = cast("Mapping[str, Any]", parsed)
         created = row["created_at"]
         if isinstance(created, str):
             created = datetime.fromisoformat(created)
@@ -251,7 +274,7 @@ class PolicyStore:
             scope=row["scope"],
             scope_id=row["scope_id"],
             version=row["version"],
-            policy_json=pjson,
+            policy_body=PolicyBody.from_mapping(pjson),
             hash=row["hash"],
             created_at=created,
         )
