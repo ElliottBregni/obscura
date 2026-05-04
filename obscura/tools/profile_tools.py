@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.auth.cli_user import current_cli_user
+from obscura.core.enums.storage import ProfileSource
 from obscura.core.tools import tool
 from obscura.kairos.user_profile import UserProfile
 from obscura.kairos.vault_sync import notify_profile_changed
@@ -189,7 +190,7 @@ def profile_update(fact: str, memory_type: str = "fact") -> str:
                 value=fact,
                 category=category,
                 confidence=1.0,
-                source="user_stated",
+                source=ProfileSource.USER_STATED,
             )
             store.set_fact(structured_fact)
         except Exception:
@@ -303,7 +304,7 @@ def profile_set(key: str, value: str, category: str) -> str:
         value=value,
         category=cat,
         confidence=1.0,
-        source="user_stated",
+        source=ProfileSource.USER_STATED,
     )
     store.set_fact(fact)
     _notify_vault_profile()

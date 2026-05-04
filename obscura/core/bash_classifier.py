@@ -16,18 +16,11 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import enum
 import re
 import time
 from dataclasses import dataclass, field
 
-
-class BashRisk(enum.Enum):
-    """Risk level for a shell command."""
-
-    SAFE = "safe"
-    NEEDS_REVIEW = "needs-review"
-    DANGEROUS = "dangerous"
+from obscura.core.enums.tools import BashRisk
 
 
 @dataclass(frozen=True)

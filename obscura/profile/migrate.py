@@ -16,6 +16,7 @@ import logging
 import re
 from pathlib import Path
 
+from obscura.core.enums.storage import ProfileSource
 from obscura.profile.models import ProfileCategory, ProfileFact
 
 from typing import TYPE_CHECKING
@@ -63,7 +64,7 @@ def migrate_flat_profile(path: Path, store: ProfileStore) -> int:
                 value=item,
                 category=category,
                 confidence=1.0,
-                source="user_stated",
+                source=ProfileSource.USER_STATED,
             )
             store.set_fact(fact)
             count += 1

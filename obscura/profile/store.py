@@ -21,6 +21,8 @@ import threading
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from obscura.core.enums._base import parse_lenient
+from obscura.core.enums.storage import ProfileSource
 from obscura.memory import MemoryKey
 from obscura.profile.models import (
     ProfileCategory,
@@ -155,7 +157,11 @@ class ProfileStore:
                     else entry.text,
                     category=category,
                     confidence=float(meta.get("confidence", 1.0)),
-                    source=meta.get("source", "user_stated"),
+                    source=parse_lenient(
+                        ProfileSource,
+                        meta.get("source", "user_stated"),
+                        default=ProfileSource.USER_STATED,
+                    ),
                     learned_at=str(meta.get("learned_at", "")),
                     supersedes=meta.get("supersedes"),
                 )

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import difflib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
+
+from obscura.core.enums.ui import DiffLineType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
 class DiffLine:
     """A single line in a diff hunk."""
 
-    tag: Literal["+", "-", " "]
+    tag: DiffLineType
     content: str
     old_lineno: int | None = None
     new_lineno: int | None = None
@@ -199,7 +201,7 @@ class DiffEngine:
             if line.startswith("+"):
                 current_hunk.lines.append(
                     DiffLine(
-                        tag="+",
+                        tag=DiffLineType.ADD,
                         content=content,
                         old_lineno=None,
                         new_lineno=new_lineno,
@@ -209,7 +211,7 @@ class DiffEngine:
             elif line.startswith("-"):
                 current_hunk.lines.append(
                     DiffLine(
-                        tag="-",
+                        tag=DiffLineType.REMOVE,
                         content=content,
                         old_lineno=old_lineno,
                         new_lineno=None,
@@ -219,7 +221,7 @@ class DiffEngine:
             elif line.startswith(" "):
                 current_hunk.lines.append(
                     DiffLine(
-                        tag=" ",
+                        tag=DiffLineType.CONTEXT,
                         content=content,
                         old_lineno=old_lineno,
                         new_lineno=new_lineno,

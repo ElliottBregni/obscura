@@ -26,9 +26,10 @@ import os
 import threading
 import time
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from obscura.core.enums.tools import ChangeKind
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +52,6 @@ DEFAULT_IGNORE_PATTERNS: frozenset[str] = frozenset(
         ".env",
     }
 )
-
-
-class ChangeKind(Enum):
-    """Type of file change detected."""
-
-    CREATED = "created"
-    MODIFIED = "modified"
-    DELETED = "deleted"
 
 
 @dataclass(frozen=True)

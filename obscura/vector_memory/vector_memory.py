@@ -47,7 +47,12 @@ from obscura.vector_memory.backends import QDRANT_AVAILABLE, QdrantBackend
 
 import contextlib
 
-from obscura.memory.events import EventKind, get_default_sink, make_event
+from obscura.memory.events import (
+    EventKind,
+    EventSource,
+    get_default_sink,
+    make_event,
+)
 from obscura.vector_memory.backends.postgres_backend import PostgreSQLVectorBackend
 from obscura.vector_memory.consolidator import MemoryConsolidator
 from obscura.vector_memory.decay import DecayConfig, load_decay_config_from_disk
@@ -209,14 +214,13 @@ class VectorMemoryStore:
     ) -> None:
         """Emit a memory event after the backend has accepted the write."""
         sink = self._event_sink if self._event_sink is not None else get_default_sink()
-        event_kind: EventKind = kind  # type: ignore[assignment]
         sink.emit(
             make_event(
-                kind=event_kind,
+                kind=EventKind(kind),
                 key=key,
                 value=value,
                 ttl_seconds=ttl_seconds,
-                source="vector",
+                source=EventSource.VECTOR,
                 user_id=self.user_id,
             ),
         )

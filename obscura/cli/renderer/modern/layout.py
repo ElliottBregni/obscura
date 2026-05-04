@@ -8,18 +8,9 @@ needed for a CLI streaming renderer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import cast
 
-
-class BorderStyle(Enum):
-    """Border drawing style."""
-
-    NONE = "none"
-    LIGHT = "light"  # ─│┌┐└┘
-    HEAVY = "heavy"  # ━┃┏┓┗┛
-    ROUND = "round"  # ─│╭╮╰╯
-    DOUBLE = "double"  # ═║╔╗╚╝
+from obscura.core.enums.ui import BorderStyle
 
 
 # Border character sets indexed by BorderStyle
