@@ -27,6 +27,16 @@ from obscura.core.models.configs import (
     MCPServerSpec,
     PluginManifest,
 )
+from obscura.core.models.kairos import (
+    PlanResponse,
+    PlanResponseTask,
+)
+from obscura.core.models.supervisor import (
+    AgentTemplateBody,
+    AgentVersionBody,
+    PolicyBody,
+    ToolSchema,
+)
 from obscura.core.models.triggers import (
     EmailTrigger,
     IMessageTrigger,
@@ -37,6 +47,8 @@ from obscura.core.models.triggers import (
 
 __all__ = [
     "AgentConfig",
+    "AgentTemplateBody",
+    "AgentVersionBody",
     "BashClassification",
     "BoundaryModel",
     "EmailTrigger",
@@ -46,7 +58,11 @@ __all__ = [
     "MessageTrigger",
     "MutableObscuraModel",
     "ObscuraModel",
+    "PlanResponse",
+    "PlanResponseTask",
     "PluginManifest",
+    "PolicyBody",
     "StopTrigger",
+    "ToolSchema",
     "Trigger",
 ]

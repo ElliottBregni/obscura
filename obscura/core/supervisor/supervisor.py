@@ -34,6 +34,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -128,7 +129,7 @@ class Supervisor:
         system_prompt: str = "",
         context_instructions: str = "",
         session_history: str = "",
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
         agent_loop: Any | None = None,
     ) -> AsyncIterator[SupervisorEvent]:
         """Execute a supervised run.

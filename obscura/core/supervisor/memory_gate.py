@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -302,7 +303,7 @@ class MemoryCommitGate:
     def _emit_event(
         self,
         kind: SupervisorEventKind,
-        payload: dict[str, Any],
+        payload: Mapping[str, Any],
     ) -> None:
         self._events.append(
             SupervisorEvent(

@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -112,7 +112,7 @@ class Kairos:
         tool_blocklist: list[str] | None = None,
         tags: list[str] | None = None,
         deadline: datetime | None = None,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> str:
         """Create and persist a new Goal. Returns goal_id."""
         goal_id = str(uuid.uuid4())
@@ -129,7 +129,7 @@ class Kairos:
             tool_blocklist=tuple(tool_blocklist or []),
             tags=tuple(tags or []),
             deadline=deadline,
-            metadata=metadata or {},
+            metadata=dict(metadata) if metadata else {},
         )
         self._store.create_goal(goal)
         self._emit(

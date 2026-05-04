@@ -7,6 +7,7 @@ and provides invariant checking at each state boundary.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from obscura.core.enums.lifecycle import (
@@ -81,7 +82,7 @@ class SessionStateMachine:
         self,
         target: SupervisorState,
         *,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> SupervisorEvent:
         """Transition to a new state.
 
@@ -125,7 +126,7 @@ class SessionStateMachine:
         self,
         error: str,
         *,
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> SupervisorEvent:
         """Transition to FAILED from any non-terminal state.
 

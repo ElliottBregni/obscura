@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -424,7 +424,7 @@ class SessionHookManager:
     def _emit_event(
         self,
         kind: SupervisorEventKind,
-        payload: dict[str, Any],
+        payload: Mapping[str, Any],
     ) -> None:
         self._events.append(
             SupervisorEvent(

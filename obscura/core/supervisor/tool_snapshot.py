@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -39,6 +40,9 @@ class FrozenToolEntry:
     """A single tool frozen into a snapshot.
 
     Immutable after creation. Contains the full schema for replay.
+    ``parameters`` carries the JSON-Schema document that gets serialized
+    to ``tool_snapshots.tools_json`` — heterogeneous by nature, so kept
+    as ``Mapping[str, Any]`` here.
     """
 
     __slots__ = (
@@ -55,24 +59,24 @@ class FrozenToolEntry:
         self,
         name: str,
         description: str,
-        parameters: dict[str, Any],
+        parameters: Mapping[str, Any],
         order_index: int,
         tool_id: str = "",
         is_dynamic: bool = False,
     ) -> None:
         self.name = name
         self.description = description
-        self.parameters = parameters
+        self.parameters: Mapping[str, Any] = dict(parameters)
         self.order_index = order_index
         self.tool_id = tool_id or name
         self.is_dynamic = is_dynamic
-        self.schema_hash = _hash_schema(name, parameters)
+        self.schema_hash = _hash_schema(name, self.parameters)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": self.parameters,
+            "parameters": dict(self.parameters),
             "order_index": self.order_index,
             "tool_id": self.tool_id,
             "is_dynamic": self.is_dynamic,
@@ -80,7 +84,7 @@ class FrozenToolEntry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> FrozenToolEntry:
+    def from_dict(cls, data: Mapping[str, Any]) -> FrozenToolEntry:
         return cls(
             name=data["name"],
             description=data["description"],
@@ -231,7 +235,7 @@ class FrozenToolRegistry:
     @classmethod
     def from_registrations(
         cls,
-        registrations: list[dict[str, Any]],
+        registrations: list[Mapping[str, Any]],
     ) -> FrozenToolRegistry:
         """Create from tool_registrations rows (session-scoped, pre-ordered).
 
@@ -272,7 +276,7 @@ class FrozenToolRegistry:
 
         """
         names: list[str] = broker.registered_tools
-        schemas: dict[str, dict[str, Any]] = broker.schemas
+        schemas: Mapping[str, Mapping[str, Any]] = broker.schemas
 
         if allowlist is not None:
             names = [n for n in names if n in allowlist]
@@ -391,7 +395,7 @@ class ToolSnapshotStore:
 # ---------------------------------------------------------------------------
 
 
-def _hash_schema(name: str, parameters: dict[str, Any]) -> str:
+def _hash_schema(name: str, parameters: Mapping[str, Any]) -> str:
     """Hash a single tool's schema for versioning."""
-    data = json.dumps({"name": name, "parameters": parameters}, sort_keys=True)
+    data = json.dumps({"name": name, "parameters": dict(parameters)}, sort_keys=True)
     return hashlib.sha256(data.encode()).hexdigest()[:16]

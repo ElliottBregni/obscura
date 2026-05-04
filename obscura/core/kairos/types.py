@@ -3,11 +3,17 @@
 Defines the full hierarchy: Goal → Plan → Task → Checkpoint → Intervention.
 
 All types are frozen dataclasses for immutability guarantees.
+
+Free-form ``metadata`` and event ``payload`` fields are typed as
+:class:`collections.abc.Mapping` (rather than ``dict``) so callers cannot
+mutate the persisted state in place — the canonical writes happen
+through :class:`obscura.core.kairos.goal_store.GoalStore`.
 """
 
 from __future__ import annotations
 
 import enum
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -94,7 +100,7 @@ def _empty_tuple() -> tuple[str, ...]:
     return ()
 
 
-def _empty_dict() -> dict[str, Any]:
+def _empty_dict() -> Mapping[str, Any]:
     return {}
 
 
@@ -216,7 +222,7 @@ class Goal:
     deadline: datetime | None = None
 
     # Metadata
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)
     tags: tuple[str, ...] = field(default_factory=_empty_tuple)
 
 
@@ -251,7 +257,7 @@ class Task:
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)
 
 
 @dataclass(frozen=True)
@@ -287,7 +293,7 @@ class Plan:
     status: PlanStatus = PlanStatus.DRAFT
     created_at: datetime = field(default_factory=_now)
     completed_at: datetime | None = None
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)
 
 
 @dataclass(frozen=True)
@@ -308,7 +314,7 @@ class Checkpoint:
     next_steps: str = ""  # Recommended next actions
     budget_usage: BudgetUsage = field(default_factory=BudgetUsage)
     created_at: datetime = field(default_factory=_now)
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)
 
 
 @dataclass(frozen=True)
@@ -330,7 +336,7 @@ class Intervention:
     resolved: bool = False
     created_at: datetime = field(default_factory=_now)
     resolved_at: datetime | None = None
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +352,7 @@ class KairosEvent:
     goal_id: str = ""
     plan_id: str = ""
     task_id: str = ""
-    payload: dict[str, Any] = field(default_factory=_empty_dict)
+    payload: Mapping[str, Any] = field(default_factory=_empty_dict)
     timestamp: datetime = field(default_factory=_now)
 
 
@@ -365,4 +371,4 @@ class GoalRunContext:
     turn_number: int = 0
     budget_usage: BudgetUsage = field(default_factory=BudgetUsage)
     started_at: datetime = field(default_factory=_now)
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)

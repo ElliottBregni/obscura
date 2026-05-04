@@ -198,7 +198,9 @@ class RunObserver:
 
         elif kind == SupervisorEventKind.DRIFT_DETECTED:
             self._metrics.drift_detected = True
-            self._metrics.drift_details.append(event.payload)
+            self._metrics.drift_details.append(
+                {str(k): str(v) for k, v in event.payload.items()}
+            )
 
     # -- drift detection -----------------------------------------------------
 

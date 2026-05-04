@@ -16,7 +16,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -291,12 +291,12 @@ def get_heartbeats_for_run(
     result: list[SessionHeartbeat] = []
     for row in rows:
         meta_raw = row["metadata"]
-        meta: dict[str, Any] = {}
+        meta: Mapping[str, Any] = {}
         if meta_raw:
             try:
                 parsed: Any = json.loads(meta_raw)
                 if isinstance(parsed, dict):
-                    meta = cast(dict[str, Any], parsed)
+                    meta = cast("Mapping[str, Any]", parsed)
             except (json.JSONDecodeError, TypeError):
                 logger.debug(
                     "suppressed exception in get_heartbeats_for_run", exc_info=True
