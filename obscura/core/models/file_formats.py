@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from obscura.core.models._base import BoundaryModel, MutableObscuraModel
 
@@ -109,7 +109,19 @@ class BootstrapSummary(MutableObscuraModel):
 
 
 class ExternalMigrationDecision(BoundaryModel):
-    """Per-source decision recorded in the migration marker file."""
+    """Per-source decision recorded in the migration marker file.
+
+    ``extra="allow"`` so future fields (e.g. ``reason`` / ``count``)
+    written by a newer Obscura survive a load+save round-trip in an
+    older binary that only knows about ``status`` and ``at``.
+    """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="allow",
+        strict=False,
+        populate_by_name=True,
+    )
 
     status: str
     at: str = ""
@@ -118,10 +130,18 @@ class ExternalMigrationDecision(BoundaryModel):
 class ExternalMigrationMarker(BoundaryModel):
     """The marker JSON envelope at ``state/external_migration.json``.
 
-    Only the ``decisions`` map is structured here; unknown top-level
-    keys (added by future schema bumps) are tolerated via
-    ``BoundaryModel``'s ``extra="ignore"``.
+    Only the ``decisions`` map is structured here. Unknown top-level
+    keys (e.g. future schema-version markers) round-trip preserved via
+    ``extra="allow"`` so an older Obscura reading and rewriting the
+    file does not drop forward-compat metadata.
     """
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="allow",
+        strict=False,
+        populate_by_name=True,
+    )
 
     decisions: Mapping[str, ExternalMigrationDecision] = Field(default_factory=dict)
 
