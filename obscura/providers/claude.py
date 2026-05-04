@@ -14,12 +14,17 @@ from obscura.core.agent_loop import AgentLoop, call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
 from obscura.core.tool_policy import ToolPolicy
+from obscura.core.models.content import (
+    TextBlock as ObscuraTextBlock,
+    ThinkingBlock as ObscuraThinkingBlock,
+    ToolResultBlock as ObscuraToolResultBlock,
+    ToolUseBlock as ObscuraToolUseBlock,
+)
 from obscura.core.types import (
     AgentEvent,
     Backend,
     BackendCapabilities,
     ChunkKind,
-    ContentBlock,
     HookPoint,
     Message,
     NativeHandle,
@@ -839,27 +844,26 @@ class ClaudeBackend(BackendToolHostMixin):
 
     def _to_message(self, raw_messages: list[Any]) -> Message:
         """Convert Claude response messages to a normalized Message."""
-        blocks: list[ContentBlock] = []
+        blocks: list[Any] = []
 
         for msg in raw_messages:
             type_name = type(msg).__name__
 
             if type_name == "AssistantMessage" and hasattr(msg, "content"):
                 for block in msg.content:
+                    # ``block_type`` is the Claude SDK's class name, not
+                    # ours — coincidence is intentional.
                     block_type = type(block).__name__
 
                     if block_type == "TextBlock" and hasattr(block, "text"):
-                        blocks.append(ContentBlock(kind="text", text=block.text))
+                        blocks.append(ObscuraTextBlock(text=block.text))
                     elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
-                        blocks.append(
-                            ContentBlock(kind="thinking", text=block.thinking),
-                        )
+                        blocks.append(ObscuraThinkingBlock(text=block.thinking))
                     elif block_type == "ToolUseBlock":
                         blocks.append(
-                            ContentBlock(
-                                kind="tool_use",
+                            ObscuraToolUseBlock(
                                 tool_name=getattr(block, "name", ""),
-                                tool_input=getattr(block, "input", {}),
+                                args=getattr(block, "input", {}) or {},
                                 tool_use_id=getattr(block, "id", ""),
                             ),
                         )
@@ -868,9 +872,8 @@ class ClaudeBackend(BackendToolHostMixin):
                         if not isinstance(content, str):
                             content = str(content)
                         blocks.append(
-                            ContentBlock(
-                                kind="tool_result",
-                                text=content,
+                            ObscuraToolResultBlock(
+                                content=content,
                                 tool_use_id=getattr(block, "tool_use_id", ""),
                                 is_error=getattr(block, "is_error", False),
                             ),
@@ -881,7 +884,7 @@ class ClaudeBackend(BackendToolHostMixin):
                 continue
 
         if not blocks:
-            blocks = [ContentBlock(kind="text", text="")]
+            blocks = [ObscuraTextBlock(text="")]
 
         # Use last raw message for the raw field
         raw = raw_messages[-1] if raw_messages else None

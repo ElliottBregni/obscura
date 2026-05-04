@@ -18,11 +18,11 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.sessions import SessionStore
+from obscura.core.models.content import TextBlock, ThinkingBlock, ToolUseBlock
 from obscura.core.types import (
     Backend,
     BackendCapabilities,
     ChunkKind,
-    ContentBlock,
     HookContext,
     HookPoint,
     Message,
@@ -923,9 +923,9 @@ class CodexBackend(BackendToolHostMixin):
         self,
         items: list[Any],
         final_text: str,
-    ) -> list[ContentBlock]:
-        """Convert Codex thread items into Obscura ContentBlocks."""
-        blocks: list[ContentBlock] = []
+    ) -> list[Any]:
+        """Convert Codex thread items into Obscura content blocks."""
+        blocks: list[Any] = []
         has_text = False
 
         for raw in items:
@@ -936,7 +936,7 @@ class CodexBackend(BackendToolHostMixin):
 
             if item_type == "agentMessage":
                 blocks.append(
-                    ContentBlock(kind="text", text=getattr(item, "text", "") or ""),
+                    TextBlock(text=getattr(item, "text", "") or ""),
                 )
                 has_text = True
 
@@ -945,14 +945,13 @@ class CodexBackend(BackendToolHostMixin):
                 summary = list(getattr(item, "summary", None) or [])
                 text = "\n".join(str(s) for s in content + summary)
                 if text:
-                    blocks.append(ContentBlock(kind="thinking", text=text))
+                    blocks.append(ThinkingBlock(text=text))
 
             elif item_type == "commandExecution":
                 blocks.append(
-                    ContentBlock(
-                        kind="tool_use",
+                    ToolUseBlock(
                         tool_name="shell_command",
-                        tool_input={"command": getattr(item, "command", "") or ""},
+                        args={"command": getattr(item, "command", "") or ""},
                         tool_use_id=getattr(item, "id", "") or "",
                     ),
                 )
@@ -961,26 +960,24 @@ class CodexBackend(BackendToolHostMixin):
                 server = getattr(item, "server", "") or ""
                 tool = getattr(item, "tool", "") or ""
                 blocks.append(
-                    ContentBlock(
-                        kind="tool_use",
+                    ToolUseBlock(
                         tool_name=self._sanitize_tool_name(f"{server}_{tool}"),
-                        tool_input=getattr(item, "arguments", None) or {},
+                        args=getattr(item, "arguments", None) or {},
                         tool_use_id=getattr(item, "id", "") or "",
                     ),
                 )
 
             elif item_type == "fileChange":
                 blocks.append(
-                    ContentBlock(
-                        kind="tool_use",
+                    ToolUseBlock(
                         tool_name="file_change",
-                        tool_input={"changes": self._summarize_file_changes(item)},
+                        args={"changes": self._summarize_file_changes(item)},
                         tool_use_id=getattr(item, "id", "") or "",
                     ),
                 )
 
         if not has_text:
-            blocks.insert(0, ContentBlock(kind="text", text=final_text))
+            blocks.insert(0, TextBlock(text=final_text))
 
         return blocks
 

@@ -10,6 +10,7 @@ from typing import Any
 from urllib import error as url_error
 from urllib import request as url_request
 
+from obscura.core.enums.tools import HTTPMethod
 from obscura.core.tools import tool
 from obscura.tools.system._policy import Policy
 from obscura.tools.system._shell import Shell
@@ -126,12 +127,20 @@ class Http:
     )
     async def http_request(
         url: str,
-        method: str = "GET",
+        method: HTTPMethod | str = HTTPMethod.GET,
         headers: dict[str, str] | None = None,
         body: str = "",
         json_body: dict[str, Any] | None = None,
         timeout_seconds: float = 30.0,
     ) -> str:
+        # Coerce loose strings ("get", "POST", etc.) into the canonical
+        # HTTPMethod member. Tool handlers receive arguments parsed from
+        # JSON Schema, so the value still arrives as a bare string.
+        normalized_method = (
+            method if isinstance(method, HTTPMethod) else HTTPMethod(method.upper())
+        )
+        method_value = normalized_method.value
+
         req_headers = headers or {}
         payload: bytes | None = None
 
@@ -148,7 +157,7 @@ class Http:
             return Policy.json_error("ssrf_blocked", url=url, detail=str(exc))
         req = url_request.Request(
             url=url,
-            method=method.upper(),
+            method=method_value,
             headers=req_headers,
             data=payload,
         )
@@ -168,7 +177,7 @@ class Http:
                     "ok": True,
                     "status": getattr(resp, "status", 200),
                     "url": url,
-                    "method": method.upper(),
+                    "method": method_value,
                     "content_type": content_type,
                     "headers": response_headers,
                     "body": text,
@@ -190,7 +199,7 @@ class Http:
                     "ok": False,
                     "status": exc.code,
                     "url": url,
-                    "method": method.upper(),
+                    "method": method_value,
                     "error": "http_error",
                     "body": raw_error.decode("utf-8", errors="replace"),
                     "headers": dict(exc.headers.items()) if exc.headers else {},
@@ -201,7 +210,7 @@ class Http:
             return Policy.json_error(
                 "request_failed",
                 url=url,
-                method=method.upper(),
+                method=method_value,
                 detail=str(exc),
             )
 

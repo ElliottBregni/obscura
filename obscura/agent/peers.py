@@ -1,4 +1,12 @@
-"""Local peer discovery and invocation models for agent-to-agent calls."""
+"""Local peer discovery and invocation models for agent-to-agent calls.
+
+The peer reference models (``AgentRef``, ``RemoteAgentRef``,
+``UnixSocketAgentRef``) live canonically in
+:mod:`obscura.core.models.peers` as a discriminated Pydantic union. This
+module keeps the historical import paths working and houses the runtime
+side of the peer system (``PeerRegistry``, ``PeerCatalog``,
+``PeerInvocationEnvelope``).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +17,15 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from obscura.core.enums.agent import InvocationMode, PeerKind
+from obscura.core.enums.agent import InvocationMode
+from obscura.core.models.peers import (
+    A2ARemoteAgentRef,
+    AgentRef,
+    AgentRefUnion,
+    LocalAgentRef,
+    RemoteAgentRef,
+    UnixSocketAgentRef,
+)
 from obscura.integrations.a2a.client import A2AClient
 import logging
 
@@ -20,39 +36,17 @@ if TYPE_CHECKING:
     from obscura.agent.agents import Agent, AgentRuntime
 
 
-class AgentRef(BaseModel):
-    """Reference to a peer agent."""
-
-    kind: PeerKind = PeerKind.LOCAL
-    runtime_id: str
-    agent_id: str
-    name: str
-    model: str
-    status: str
-    capabilities: tuple[str, ...] = ()
-
-
-class RemoteAgentRef(BaseModel):
-    """Reference to a remote A2A peer endpoint/agent."""
-
-    kind: PeerKind = PeerKind.A2A_REMOTE
-    url: str
-    name: str = ""
-    status: str = "configured"
-    capabilities: tuple[str, ...] = ()
-    skills: tuple[str, ...] = ()
-    description: str = ""
-
-
-class UnixSocketAgentRef(BaseModel):
-    """Reference to an agent reachable via Unix domain socket."""
-
-    kind: PeerKind = PeerKind.UNIX_SOCKET
-    socket_path: str
-    name: str = ""
-    status: str = "configured"
-    capabilities: tuple[str, ...] = ()
-    description: str = ""
+__all__ = [
+    "A2ARemoteAgentRef",
+    "AgentRef",
+    "AgentRefUnion",
+    "LocalAgentRef",
+    "PeerCatalog",
+    "PeerInvocationEnvelope",
+    "PeerRegistry",
+    "RemoteAgentRef",
+    "UnixSocketAgentRef",
+]
 
 
 def _default_local_refs() -> list[AgentRef]:
