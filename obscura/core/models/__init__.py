@@ -1,11 +1,9 @@
 """Central Pydantic model registry for the obscura runtime.
 
 Domain teams populate this package with frozen Pydantic models composed via
-the mixins in `_mixins`. This module intentionally re-exports nothing yet —
-domain teams will add curated re-exports as their models land. Until then,
-import directly from the submodule that owns the model, or from `_base`
-for the shared base classes (`ObscuraModel`, `MutableObscuraModel`,
-`BoundaryModel`).
+the mixins in `_mixins`. Boundary teams add I/O-bound models that parse
+incoming dicts into typed objects on ingress and round-trip via
+``model_dump`` on egress.
 """
 
 from __future__ import annotations
