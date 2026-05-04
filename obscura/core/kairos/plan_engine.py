@@ -10,7 +10,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.enums.lifecycle import KairosTaskStatus, PlanStatus
 from obscura.core.kairos.errors import EmptyPlanError, PlanningError
@@ -20,6 +20,7 @@ from obscura.core.kairos.types import (
     Plan,
     Task,
 )
+from obscura.core.models.kairos import PlanResponse
 
 if TYPE_CHECKING:
     from obscura.core.types import BackendProtocol
@@ -78,7 +79,7 @@ class PlanEngine:
         """
         prompt = self._build_planning_prompt(goal)
         raw = await self._call_model(prompt)
-        data = self._parse_response(raw, goal.goal_id)
+        response = self._parse_response(raw, goal.goal_id)
 
         plan_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -86,12 +87,12 @@ class PlanEngine:
         task_id_map: dict[int, str] = {}
         tasks: list[Task] = []
 
-        for i, t in enumerate(data["tasks"]):
+        for i, t in enumerate(response.tasks):
             tid = str(uuid.uuid4())
             task_id_map[i] = tid
             depends_on = tuple(
                 task_id_map[j]
-                for j in t.get("depends_on_indices", [])
+                for j in t.depends_on_indices
                 if j < i and j in task_id_map
             )
             tasks.append(
@@ -99,11 +100,11 @@ class PlanEngine:
                     task_id=tid,
                     goal_id=goal.goal_id,
                     plan_id=plan_id,
-                    title=t["title"],
-                    description=t.get("description", ""),
+                    title=t.title,
+                    description=t.description,
                     order_index=i,
                     depends_on=depends_on,
-                    tool_hint=t.get("tool_hint", ""),
+                    tool_hint=t.tool_hint,
                     max_retries=self._config.default_budget.max_retries_per_task,
                     status=KairosTaskStatus.PENDING,
                     created_at=now,
@@ -114,7 +115,7 @@ class PlanEngine:
             plan_id=plan_id,
             goal_id=goal.goal_id,
             revision=0,
-            rationale=data.get("rationale", ""),
+            rationale=response.rationale,
             task_ids=tuple(t.task_id for t in tasks),
             status=PlanStatus.DRAFT,
             created_at=now,
@@ -142,7 +143,7 @@ class PlanEngine:
             goal, current_plan, completed_task_ids, failure_context
         )
         raw = await self._call_model(prompt)
-        data = self._parse_response(raw, goal.goal_id)
+        response = self._parse_response(raw, goal.goal_id)
 
         plan_id = str(uuid.uuid4())
         now = datetime.now(UTC)
@@ -150,12 +151,12 @@ class PlanEngine:
         task_id_map: dict[int, str] = {}
         tasks: list[Task] = []
 
-        for i, t in enumerate(data["tasks"]):
+        for i, t in enumerate(response.tasks):
             tid = str(uuid.uuid4())
             task_id_map[i] = tid
             depends_on = tuple(
                 task_id_map[j]
-                for j in t.get("depends_on_indices", [])
+                for j in t.depends_on_indices
                 if j < i and j in task_id_map
             )
             tasks.append(
@@ -163,22 +164,23 @@ class PlanEngine:
                     task_id=tid,
                     goal_id=goal.goal_id,
                     plan_id=plan_id,
-                    title=t["title"],
-                    description=t.get("description", ""),
+                    title=t.title,
+                    description=t.description,
                     order_index=i,
                     depends_on=depends_on,
-                    tool_hint=t.get("tool_hint", ""),
+                    tool_hint=t.tool_hint,
                     max_retries=self._config.default_budget.max_retries_per_task,
                     status=KairosTaskStatus.PENDING,
                     created_at=now,
                 )
             )
 
+        rationale = response.rationale or "Revised after failure"
         plan = Plan(
             plan_id=plan_id,
             goal_id=goal.goal_id,
             revision=revision,
-            rationale=data.get("rationale", "Revised after failure"),
+            rationale=rationale,
             task_ids=tuple(t.task_id for t in tasks),
             status=PlanStatus.DRAFT,
             created_at=now,
@@ -239,8 +241,8 @@ class PlanEngine:
             raise PlanningError(f"LLM call failed during planning: {exc}") from exc
         return "".join(chunks)
 
-    def _parse_response(self, raw: str, goal_id: str) -> dict[str, Any]:
-        """Parse the LLM JSON response."""
+    def _parse_response(self, raw: str, goal_id: str) -> PlanResponse:
+        """Parse the LLM JSON response into a typed :class:`PlanResponse`."""
         # Strip markdown fences if present
         text = raw.strip()
         if text.startswith("```"):
@@ -248,22 +250,29 @@ class PlanEngine:
             text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
 
         try:
-            data = json.loads(text)
+            data: Any = json.loads(text)
         except json.JSONDecodeError as exc:
             raise PlanningError(
                 f"Invalid JSON from planner: {exc}",
                 goal_id=goal_id,
             ) from exc
 
-        tasks = data.get("tasks", [])
-        if not tasks:
+        if not isinstance(data, dict):
+            raise PlanningError(
+                "Planner JSON did not decode to an object",
+                goal_id=goal_id,
+            )
+
+        response = PlanResponse.from_mapping(cast("dict[str, Any]", data))
+        if not response.tasks:
             raise EmptyPlanError("Planner returned 0 tasks", goal_id=goal_id)
-        if len(tasks) > self._config.max_plan_tasks:
-            tasks = tasks[: self._config.max_plan_tasks]
-            data["tasks"] = tasks
+        if len(response.tasks) > self._config.max_plan_tasks:
+            response = response.model_copy(
+                update={"tasks": response.tasks[: self._config.max_plan_tasks]},
+            )
             logger.warning(
                 "Plan truncated to %d tasks (goal %s)",
                 self._config.max_plan_tasks,
                 goal_id,
             )
-        return data
+        return response
