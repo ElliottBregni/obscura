@@ -427,9 +427,7 @@ class TaskQueue:
         project_root: str | None = None,
     ) -> dict[str, int]:
         """Return counts by priority bucket for quick diagnostics."""
-        status_value = (
-            status.value if isinstance(status, TaskQueueStatus) else status
-        )
+        status_value = status.value if isinstance(status, TaskQueueStatus) else status
         conn = _open()
         try:
             where = "WHERE status = ?"

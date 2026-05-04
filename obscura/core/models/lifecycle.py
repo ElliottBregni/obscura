@@ -72,10 +72,14 @@ def _coerce_dt(value: object) -> datetime:
     return datetime.now(UTC)
 
 
-def _row_get(row: sqlite3.Row | Mapping[str, Any], key: str, default: Any = None) -> Any:
+def _row_get(
+    row: sqlite3.Row | Mapping[str, Any], key: str, default: Any = None
+) -> Any:
     """Mapping-style ``.get`` that also works on ``sqlite3.Row``."""
     if isinstance(row, sqlite3.Row):
-        if key in row.keys():
+        # sqlite3.Row supports membership via __contains__ on keys() but not
+        # __contains__ directly, so we explicitly check key presence.
+        if key in row.keys():  # noqa: SIM118
             return row[key]
         return default
     return row.get(key, default)
@@ -312,9 +316,7 @@ class GoalRecord(
     @classmethod
     def from_row(cls, row: sqlite3.Row | Mapping[str, Any]) -> Self:
         status_raw = _row_get(row, "status", GoalStatus.PENDING.value)
-        status = parse_lenient(
-            GoalStatus, str(status_raw), default=GoalStatus.PENDING
-        )
+        status = parse_lenient(GoalStatus, str(status_raw), default=GoalStatus.PENDING)
         created = _coerce_dt(_row_get(row, "created_at") or _row_get(row, "created"))
         updated = _coerce_dt(
             _row_get(row, "updated_at") or _row_get(row, "updated", created),
@@ -550,9 +552,7 @@ class HealthReport(ObscuraModel, StatusedMixin[HealthStatus]):
     @classmethod
     def from_row(cls, row: sqlite3.Row | Mapping[str, Any]) -> Self:
         status_raw = _row_get(row, "status", HealthStatus.OK.value)
-        status = parse_lenient(
-            HealthStatus, str(status_raw), default=HealthStatus.OK
-        )
+        status = parse_lenient(HealthStatus, str(status_raw), default=HealthStatus.OK)
         status_changed = _coerce_dt(_row_get(row, "status_changed_at"))
         return cls(
             status=status,
@@ -706,7 +706,11 @@ class BackgroundTaskRecord(
     @model_validator(mode="after")
     def _backfill_status_changed_at(self) -> Self:
         if self.status_changed_at is None:  # type: ignore[truthy-bool]
-            ts = datetime.fromtimestamp(self.started_at, tz=UTC) if self.started_at else datetime.now(UTC)
+            ts = (
+                datetime.fromtimestamp(self.started_at, tz=UTC)
+                if self.started_at
+                else datetime.now(UTC)
+            )
             object.__setattr__(self, "status_changed_at", ts)
         return self
 
@@ -721,9 +725,13 @@ class BackgroundTaskRecord(
         started = float(_row_get(row, "started_at", 0.0) or 0.0)
         completed_raw = _row_get(row, "completed_at")
         completed = float(completed_raw) if completed_raw else None
-        status_changed = _coerce_dt(
-            _row_get(row, "status_changed_at"),
-        ) if _row_get(row, "status_changed_at") else _coerce_dt(started)
+        status_changed = (
+            _coerce_dt(
+                _row_get(row, "status_changed_at"),
+            )
+            if _row_get(row, "status_changed_at")
+            else _coerce_dt(started)
+        )
         exit_code_raw = _row_get(row, "exit_code")
         return cls(
             id=str(_row_get(row, "task_id") or _row_get(row, "id", "")),

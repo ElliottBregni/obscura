@@ -115,9 +115,7 @@ async def resolve_tool_approval_request(
         if approval.status != ApprovalStatus.PENDING:
             return approval
         now = datetime.now(UTC)
-        approval.status = (
-            ApprovalStatus.APPROVED if approved else ApprovalStatus.DENIED
-        )
+        approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.DENIED
         approval.status_changed_at = now
         approval.updated_at = now
         approval.resolved_at = now
