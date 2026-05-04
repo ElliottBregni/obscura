@@ -50,6 +50,94 @@ class BrowserBridgeError(RuntimeError):
     """Raised when the bridge can't be reached or returns an error."""
 
 
+# Patterns we know how to translate into an action hint for the LLM agent.
+# Order matters — first match wins. Keep substrings lowercase; we match on
+# the lowercased error message. The hint is appended to the original message
+# (preserving the raw text so debugging humans still see it).
+_ERROR_HINTS: tuple[tuple[str, str], ...] = (
+    (
+        "no active obscura browser host",
+        # Already actionable; nothing to add.
+        "",
+    ),
+    (
+        "bridge is closed",
+        " (the side panel was closed after this session attached; ask the "
+        "user to re-open the Obscura side panel in Chrome, then retry)",
+    ),
+    (
+        "bridge connection closed",
+        " (the side panel disconnected mid-call — likely closed or the "
+        "browser quit; ask the user to re-open the Obscura side panel)",
+    ),
+    (
+        "bridge connection lost",
+        " (the side panel went away — likely closed mid-call; ask the user "
+        "to re-open the Obscura side panel in Chrome)",
+    ),
+    (
+        "socket",  # "socket {path} not reachable: ..."
+        " (the side panel does not appear to be running; ask the user to "
+        "open the Obscura side panel in Chrome before retrying)",
+    ),
+    (
+        "timed out connecting",
+        " (could not reach the side panel — it may be busy or unresponsive; "
+        "ask the user to verify the Obscura side panel is open and active)",
+    ),
+    (
+        "timed out after",  # "browser bridge call '{name}' timed out after {n}s"
+        " (the call did not complete in time — the page may still be "
+        "loading, the selector may not exist, or the tab may be unresponsive; "
+        "call browser_screenshot or browser_read_page to verify page state "
+        "before retrying)",
+    ),
+    (
+        "no match",
+        " (selector matched nothing on the active tab; the tab may not be "
+        "the one you expect, the page may not have finished loading, or the "
+        "selector may be wrong — call browser_screenshot or browser_read_page "
+        "to verify before retrying)",
+    ),
+    (
+        "no active tab",
+        " (the active tab Chrome reports is not accessible — the user may "
+        "have closed it or switched windows; ask them to focus a normal tab)",
+    ),
+    (
+        "debugger already attached",
+        " (another Chrome debugger is connected to this tab — usually "
+        "DevTools or another extension; ask the user to close DevTools or "
+        "the other client, then retry)",
+    ),
+    (
+        "cannot attach to",  # CDP attach error variants
+        " (CDP attach was refused — the tab may be a chrome:// URL, the "
+        "Web Store, or otherwise off-limits to extensions; switch to a "
+        "regular http(s) tab)",
+    ),
+)
+
+
+def _diagnostic_for_error(tool_name: str, message: str) -> str:
+    """Augment a raw bridge/host error with a tool-name prefix and an
+    action hint based on known failure patterns.
+
+    Pure function — safe to unit-test without any socket. Always returns a
+    string; if no pattern matches, returns ``"{tool_name}: {message}"`` so
+    the LLM at least knows which tool produced the error.
+    """
+    msg = message or "unknown error"
+    lowered = msg.lower()
+    hint = ""
+    for needle, suffix in _ERROR_HINTS:
+        if needle in lowered:
+            hint = suffix
+            break
+    prefix = f"{tool_name}: " if tool_name else ""
+    return f"{prefix}{msg}{hint}"
+
+
 class BrowserBridgeClient:
     """Async client for the native host's socket bridge.
 
@@ -318,7 +406,14 @@ def _build_proxy_spec(
     side_effects = str(raw.get("side_effects") or "unknown")
 
     async def _handler(**kwargs: Any) -> Any:
-        return await client.call(real_name, kwargs)
+        try:
+            return await client.call(real_name, kwargs)
+        except BrowserBridgeError as e:
+            # Wrap every bridge/host error with the tool name and an action
+            # hint so the LLM agent knows what to do, not just what failed.
+            raise BrowserBridgeError(
+                _diagnostic_for_error(real_name, str(e))
+            ) from e
 
     return ToolSpec(
         name=name,
