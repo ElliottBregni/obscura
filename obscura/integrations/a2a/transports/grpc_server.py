@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.integrations.a2a.types import (
     A2AError,
@@ -38,6 +39,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _params_from_json(raw: str) -> Mapping[str, Any]:
+    """Parse JSON request payload into a typed mapping."""
+    parsed: Any = json.loads(raw)
+    if isinstance(parsed, Mapping):
+        return cast("Mapping[str, Any]", parsed)
+    return {}
+
+
+def _optional_str(params: Mapping[str, Any], key: str) -> str | None:
+    value = params.get(key)
+    if value is None:
+        return None
+    return str(value)
+
+
+def _message_payload(params: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw: Any = params.get("message", {})
+    if isinstance(raw, Mapping):
+        return cast("Mapping[str, Any]", raw)
+    return {}
+
+
 class A2AServicer:
     """gRPC servicer that delegates to A2AService.
 
@@ -50,30 +73,30 @@ class A2AServicer:
 
     async def SendMessage(self, request_json: str) -> str:
         """Handle SendMessage RPC."""
-        params = json.loads(request_json)
-        message = A2AMessage.model_validate(params.get("message", {}))
+        params = _params_from_json(request_json)
+        message = A2AMessage.model_validate(_message_payload(params))
         task = await self._service.message_send(
             message,
-            context_id=params.get("contextId"),
-            task_id=params.get("taskId"),
-            blocking=params.get("blocking", True),
+            context_id=_optional_str(params, "contextId"),
+            task_id=_optional_str(params, "taskId"),
+            blocking=bool(params.get("blocking", True)),
         )
         return task.model_dump_json()
 
     async def StreamMessage(self, request_json: str) -> AsyncIterator[str]:
         """Handle StreamMessage RPC — yields JSON events."""
-        params = json.loads(request_json)
-        message = A2AMessage.model_validate(params.get("message", {}))
+        params = _params_from_json(request_json)
+        message = A2AMessage.model_validate(_message_payload(params))
         async for event in self._service.message_stream(
             message,
-            context_id=params.get("contextId"),
+            context_id=_optional_str(params, "contextId"),
         ):
             yield event.model_dump_json()
 
     async def GetTask(self, request_json: str) -> str:
         """Handle GetTask RPC."""
-        params = json.loads(request_json)
-        task_id = params.get("taskId", "")
+        params = _params_from_json(request_json)
+        task_id = _optional_str(params, "taskId") or ""
         task = await self._service.tasks_get(task_id)
         if task is None:
             raise TaskNotFoundError(task_id)
@@ -81,12 +104,14 @@ class A2AServicer:
 
     async def ListTasks(self, request_json: str) -> str:
         """Handle ListTasks RPC."""
-        params = json.loads(request_json)
+        params = _params_from_json(request_json)
+        state_value: Any = params.get("state")
+        limit_raw: Any = params.get("limit", 20)
         tasks, cursor = await self._service.tasks_list(
-            context_id=params.get("contextId"),
-            state=TaskState(params["state"]) if "state" in params else None,
-            cursor=params.get("cursor"),
-            limit=params.get("limit", 20),
+            context_id=_optional_str(params, "contextId"),
+            state=TaskState(state_value) if isinstance(state_value, str) else None,
+            cursor=_optional_str(params, "cursor"),
+            limit=int(limit_raw or 20),
         )
         result: dict[str, Any] = {
             "tasks": [json.loads(t.model_dump_json()) for t in tasks],
@@ -97,15 +122,15 @@ class A2AServicer:
 
     async def CancelTask(self, request_json: str) -> str:
         """Handle CancelTask RPC."""
-        params = json.loads(request_json)
-        task_id = params.get("taskId", "")
+        params = _params_from_json(request_json)
+        task_id = _optional_str(params, "taskId") or ""
         task = await self._service.tasks_cancel(task_id)
         return task.model_dump_json()
 
     async def SubscribeToTask(self, request_json: str) -> AsyncIterator[str]:
         """Handle SubscribeToTask RPC — yields JSON events."""
-        params = json.loads(request_json)
-        task_id = params.get("taskId", "")
+        params = _params_from_json(request_json)
+        task_id = _optional_str(params, "taskId") or ""
         async for event in self._service.tasks_subscribe(task_id):
             yield event.model_dump_json()
 

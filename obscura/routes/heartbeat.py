@@ -15,6 +15,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.deps import audit, authenticate_websocket
@@ -33,6 +34,19 @@ router = APIRouter(prefix="/api/v1", tags=["heartbeat"])
 ws_router = APIRouter()
 
 
+class HeartbeatRequest(BaseModel):
+    """Body for ``POST /heartbeat`` — typed boundary model."""
+
+    agent_id: str
+    timestamp: str | None = None
+    status: str = "unknown"
+    metrics: dict[str, Any] = Field(default_factory=dict[str, Any])
+    message: str | None = None
+    ttl: int = 30
+    version: str = "0.1.0"
+    tags: list[str] = Field(default_factory=list)
+
+
 async def _get_heartbeat_monitor(request: Request) -> Any:
     """Get or create the heartbeat monitor."""
     monitor = getattr(request.app.state, "_heartbeat_monitor", None)
@@ -45,7 +59,7 @@ async def _get_heartbeat_monitor(request: Request) -> Any:
 
 @router.post("/heartbeat")
 async def heartbeat_receive(
-    body: dict[str, Any],
+    body: HeartbeatRequest,
     request: Request,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
@@ -54,16 +68,16 @@ async def heartbeat_receive(
 
     try:
         heartbeat = Heartbeat(
-            agent_id=body["agent_id"],
+            agent_id=body.agent_id,
             timestamp=datetime.fromisoformat(
-                body.get("timestamp", datetime.now(UTC).isoformat()),
+                body.timestamp or datetime.now(UTC).isoformat(),
             ),
-            status=HealthStatus(body.get("status", "unknown")),
-            metrics=SystemMetrics(**body.get("metrics", {})),
-            message=body.get("message"),
-            ttl=body.get("ttl", 30),
-            version=body.get("version", "0.1.0"),
-            tags=body.get("tags", []),
+            status=HealthStatus(body.status),
+            metrics=SystemMetrics(**body.metrics),
+            message=body.message,
+            ttl=body.ttl,
+            version=body.version,
+            tags=body.tags,
         )
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"Invalid heartbeat: {e}")

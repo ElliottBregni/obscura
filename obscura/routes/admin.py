@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from obscura.auth.rbac import require_any_role, require_role
 from obscura.deps import audit_logs, get_runtime
@@ -29,6 +30,16 @@ if TYPE_CHECKING:
     from obscura.core.rate_limiter import RateLimiter
 
 router = APIRouter(prefix="/api/v1", tags=["admin"])
+
+
+class RateLimitsRequest(BaseModel):
+    """Body for ``POST /rate-limits`` — typed boundary model."""
+
+    api_key: str
+    requests_per_minute: int | None = None
+    concurrent_agents: int | None = None
+    memory_quota_mb: int | None = None
+
 
 # In-memory rate limit store (legacy fallback)
 _rate_limits: dict[str, dict[str, Any]] = {}
@@ -227,11 +238,11 @@ async def rate_limits_get(
 @router.post("/rate-limits")
 async def rate_limits_set(
     request: Request,
-    body: dict[str, Any],
+    body: RateLimitsRequest,
     user: Annotated[AuthenticatedUser, Depends(require_role("admin"))],
 ) -> JSONResponse:
     """Set rate limits for a user/API key. Admin only."""
-    api_key: str | None = body.get("api_key")
+    api_key = body.api_key
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key is required")
 
@@ -241,14 +252,14 @@ async def rate_limits_set(
         rl: RateLimiter = limiter
         rl.set_limits(
             api_key,
-            rpm=body.get("requests_per_minute"),
-            concurrent=body.get("concurrent_agents"),
+            rpm=body.requests_per_minute,
+            concurrent=body.concurrent_agents,
         )
 
     _rate_limits[api_key] = {
-        "requests_per_minute": body.get("requests_per_minute", 100),
-        "concurrent_agents": body.get("concurrent_agents", 10),
-        "memory_quota_mb": body.get("memory_quota_mb", 1024),
+        "requests_per_minute": body.requests_per_minute or 100,
+        "concurrent_agents": body.concurrent_agents or 10,
+        "memory_quota_mb": body.memory_quota_mb or 1024,
         "set_by": user.user_id,
         "set_at": datetime.now(UTC).isoformat(),
     }

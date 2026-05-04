@@ -1,35 +1,71 @@
-"""obscura.a2a.types — A2A protocol data model.
+"""obscura.a2a.types — A2A protocol re-exports.
 
-Pydantic models for the full A2A specification: Tasks, Messages, Parts,
-Artifacts, Agent Cards, streaming events, and JSON-RPC method routing.
+Wire-format-bound models live in :mod:`obscura.core.models.a2a` (the
+canonical location used at every wire boundary). This module re-exports
+them under the historical names that internal callers already use
+(``Task``, ``TaskStatus``, ``StreamEvent``, ``Part``, ...) so existing
+imports keep resolving. New code should import from
+:mod:`obscura.core.models.a2a` directly.
+
+A2A protocol method names live in
+:class:`obscura.core.enums.protocol.A2AMethod`; task lifecycle states in
+:class:`obscura.core.enums.protocol.A2ATaskState`; part-kind discriminator
+values in :class:`obscura.core.enums.protocol.A2APartKind`. The agent card,
+auth, and per-request configuration models stay defined here — they're
+plain in-memory schemas, not protocol-bound.
 
 Conforms to the A2A Protocol Specification v0.3.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any, Literal, TypeAlias
+from typing import Any, TypeAlias
 
 from pydantic import BaseModel, Field
 
 from obscura.core.enums.protocol import (
     A2AMethod as A2AMethod,
-    A2APartKind,
     A2ARole as A2ARole,
-    A2ATaskMessageKind,
     A2ATaskState as A2ATaskState,
 )
+from obscura.core.models.a2a import (
+    A2AArtifactUpdateEvent,
+    A2AMessage as A2AMessage,
+    A2APart,
+    A2APartAdapter as A2APartAdapter,
+    A2AStatusUpdateEvent,
+    A2ATask,
+    A2ATaskMessage as A2ATaskMessage,
+    A2ATaskMessageAdapter as A2ATaskMessageAdapter,
+    A2ATaskStatus,
+    Artifact as Artifact,
+    DataPart as DataPart,
+    FileContent as FileContent,
+    FilePart as FilePart,
+    TextPart as TextPart,
+)
+
+# ---------------------------------------------------------------------------
+# Back-compat aliases for legacy import names
+# ---------------------------------------------------------------------------
+
+# Pre-rename names kept in scope; consumers that haven't migrated still resolve.
+TaskState: TypeAlias = A2ATaskState  # noqa: UP040
+TaskStatus = A2ATaskStatus
+Task = A2ATask
+TaskStatusUpdateEvent = A2AStatusUpdateEvent
+TaskArtifactUpdateEvent = A2AArtifactUpdateEvent
+
+# Part is the discriminated-union TYPE; consumers do isinstance(p, TextPart).
+Part: TypeAlias = A2APart  # noqa: UP040
+
+# StreamEvent is the union of streaming-event types — used as a return type.
+StreamEvent: TypeAlias = A2AStatusUpdateEvent | A2AArtifactUpdateEvent  # noqa: UP040
+
 
 # ---------------------------------------------------------------------------
 # Task state machine
 # ---------------------------------------------------------------------------
-
-
-# Backwards-compatible alias for the canonical A2ATaskState StrEnum.
-# UP040 ignored: `type X = ...` produces a TypeAliasType that strips enum
-# member access; we need the runtime to stay the actual enum class.
-TaskState: TypeAlias = A2ATaskState  # noqa: UP040
 
 
 # Valid state transitions enforced by the task store.
@@ -77,138 +113,7 @@ TERMINAL_STATES: frozenset[TaskState] = frozenset(
 
 
 # ---------------------------------------------------------------------------
-# Parts — content containers
-# ---------------------------------------------------------------------------
-
-
-class TextPart(BaseModel):
-    """Plain text content."""
-
-    # Discriminator literal — value sourced from A2APartKind for single source of truth.
-    kind: Literal["text"] = A2APartKind.TEXT.value
-    text: str
-    metadata: dict[str, Any] | None = None
-
-
-class FileContent(BaseModel):
-    """File reference or inline bytes."""
-
-    name: str | None = None
-    mimeType: str | None = None
-    bytes: str | None = None  # base64-encoded
-    uri: str | None = None
-
-
-class FilePart(BaseModel):
-    """File content (inline bytes or URI reference)."""
-
-    kind: Literal["file"] = A2APartKind.FILE.value
-    file: FileContent
-    metadata: dict[str, Any] | None = None
-
-
-class DataPart(BaseModel):
-    """Structured JSON data."""
-
-    kind: Literal["data"] = A2APartKind.DATA.value
-    data: dict[str, Any]
-    metadata: dict[str, Any] | None = None
-
-
-# Union type for all part kinds.
-Part = TextPart | FilePart | DataPart
-
-
-# ---------------------------------------------------------------------------
-# Messages
-# ---------------------------------------------------------------------------
-
-
-class A2AMessage(BaseModel):
-    """A single communication turn between client and agent."""
-
-    # Wire string ("user"/"agent") — see A2ARole for the canonical enum.
-    role: Literal["user", "agent"]
-    messageId: str
-    parts: list[Part]
-    taskId: str | None = None
-    contextId: str | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    metadata: dict[str, Any] | None = None
-    referenceTaskIds: list[str] | None = None
-
-
-# ---------------------------------------------------------------------------
-# Artifacts
-# ---------------------------------------------------------------------------
-
-
-class Artifact(BaseModel):
-    """Agent-generated output (document, image, structured data)."""
-
-    artifactId: str
-    name: str | None = None
-    parts: list[Part]
-    metadata: dict[str, Any] | None = None
-
-
-# ---------------------------------------------------------------------------
-# Task
-# ---------------------------------------------------------------------------
-
-
-class TaskStatus(BaseModel):
-    """Current task status with optional message."""
-
-    state: TaskState
-    message: A2AMessage | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-
-class Task(BaseModel):
-    """The primary unit of work in A2A."""
-
-    id: str
-    contextId: str
-    status: TaskStatus
-    artifacts: list[Artifact] = Field(default_factory=list[Artifact])
-    history: list[A2AMessage] = Field(default_factory=list[A2AMessage])
-    kind: Literal["task"] = A2ATaskMessageKind.TASK.value
-    metadata: dict[str, Any] | None = None
-
-
-# ---------------------------------------------------------------------------
-# Streaming events
-# ---------------------------------------------------------------------------
-
-
-class TaskStatusUpdateEvent(BaseModel):
-    """SSE event: task status changed."""
-
-    taskId: str
-    contextId: str
-    status: TaskStatus
-    final: bool = False
-    kind: Literal["status-update"] = A2ATaskMessageKind.STATUS_UPDATE.value
-
-
-class TaskArtifactUpdateEvent(BaseModel):
-    """SSE event: artifact created or appended."""
-
-    taskId: str
-    contextId: str
-    artifact: Artifact
-    append: bool = False
-    lastChunk: bool = False
-    kind: Literal["artifact-update"] = A2ATaskMessageKind.ARTIFACT_UPDATE.value
-
-
-# Union for stream responses.
-StreamEvent = TaskStatusUpdateEvent | TaskArtifactUpdateEvent
-
-
-# ---------------------------------------------------------------------------
-# Agent Card
+# Agent Card — in-memory schema, not wire-bound
 # ---------------------------------------------------------------------------
 
 
@@ -287,11 +192,6 @@ class SendMessageConfiguration(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# JSON-RPC method names — see obscura.core.enums.protocol.A2AMethod
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
 # Error types
 # ---------------------------------------------------------------------------
 
@@ -337,3 +237,43 @@ class UnsupportedOperationError(A2AError):
 class VersionNotSupportedError(A2AError):
     def __init__(self, version: str) -> None:
         super().__init__(-32005, f"Version not supported: {version}")
+
+
+__all__ = [
+    "TERMINAL_STATES",
+    "VALID_TRANSITIONS",
+    "A2AError",
+    "A2AMessage",
+    "A2AMethod",
+    "A2APart",
+    "A2APartAdapter",
+    "A2ARole",
+    "A2ATask",
+    "A2ATaskMessage",
+    "A2ATaskMessageAdapter",
+    "A2ATaskState",
+    "A2ATaskStatus",
+    "AgentCapabilities",
+    "AgentCard",
+    "AgentSkill",
+    "Artifact",
+    "AuthScheme",
+    "DataPart",
+    "FileContent",
+    "FilePart",
+    "InvalidTransitionError",
+    "Part",
+    "PushNotificationConfig",
+    "SendMessageConfiguration",
+    "StreamEvent",
+    "Task",
+    "TaskArtifactUpdateEvent",
+    "TaskNotCancelableError",
+    "TaskNotFoundError",
+    "TaskState",
+    "TaskStatus",
+    "TaskStatusUpdateEvent",
+    "TextPart",
+    "UnsupportedOperationError",
+    "VersionNotSupportedError",
+]

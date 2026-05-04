@@ -15,6 +15,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.enums.protocol import A2ARole
 from obscura.core.types import AgentEvent, AgentEventKind, ToolCallInfo
 from obscura.integrations.a2a.event_mapper import EventMapper
 from obscura.integrations.a2a.types import (
@@ -257,7 +258,7 @@ class A2AService:
         async def on_confirm(tool_call: ToolCallInfo) -> bool:
             # Transition to INPUT_REQUIRED
             confirm_msg = A2AMessage(
-                role="agent",
+                role=A2ARole.AGENT,
                 messageId=f"confirm-{uuid.uuid4().hex[:8]}",
                 parts=[
                     TextPart(

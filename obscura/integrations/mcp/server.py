@@ -23,9 +23,20 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.agent.agents import AgentConfig, AgentRuntime
+from obscura.core.enums.protocol import MCPMethod
+from obscura.core.models.protocol import (
+    JSONRPCError,
+    JSONRPCRequest,
+    JSONRPCResponse,
+    MCPCallToolParams,
+    MCPGetPromptParams,
+    MCPInitializeParams,
+    MCPReadResourceParams,
+)
 from obscura.core.sessions import SessionStore
 from obscura.core.types import Backend, SessionRef
 from obscura.integrations.mcp.file_tools import read_file, search_files
@@ -1081,6 +1092,67 @@ class ObscuraMCPServer:
 # ---------------------------------------------------------------------------
 
 
+async def _dispatch_mcp_method(
+    server: ObscuraMCPServer,
+    method: str,
+    params: Mapping[str, Any],
+) -> Any:
+    """Dispatch a parsed MCP JSON-RPC method to the server.
+
+    Each branch wraps ``params`` in the matching boundary model so the
+    server-side handler keeps receiving validated input even though the
+    underlying signatures still take ``**kwargs`` for now. Unknown
+    methods raise ``METHOD_NOT_FOUND``.
+    """
+    if method == MCPMethod.INITIALIZE.value:
+        init_params = MCPInitializeParams.model_validate(params)
+        return await server.handle_initialize(
+            protocolVersion=init_params.protocolVersion,
+            capabilities=dict(init_params.capabilities),
+            clientInfo=dict(init_params.clientInfo),
+        )
+
+    if method == MCPMethod.TOOLS_LIST.value:
+        return await server.handle_tools_list()
+
+    if method == MCPMethod.TOOLS_CALL.value:
+        call_params = MCPCallToolParams.model_validate(params)
+        context = ObscuraMCPToolContext(user_id="api")
+        result_obj = await server.handle_tools_call(
+            name=call_params.name,
+            arguments=dict(call_params.arguments),
+            context=context,
+        )
+        return {
+            "content": result_obj.content,
+            "isError": result_obj.isError,
+        }
+
+    if method == MCPMethod.RESOURCES_LIST.value:
+        return await server.handle_resources_list()
+
+    if method == MCPMethod.RESOURCES_READ.value:
+        read_params = MCPReadResourceParams.model_validate(params)
+        return await server.handle_resources_read(read_params.uri)
+
+    if method == MCPMethod.PROMPTS_LIST.value:
+        return await server.handle_prompts_list()
+
+    if method == MCPMethod.PROMPTS_GET.value:
+        prompt_params = MCPGetPromptParams.model_validate(params)
+        return await server.handle_prompts_get(
+            name=prompt_params.name,
+            arguments=dict(prompt_params.arguments)
+            if prompt_params.arguments
+            else None,
+        )
+
+    raise MCPError(
+        code=MCPErrorCode.METHOD_NOT_FOUND.value,
+        message=f"Method not found: {method}",
+    )
+
+
 def create_mcp_router(server: ObscuraMCPServer) -> Any:
     """Create a FastAPI router for MCP endpoints.
 
@@ -1100,71 +1172,31 @@ def create_mcp_router(server: ObscuraMCPServer) -> Any:
     async def handle_rpc(request: Request) -> dict[str, Any]:
         """Handle MCP JSON-RPC requests."""
         body = await request.json()
-
-        method = body.get("method")
-        params = body.get("params", {})
-        req_id = body.get("id")
+        rpc_request = JSONRPCRequest.model_validate(body)
+        method = rpc_request.method
+        params: Mapping[str, Any] = rpc_request.params or {}
 
         try:
-            result: Any
-            if method == "initialize":
-                result = await server.handle_initialize(**params)
-            elif method == "tools/list":
-                result = await server.handle_tools_list()
-            elif method == "tools/call":
-                context = ObscuraMCPToolContext(user_id="api")
-                result_obj = await server.handle_tools_call(
-                    name=params["name"],
-                    arguments=params.get("arguments", {}),
-                    context=context,
-                )
-                result = {
-                    "content": result_obj.content,
-                    "isError": result_obj.isError,
-                }
-            elif method == "resources/list":
-                result = await server.handle_resources_list()
-            elif method == "resources/read":
-                result = await server.handle_resources_read(params["uri"])
-            elif method == "prompts/list":
-                result = await server.handle_prompts_list()
-            elif method == "prompts/get":
-                result = await server.handle_prompts_get(
-                    name=params["name"],
-                    arguments=params.get("arguments"),
-                )
-            else:
-                raise MCPError(
-                    code=MCPErrorCode.METHOD_NOT_FOUND.value,
-                    message=f"Method not found: {method}",
-                )
-
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": result,
-            }
+            result = await _dispatch_mcp_method(server, method, params)
+            response = JSONRPCResponse(id=rpc_request.id, result=result)
+            return response.model_dump(by_alias=True, exclude_none=True)
         except MCPError as e:
             logger.debug("suppressed exception in handle_rpc", exc_info=True)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": e.code,
-                    "message": e.message,
-                    "data": e.data,
-                },
-            }
+            response = JSONRPCResponse(
+                id=rpc_request.id,
+                error=JSONRPCError(code=e.code, message=e.message, data=e.data),
+            )
+            return response.model_dump(by_alias=True, exclude_none=True)
         except Exception as e:
             logger.exception("MCP RPC error")
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": MCPErrorCode.INTERNAL_ERROR.value,
-                    "message": str(e),
-                },
-            }
+            response = JSONRPCResponse(
+                id=rpc_request.id,
+                error=JSONRPCError(
+                    code=MCPErrorCode.INTERNAL_ERROR.value,
+                    message=str(e),
+                ),
+            )
+            return response.model_dump(by_alias=True, exclude_none=True)
 
     @router.get("/sse")
     async def handle_sse(request: Request):

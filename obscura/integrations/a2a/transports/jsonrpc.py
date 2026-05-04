@@ -11,10 +11,17 @@ Mirrors the pattern in ``sdk/mcp/server.py:1083-1149``.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Request
 
+from obscura.core.enums.protocol import A2ARole
+from obscura.core.models.protocol import (
+    JSONRPCError,
+    JSONRPCRequest,
+    JSONRPCResponse,
+)
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
@@ -48,39 +55,31 @@ def create_jsonrpc_router(service: A2AService) -> APIRouter:
     async def handle_rpc(request: Request) -> dict[str, Any]:
         """Handle A2A JSON-RPC 2.0 requests."""
         body = await request.json()
-
-        method = body.get("method", "")
-        params = body.get("params", {})
-        req_id = body.get("id")
+        rpc_request = JSONRPCRequest.model_validate(body)
+        method = rpc_request.method
+        params: Mapping[str, Any] = rpc_request.params or {}
 
         try:
             result = await _dispatch(service, method, params)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "result": result,
-            }
+            response = JSONRPCResponse(id=rpc_request.id, result=result)
+            return response.model_dump(by_alias=True, exclude_none=True)
         except A2AError as e:
             logger.debug("suppressed exception in handle_rpc", exc_info=True)
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": e.code,
-                    "message": e.message,
-                    "data": e.data,
-                },
-            }
+            response = JSONRPCResponse(
+                id=rpc_request.id,
+                error=JSONRPCError(code=e.code, message=e.message, data=e.data),
+            )
+            return response.model_dump(by_alias=True, exclude_none=True)
         except Exception as e:
             logger.exception("A2A JSON-RPC error")
-            return {
-                "jsonrpc": "2.0",
-                "id": req_id,
-                "error": {
-                    "code": -32603,
-                    "message": f"Internal error: {e}",
-                },
-            }
+            response = JSONRPCResponse(
+                id=rpc_request.id,
+                error=JSONRPCError(
+                    code=-32603,
+                    message=f"Internal error: {e}",
+                ),
+            )
+            return response.model_dump(by_alias=True, exclude_none=True)
 
     return router
 
@@ -88,32 +87,44 @@ def create_jsonrpc_router(service: A2AService) -> APIRouter:
 async def _dispatch(
     service: A2AService,
     method: str,
-    params: dict[str, Any],
+    params: Mapping[str, Any],
 ) -> Any:
     """Dispatch a JSON-RPC method to the service layer."""
     if method == A2AMethod.MESSAGE_SEND.value:
-        message = _parse_message(params.get("message", {}))
+        raw_message: Any = params.get("message")
+        if raw_message is not None and not isinstance(raw_message, Mapping):
+            raise A2AError(-32602, "params.message must be an object")
+        message_payload: Mapping[str, Any] = (
+            cast("Mapping[str, Any]", raw_message) if raw_message else {}
+        )
+        message = _parse_message(message_payload)
+        raw_config: Any = params.get("configuration")
+        blocking: bool = True
+        if isinstance(raw_config, Mapping):
+            blocking = bool(cast("Mapping[str, Any]", raw_config).get("blocking", True))
         task = await service.message_send(
             message,
-            context_id=params.get("contextId"),
-            task_id=params.get("taskId"),
-            blocking=params.get("configuration", {}).get("blocking", True),
+            context_id=_optional_str(params, "contextId"),
+            task_id=_optional_str(params, "taskId"),
+            blocking=blocking,
         )
         return task.model_dump(mode="json")
 
     if method == A2AMethod.TASKS_GET.value:
-        task_id = params.get("taskId", "")
+        task_id = _optional_str(params, "taskId") or ""
         task = await service.tasks_get(task_id)
         if task is None:
             raise TaskNotFoundError(task_id)
         return task.model_dump(mode="json")
 
     if method == A2AMethod.TASKS_LIST.value:
+        state_value: Any = params.get("state")
+        limit_raw: Any = params.get("limit", 20) or 20
         tasks, cursor = await service.tasks_list(
-            context_id=params.get("contextId"),
-            state=TaskState(params["state"]) if "state" in params else None,
-            cursor=params.get("cursor"),
-            limit=params.get("limit", 20),
+            context_id=_optional_str(params, "contextId"),
+            state=TaskState(state_value) if isinstance(state_value, str) else None,
+            cursor=_optional_str(params, "cursor"),
+            limit=int(limit_raw),
         )
         result: dict[str, Any] = {
             "tasks": [t.model_dump(mode="json") for t in tasks],
@@ -123,7 +134,7 @@ async def _dispatch(
         return result
 
     if method == A2AMethod.TASKS_CANCEL.value:
-        task_id = params.get("taskId", "")
+        task_id = _optional_str(params, "taskId") or ""
         task = await service.tasks_cancel(task_id)
         return task.model_dump(mode="json")
 
@@ -147,12 +158,19 @@ async def _dispatch(
     raise A2AError(-32601, f"Method not found: {method}")
 
 
-def _parse_message(data: dict[str, Any]) -> A2AMessage:
+def _parse_message(data: Mapping[str, Any]) -> A2AMessage:
     """Parse a message from JSON-RPC params."""
     if not data:
         return A2AMessage(
-            role="user",
+            role=A2ARole.USER,
             messageId="auto",
             parts=[TextPart(text="[empty]")],
         )
     return A2AMessage.model_validate(data)
+
+
+def _optional_str(params: Mapping[str, Any], key: str) -> str | None:
+    value = params.get(key)
+    if value is None:
+        return None
+    return str(value)
