@@ -24,6 +24,7 @@ from obscura.core.enums.protocol import MCPTransport
 from obscura.core.enums.tools import BashRisk
 from obscura.core.models._base import BoundaryModel, ObscuraModel
 from obscura.core.models._mixins import MetadataMixin
+from obscura.core.models.content import ContentBlock
 
 
 class AgentConfig(ObscuraModel, MetadataMixin):
@@ -92,9 +93,8 @@ class HookContext(ObscuraModel):
     Key set is derived from the JSON envelope assembled in
     ``core/hooks.py`` (``_make_command_before_hook`` /
     ``_make_command_after_hook``) plus the additional metadata callers
-    inspect on ``AgentEvent`` itself.  ``block`` is typed as ``Any`` to
-    avoid a forward reference to the ``ContentBlock`` union owned by
-    Team Core Types.
+    inspect on ``AgentEvent`` itself. ``tool_input`` stays ``Mapping[str,
+    Any]`` because it forwards heterogeneous JSON tool arguments.
     """
 
     event: str
@@ -104,7 +104,7 @@ class HookContext(ObscuraModel):
     tool_name: str | None = None
     tool_input: Mapping[str, Any] | None = None
     tool_result: str | None = None
-    block: Any = None
+    block: ContentBlock | None = None
 
 
 class BashClassification(ObscuraModel):
