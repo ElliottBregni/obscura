@@ -661,3 +661,128 @@ class TestMaxTurns:
         assert len(done) == 1
         assert "max_turns" in done[0].text
         assert backend.calls == 3
+
+
+class TestMissingToolUseIdFallback:
+    """Some backend bridges (Copilot SDK, older Claude streaming paths) only
+    put tool_use_id on the START event. The loop must still recover the
+    name + input via the in-flight fallback rather than producing a
+    ToolCallInfo with empty fields."""
+
+    @pytest.mark.asyncio
+    async def test_delta_and_end_without_tool_use_id_attribute_to_in_flight(
+        self,
+    ) -> None:
+        invoked: list[dict[str, Any]] = []
+
+        def search(**kwargs: Any) -> str:
+            invoked.append(kwargs)
+            return "results"
+
+        class _NoIdOnDeltaBackend:
+            name = "no-id-bridge"
+            capabilities = BackendCapabilities(
+                supports_streaming=True, supports_tool_calls=True
+            )
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def start(self) -> None: ...
+
+            async def close(self) -> None: ...
+
+            async def stream(
+                self,
+                messages: list[Message] | None = None,
+                **_kwargs: Any,
+            ) -> AsyncIterator[StreamChunk]:
+                if self.calls == 0:
+                    self.calls += 1
+                    # START carries id+name (the only place Copilot puts them).
+                    yield StreamChunk(
+                        kind=ChunkKind.TOOL_USE_START,
+                        tool_use_id="tu_abc",
+                        tool_name="search",
+                    )
+                    # DELTA omits both id and name — the bridge couldn't
+                    # backfill from the start event.
+                    yield StreamChunk(
+                        kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_input_delta=json.dumps({"q": "trump"}),
+                    )
+                    # END also omits id and name.
+                    yield StreamChunk(kind=ChunkKind.TOOL_USE_END)
+                else:
+                    self.calls += 1
+                    yield StreamChunk(kind=ChunkKind.TEXT_DELTA, text="done")
+
+        backend = _NoIdOnDeltaBackend()
+        loop = AgentLoopV2(
+            backend,  # pyright: ignore[reportArgumentType]
+            _make_registry({"search": search}),
+        )
+        events = [e async for e in loop.run("search for x")]
+        # Tool got dispatched with the name+input recovered from the
+        # in-flight entry — not "tool not found:".
+        assert invoked == [{"q": "trump"}]
+        # TOOL_CALL event carries the recovered name (renderer uses this).
+        tool_calls = [
+            e for e in events if e.kind == AgentEventKind.TOOL_CALL
+        ]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "search"
+
+    @pytest.mark.asyncio
+    async def test_end_with_empty_tool_name_drops_call_with_warning(
+        self,
+    ) -> None:
+        """When the END can't recover any name (no in-flight entry, no
+        chunk.tool_name), the malformed call is dropped — a tool_use with
+        empty name would only produce 'tool not found:' garbage and burn
+        a turn. Better to skip and let the model recover."""
+        invoked: list[Any] = []
+
+        def t(**_: Any) -> str:
+            invoked.append("no")
+            return "x"
+
+        class _Broken:
+            name = "broken"
+            capabilities = BackendCapabilities(
+                supports_streaming=True, supports_tool_calls=True
+            )
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def start(self) -> None: ...
+
+            async def close(self) -> None: ...
+
+            async def stream(
+                self,
+                messages: list[Message] | None = None,
+                **_kwargs: Any,
+            ) -> AsyncIterator[StreamChunk]:
+                if self.calls == 0:
+                    self.calls += 1
+                    # END with no START at all and no name — completely broken.
+                    yield StreamChunk(kind=ChunkKind.TOOL_USE_END)
+                else:
+                    self.calls += 1
+                    yield StreamChunk(kind=ChunkKind.TEXT_DELTA, text="recover")
+
+        backend = _Broken()
+        loop = AgentLoopV2(
+            backend,  # pyright: ignore[reportArgumentType]
+            _make_registry({"t": t}),
+        )
+        events = [e async for e in loop.run("recover")]
+        # Tool was not invoked, no broken TOOL_CALL surfaced.
+        assert invoked == []
+        tool_calls = [e for e in events if e.kind == AgentEventKind.TOOL_CALL]
+        assert tool_calls == []
+        # Loop reached AGENT_DONE cleanly.
+        done = [e for e in events if e.kind == AgentEventKind.AGENT_DONE]
+        assert len(done) == 1

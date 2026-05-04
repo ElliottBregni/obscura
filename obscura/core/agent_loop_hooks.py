@@ -42,6 +42,7 @@ __all__ = [
 def compact_pre_turn(
     *,
     model_id: str,
+    backend: Any,
     system_prompt: str = "",
     max_history_share: float = 0.5,
     reserve_tokens: int = 4096,
@@ -53,6 +54,11 @@ def compact_pre_turn(
     in-place. By default, compaction only runs when the message history
     is over the threshold; set ``only_when_over_threshold=False`` to
     always run (mostly useful for debugging).
+
+    *backend* is required — Phase 2 of compaction calls
+    ``summarize_messages`` and ``extract_memories`` against the backend
+    to LLM-summarize older chunks. Pass the same backend the loop is
+    streaming from.
     """
 
     async def hook(ctx: TurnContext) -> None:
@@ -62,6 +68,7 @@ def compact_pre_turn(
         compacted, was_compacted, _ = await compact_history(
             ctx.messages,
             model_id=model_id,
+            backend=backend,
             system_prompt=system_prompt,
             max_history_share=max_history_share,
             reserve_tokens=reserve_tokens,

@@ -307,7 +307,10 @@ def _build_v2(
     # threshold logic; v2 just calls compact_history each turn (which itself
     # gates on the threshold internally).
     if v1_kwargs.get("context_budget") and v1_kwargs.get("model_name"):
-        pre_turn = compact_pre_turn(model_id=v1_kwargs["model_name"])
+        pre_turn = compact_pre_turn(
+            model_id=v1_kwargs["model_name"],
+            backend=backend,
+        )
 
     # event_store + arbiter both go in post_turn. If both are present,
     # compose them.

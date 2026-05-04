@@ -145,9 +145,7 @@ class TaskRunner:
                             else str(event_kind)
                         )
                         if "text" in kind_name.lower() or "delta" in kind_name.lower():
-                            text = getattr(event, "text", "") or getattr(
-                                event, "delta", ""
-                            )
+                            text = getattr(event, "text", "")
                             if text:
                                 output_chunks.append(text)
                         if (

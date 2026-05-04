@@ -42,6 +42,13 @@ class EventToIteratorBridge:
 
     def __init__(self) -> None:
         self._queue: asyncio.Queue[StreamChunk | None] = asyncio.Queue()
+        # Track the most recent tool_use_id so DELTA/END chunks can carry
+        # the same id the START emitted. Copilot's tool events may put the
+        # id only on the start event; without this, agent_loop_v2 keys
+        # partial_inputs on an empty string and drops the input. Also
+        # used to backfill an end-event tool_name when the SDK omits it.
+        self._active_tool_id: str = ""
+        self._active_tool_name: str = ""
 
     # -- Push methods (called from Copilot event handlers) ------------------
 
@@ -113,13 +120,38 @@ class EventToIteratorBridge:
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
         name = ""
+        tool_id = ""
         data = getattr(event, "data", None)
         if data is not None:
             name = getattr(data, "tool_name", "") or getattr(data, "name", "") or ""
+            # Copilot may surface the call id under a few different names;
+            # try each in turn. Falls back to empty (agent_loop_v2 will
+            # treat the call as un-cached, which is correct for siblings
+            # that have no SDK identity).
+            tool_id = (
+                getattr(data, "tool_call_id", "")
+                or getattr(data, "tool_use_id", "")
+                or getattr(data, "call_id", "")
+                or getattr(data, "id", "")
+                or ""
+            )
+            if not tool_id and isinstance(data, dict):
+                data_dict = cast(dict[str, Any], data)
+                for key in ("tool_call_id", "tool_use_id", "call_id", "id"):
+                    val = data_dict.get(key)
+                    if val:
+                        tool_id = str(val)
+                        break
+        # Cache the active id/name so DELTA chunks emitted below and any
+        # following on_tool_end can attribute back to the same call even
+        # if Copilot only emits the id on the start event.
+        self._active_tool_id = tool_id
+        self._active_tool_name = name
         self.push(
             StreamChunk(
                 kind=ChunkKind.TOOL_USE_START,
                 tool_name=name,
+                tool_use_id=tool_id,
                 raw=event,
                 native_event=event,
             ),
@@ -157,6 +189,8 @@ class EventToIteratorBridge:
                 self.push(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_use_id=tool_id,
+                        tool_name=name,
                         tool_input_delta=delta,
                         raw=event,
                         native_event=event,
@@ -166,6 +200,7 @@ class EventToIteratorBridge:
     def on_tool_end(self, event: Any) -> None:
         """Map tool execution end."""
         name = ""
+        tool_id = ""
         if (
             hasattr(event, "data")
             and hasattr(event.data, "tool_name")
@@ -174,10 +209,37 @@ class EventToIteratorBridge:
             name = event.data.tool_name
         elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
             name = event.data.name
+        data = getattr(event, "data", None)
+        if data is not None:
+            tool_id = (
+                getattr(data, "tool_call_id", "")
+                or getattr(data, "tool_use_id", "")
+                or getattr(data, "call_id", "")
+                or getattr(data, "id", "")
+                or ""
+            )
+            if not tool_id and isinstance(data, dict):
+                data_dict = cast(dict[str, Any], data)
+                for key in ("tool_call_id", "tool_use_id", "call_id", "id"):
+                    val = data_dict.get(key)
+                    if val:
+                        tool_id = str(val)
+                        break
+        # Backfill from the active call when the END event omits id/name —
+        # copilot tool events are emitted in start/end pairs, so the most
+        # recent active call is the right attribution.
+        if not tool_id:
+            tool_id = self._active_tool_id
+        if not name:
+            name = self._active_tool_name
+        # Reset active state — any future call gets its own id/name pair.
+        self._active_tool_id = ""
+        self._active_tool_name = ""
         self.push(
             StreamChunk(
                 kind=ChunkKind.TOOL_USE_END,
                 tool_name=name,
+                tool_use_id=tool_id,
                 raw=event,
                 native_event=event,
             ),
@@ -250,6 +312,15 @@ class ClaudeIteratorAdapter:
     def __init__(self, source: AsyncIterator[Any]) -> None:
         self._source = source
         self._buffer: list[StreamChunk] = []
+        # Claude's streaming protocol uses content_block.index to correlate
+        # start/delta/stop events for the same block, but the SDK puts the
+        # actual tool_use id only on content_block_start. We track the
+        # index -> (id, name) map here so DELTA and END chunks can carry
+        # the same tool_use_id the START emitted — without that, the agent
+        # loop's partial_names / partial_inputs dicts (keyed on tool_use_id)
+        # silently drop the streamed input and the final ToolCallInfo gets
+        # constructed with empty name + input.
+        self._index_to_tool: dict[int, tuple[str, str]] = {}
 
     def __aiter__(self) -> AsyncIterator[StreamChunk]:
         return self
@@ -394,6 +465,7 @@ class ClaudeIteratorAdapter:
         if ev_type == "content_block_delta":
             delta = ev.get("delta", {})
             delta_type = delta.get("type", "")
+            block_index = ev.get("index")
             if delta_type == "text_delta":
                 return [
                     StreamChunk(
@@ -413,9 +485,12 @@ class ClaudeIteratorAdapter:
                     ),
                 ]
             if delta_type == "input_json_delta":
+                tool_id, tool_name = self._index_to_tool.get(block_index, ("", ""))
                 return [
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_DELTA,
+                        tool_use_id=tool_id,
+                        tool_name=tool_name,
                         tool_input_delta=delta.get("partial_json", ""),
                         raw=event,
                         native_event=event,
@@ -425,20 +500,35 @@ class ClaudeIteratorAdapter:
         if ev_type == "content_block_start":
             block = ev.get("content_block", {})
             if block.get("type") == "tool_use":
+                tool_id = block.get("id", "")
+                tool_name = block.get("name", "")
+                idx = ev.get("index")
+                if idx is not None:
+                    self._index_to_tool[idx] = (tool_id, tool_name)
                 return [
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_START,
-                        tool_name=block.get("name", ""),
-                        tool_use_id=block.get("id", ""),
+                        tool_name=tool_name,
+                        tool_use_id=tool_id,
                         raw=event,
                         native_event=event,
                     ),
                 ]
 
         if ev_type == "content_block_stop":
+            block_index = ev.get("index")
+            tool_id, tool_name = self._index_to_tool.pop(block_index, ("", ""))
+            # Only emit TOOL_USE_END for blocks we tracked as tool_use —
+            # text/thinking blocks also produce content_block_stop events
+            # and the agent loop's TOOL_USE_END handler would attribute an
+            # empty ToolCallInfo for them otherwise.
+            if not tool_id and not tool_name:
+                return []
             return [
                 StreamChunk(
                     kind=ChunkKind.TOOL_USE_END,
+                    tool_use_id=tool_id,
+                    tool_name=tool_name,
                     raw=event,
                     native_event=event,
                 ),
@@ -484,21 +574,27 @@ class ClaudeIteratorAdapter:
                 )
             elif block_type == "ToolUseBlock":
                 tool_id = getattr(block, "id", "")
+                tool_name = getattr(block, "name", "")
                 chunks.append(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_START,
-                        tool_name=getattr(block, "name", ""),
+                        tool_name=tool_name,
                         tool_use_id=tool_id,
                         raw=block,
                         native_event=block,
                     ),
                 )
-                # Emit tool input as a single delta (mirrors streaming path)
+                # Emit tool input as a single delta (mirrors streaming path).
+                # Carry tool_use_id + tool_name so the loop's partial_inputs
+                # dict (keyed on tool_use_id) can attribute the delta back to
+                # the right START.
                 block_input = getattr(block, "input", None)
                 if block_input is not None:
                     chunks.append(
                         StreamChunk(
                             kind=ChunkKind.TOOL_USE_DELTA,
+                            tool_use_id=tool_id,
+                            tool_name=tool_name,
                             tool_input_delta=json.dumps(block_input),
                             raw=block,
                             native_event=block,
@@ -507,6 +603,8 @@ class ClaudeIteratorAdapter:
                 chunks.append(
                     StreamChunk(
                         kind=ChunkKind.TOOL_USE_END,
+                        tool_use_id=tool_id,
+                        tool_name=tool_name,
                         raw=block,
                         native_event=block,
                     ),

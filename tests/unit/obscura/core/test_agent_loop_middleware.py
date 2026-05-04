@@ -468,8 +468,12 @@ class TestHookMiddleware:
             return "ok"
 
         class _Hooks:
-            def run(self, name: str, *_args: Any) -> None:
-                order.append(f"hook:{name}")
+            async def run_before(self, _event: Any) -> Any:
+                order.append("hook:before")
+                return _event
+
+            async def run_after(self, _event: Any) -> None:
+                order.append("hook:after")
 
         backend = _StubBackend(
             [
@@ -483,7 +487,7 @@ class TestHookMiddleware:
             dispatch_middleware=[hook_middleware(_Hooks())],
         )
         _ = [e async for e in loop.run("test")]
-        assert order == ["hook:pre_tool_use", "dispatch", "hook:post_tool_use"]
+        assert order == ["hook:before", "dispatch", "hook:after"]
 
     @pytest.mark.asyncio
     async def test_hook_exception_is_swallowed(self) -> None:
@@ -494,7 +498,10 @@ class TestHookMiddleware:
             return "ok"
 
         class _BadHooks:
-            def run(self, _name: str, *_args: Any) -> None:
+            async def run_before(self, _event: Any) -> Any:
+                raise RuntimeError("boom")
+
+            async def run_after(self, _event: Any) -> None:
                 raise RuntimeError("boom")
 
         backend = _StubBackend(
@@ -613,8 +620,12 @@ class TestMiddlewareComposition:
             return "ok"
 
         class _Hooks:
-            def run(self, name: str, *_args: Any) -> None:
-                order.append(f"hook:{name}")
+            async def run_before(self, _event: Any) -> Any:
+                order.append("hook:before")
+                return _event
+
+            async def run_after(self, _event: Any) -> None:
+                order.append("hook:after")
 
         backend = _StubBackend(
             [
@@ -632,4 +643,4 @@ class TestMiddlewareComposition:
             ],
         )
         _ = [e async for e in loop.run("test")]
-        assert order == ["hook:pre_tool_use", "dispatch", "hook:post_tool_use"]
+        assert order == ["hook:before", "dispatch", "hook:after"]
