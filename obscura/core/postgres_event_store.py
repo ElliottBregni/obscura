@@ -49,6 +49,7 @@ def _coerce_metadata(value: object) -> dict[str, Any]:
         try:
             decoded: object = json.loads(value)
         except json.JSONDecodeError:
+            logger.debug("suppressed exception in _coerce_metadata", exc_info=True)
             return {}
         return cast(dict[str, Any], decoded) if isinstance(decoded, dict) else {}
     return {}
@@ -62,6 +63,7 @@ def _coerce_payload(value: object) -> dict[str, Any]:
         try:
             decoded: object = json.loads(value)
         except json.JSONDecodeError:
+            logger.debug("suppressed exception in _coerce_payload", exc_info=True)
             return {}
         return cast(dict[str, Any], decoded) if isinstance(decoded, dict) else {}
     return {}

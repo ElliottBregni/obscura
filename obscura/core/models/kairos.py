@@ -17,12 +17,15 @@ at the call site.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any, cast
 
 from pydantic import Field
 
 from obscura.core.models._base import BoundaryModel
+
+logger = logging.getLogger(__name__)
 
 
 class PlanResponseTask(BoundaryModel):
@@ -76,6 +79,7 @@ class PlanResponse(BoundaryModel):
             try:
                 tasks.append(PlanResponseTask.model_validate(entry))
             except Exception:  # noqa: BLE001 - planner output is untrusted
+                logger.debug("suppressed exception in PlanResponse.from_mapping", exc_info=True)
                 continue
 
         known = {"rationale", "tasks"}
