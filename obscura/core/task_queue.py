@@ -50,6 +50,8 @@ from pathlib import Path
 from typing import Any
 import logging
 
+from obscura.core.enums.lifecycle import TaskQueueStatus as TaskQueueStatus
+
 logger = logging.getLogger(__name__)
 
 

@@ -20,6 +20,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core.enums.lifecycle import WorktreeStatus as WorktreeStatus
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
@@ -57,10 +59,12 @@ class WorktreeEntry:
     pid: int
     created_at: float
     agent_name: str = ""
-    status: str = "active"  # "active" | "orphan" | "kept"
+    status: WorktreeStatus = WorktreeStatus.ACTIVE
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["status"] = self.status.value
+        return payload
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> WorktreeEntry:
@@ -75,7 +79,7 @@ class WorktreeEntry:
             pid=int(raw.get("pid", 0)),
             created_at=float(raw.get("created_at", 0.0)),
             agent_name=str(raw.get("agent_name", "")),
-            status=str(raw.get("status", "active")),
+            status=WorktreeStatus(str(raw.get("status", "active"))),
         )
 
 
@@ -197,8 +201,8 @@ def sweep_dead_pids() -> list[WorktreeEntry]:
         manifest = _load_locked()
         changed = False
         for entry in manifest.entries:
-            if entry.status == "active" and not _pid_alive(entry.pid):
-                entry.status = "orphan"
+            if entry.status == WorktreeStatus.ACTIVE and not _pid_alive(entry.pid):
+                entry.status = WorktreeStatus.ORPHAN
                 orphans.append(entry)
                 changed = True
         if changed:
@@ -213,7 +217,10 @@ def prune_missing_paths() -> list[str]:
         manifest = _load_locked()
         kept: list[WorktreeEntry] = []
         for entry in manifest.entries:
-            if entry.status == "kept" or Path(entry.worktree_path).exists():
+            if (
+                entry.status == WorktreeStatus.KEPT
+                or Path(entry.worktree_path).exists()
+            ):
                 kept.append(entry)
             else:
                 dropped.append(entry.slug)
@@ -258,6 +265,7 @@ def cleanup_orphan_dirs() -> int:
 
 __all__ = [
     "WorktreeEntry",
+    "WorktreeStatus",
     "add",
     "cleanup_orphan_dirs",
     "get",

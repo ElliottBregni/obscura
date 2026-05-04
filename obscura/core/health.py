@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import Any
 import logging
 
+from obscura.core.enums.lifecycle import HealthStatus as HealthStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ class HealthCheck:
     """A single startup health check result."""
 
     name: str
-    status: str  # "ok" | "degraded" | "unavailable"
+    status: HealthStatus
     message: str
 
 
@@ -44,7 +46,7 @@ def _check_vector_memory(vector_store: Any | None) -> HealthCheck | None:
             return None  # Intentionally disabled, not a health issue
         return HealthCheck(
             name="vector_memory",
-            status="unavailable",
+            status=HealthStatus.UNAVAILABLE,
             message="Vector memory failed to initialize",
         )
 
@@ -56,7 +58,7 @@ def _check_vector_memory(vector_store: Any | None) -> HealthCheck | None:
     if requested == "qdrant" and "SQLite" in backend_class:
         return HealthCheck(
             name="vector_memory",
-            status="degraded",
+            status=HealthStatus.DEGRADED,
             message="Qdrant unavailable, using SQLite fallback",
         )
     return None  # Healthy — no need to report
@@ -97,7 +99,11 @@ def _check_skipped_tools(
         if reason:
             msg += f" (missing: {reason})"
         checks.append(
-            HealthCheck(name=f"tools:{provider}", status="degraded", message=msg),
+            HealthCheck(
+                name=f"tools:{provider}",
+                status=HealthStatus.DEGRADED,
+                message=msg,
+            ),
         )
     return checks
 
@@ -147,5 +153,6 @@ def collect_startup_health(
 
 __all__ = [
     "HealthCheck",
+    "HealthStatus",
     "collect_startup_health",
 ]

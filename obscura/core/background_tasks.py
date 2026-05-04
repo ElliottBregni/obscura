@@ -19,15 +19,15 @@ import contextlib
 import hashlib
 import time
 from dataclasses import dataclass, field
-from typing import Literal
 
 from obscura.auth.secrets import safe_subprocess_env
+from obscura.core.enums.lifecycle import BackgroundTaskStatus as BackgroundTaskStatus
 import logging
 
 logger = logging.getLogger(__name__)
 
-
-_TaskStatus = Literal["running", "completed", "failed", "stopped"]
+# Backward-compat alias for the previous Literal-based name.
+_TaskStatus = BackgroundTaskStatus
 
 
 @dataclass
@@ -37,7 +37,7 @@ class BackgroundTask:
     task_id: str
     command: str
     cwd: str
-    status: _TaskStatus = "running"
+    status: BackgroundTaskStatus = BackgroundTaskStatus.RUNNING
     stdout: str = ""
     stderr: str = ""
     exit_code: int | None = None
@@ -111,19 +111,23 @@ class BackgroundTaskManager:
                 stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
             )
             task.exit_code = proc.returncode
-            task.status = "completed" if proc.returncode == 0 else "failed"
+            task.status = (
+                BackgroundTaskStatus.COMPLETED
+                if proc.returncode == 0
+                else BackgroundTaskStatus.FAILED
+            )
         except TimeoutError:
             logger.debug("suppressed exception in _watch", exc_info=True)
             proc.kill()
             await proc.wait()
-            task.status = "failed"
+            task.status = BackgroundTaskStatus.FAILED
             task.stderr = f"Timed out after {timeout}s"
             task.exit_code = -1
         except asyncio.CancelledError:
             logger.debug("suppressed exception in _watch", exc_info=True)
             proc.kill()
             await proc.wait()
-            task.status = "stopped"
+            task.status = BackgroundTaskStatus.STOPPED
             task.exit_code = -1
         finally:
             task.completed_at = time.time()
@@ -146,7 +150,7 @@ class BackgroundTaskManager:
                 await watcher
         task = self._tasks.get(task_id)
         if task is not None:
-            task.status = "stopped"
+            task.status = BackgroundTaskStatus.STOPPED
             task.completed_at = time.time()
         return True
 
