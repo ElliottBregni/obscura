@@ -114,9 +114,13 @@ class ObscuraConfig(BaseModel):
 
     # Supabase OAuth (primary identity provider for human users).
     # Service/machine callers continue to use X-API-Key as a local bypass.
-    supabase_url: str = ""  # e.g. https://xxxx.supabase.co
-    supabase_jwt_secret: str = ""  # HS256 shared secret from Supabase project
-    supabase_jwks_url: str = ""  # RS256 JWKS URL; takes precedence over the secret
+    # Defaults point at the Obscura project (cnwxxlruuuqisjezsgje); override
+    # via env (``SUPABASE_URL`` / ``SUPABASE_JWKS_URL``) for forks.
+    supabase_url: str = "https://cnwxxlruuuqisjezsgje.supabase.co"
+    supabase_jwt_secret: str = ""  # HS256 secret — unused (project is on ES256)
+    supabase_jwks_url: str = (
+        "https://cnwxxlruuuqisjezsgje.supabase.co/auth/v1/.well-known/jwks.json"
+    )
     supabase_audience: str = "authenticated"  # default Supabase audience claim
     supabase_issuer: str = ""  # auto-derived from supabase_url when blank
 
@@ -246,10 +250,19 @@ class ObscuraConfig(BaseModel):
             host=_str("OBSCURA_HOST", "host", "0.0.0.0"),
             port=_int("OBSCURA_PORT", "port", 8080),
             # Supabase OAuth -- env wins, then OS keyring, then default.
-            supabase_url=_secrets.resolve("SUPABASE_URL", default="") or "",
+            # Default points at the Obscura project (cnwxxlruuuqisjezsgje).
+            supabase_url=_secrets.resolve(
+                "SUPABASE_URL",
+                default="https://cnwxxlruuuqisjezsgje.supabase.co",
+            )
+            or "https://cnwxxlruuuqisjezsgje.supabase.co",
             supabase_jwt_secret=_secrets.resolve("SUPABASE_JWT_SECRET", default="")
             or "",
-            supabase_jwks_url=_secrets.resolve("SUPABASE_JWKS_URL", default="") or "",
+            supabase_jwks_url=_secrets.resolve(
+                "SUPABASE_JWKS_URL",
+                default="https://cnwxxlruuuqisjezsgje.supabase.co/auth/v1/.well-known/jwks.json",
+            )
+            or "https://cnwxxlruuuqisjezsgje.supabase.co/auth/v1/.well-known/jwks.json",
             supabase_audience=_secrets.resolve(
                 "SUPABASE_AUDIENCE",
                 default="authenticated",
