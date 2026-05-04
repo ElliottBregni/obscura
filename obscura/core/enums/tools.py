@@ -36,6 +36,15 @@ class SideEffects(StrEnum):
     NONE = "none"
     READ = "read"
     WRITE = "write"
+    # ``MUTATING`` covers state-changing operations that don't fit
+    # READ / WRITE — e.g. browser clicks, form submissions, navigation,
+    # iMessage sends. Conservative: never speculated, always prompts
+    # for confirmation. Used by browser tools and other UI-driving
+    # integrations.
+    MUTATING = "mutating"
+    # Catch-all for tools whose effect set isn't yet classified. Treated
+    # as MUTATING for safety (no speculation, prompts on confirmation).
+    UNKNOWN = "unknown"
 
 
 class ToolChoiceMode(StrEnum):

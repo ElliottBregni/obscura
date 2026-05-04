@@ -1,15 +1,15 @@
-"""ChannelRouter — routes inbound platform messages directly into Obscura's AgentLoop.
+"""ChannelRouter — routes inbound platform messages directly into Obscura's agent loop.
 
 No external bridge required. Messages from Telegram, WhatsApp, Signal, etc.
 are normalized to PlatformMessage, mapped to a per-user ConversationState,
-and dispatched directly into the AgentLoop. Responses are sent back via
-the originating platform adapter.
+and dispatched directly into the agent loop (v2). Responses are sent back
+via the originating platform adapter.
 
 Usage::
 
     from obscura.integrations.messaging.router import ChannelRouter, ChannelRouterConfig
     from obscura.integrations.messaging.store import ConversationStore
-    from obscura.core.agent_loop import AgentLoop
+    from obscura.core.agent_loop_factory import make_agent_loop
 
     config = ChannelRouterConfig(
         system_prompt="You are a helpful assistant.",

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.hooks import HookRegistry
 from obscura.core.types import AgentEventKind, ContentBlock, Message, Role
 
@@ -74,7 +74,7 @@ class ObscuraAgentRunner:
             )
 
         hooks = HookRegistry()
-        loop = AgentLoop(
+        loop = make_agent_loop(
             backend=self._backend,
             tool_registry=self._tool_registry,
             hooks=hooks,

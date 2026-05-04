@@ -297,10 +297,22 @@ class AgentLoopV2:
         *,
         session_id: str = "",
         history: list[Message] | None = None,
+        initial_messages: list[Message] | None = None,
+        **_kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
-        """Drive the agent until the model emits no tool calls or ``max_turns``."""
+        """Drive the agent until the model emits no tool calls or ``max_turns``.
+
+        ``initial_messages`` is a v1-compat alias for ``history``. ``**_kwargs``
+        absorbs other v1-shape parameters (e.g. ``max_turns`` overrides) that
+        the v1 ``run()`` accepted; they're silently ignored under v2 because
+        v2 reads them from the ``AgentLoopV2Config`` set at construction.
+        Caller migration to the v2 signature can happen incrementally.
+        """
         session_id = session_id or str(uuid.uuid4())
-        messages: list[Message] = list(history or [])
+        # initial_messages takes precedence over history when both are passed
+        # (matches v1's behavior). Either supplies the prefix conversation.
+        history_arg = initial_messages if initial_messages is not None else history
+        messages: list[Message] = list(history_arg or [])
         # Prepend the system prompt only when no history was provided —
         # if the caller already passed a history, assume it includes any
         # system message they wanted.
@@ -379,7 +391,27 @@ class AgentLoopV2:
             ] = {}  # tool_use_id -> JSON delta chunks
             partial_names: dict[str, str] = {}
 
-            async for chunk in self._backend.stream(messages=messages):
+            # Extract the latest user-message text as the positional ``prompt``
+            # arg for backends whose ``stream()`` signature is
+            # ``stream(prompt, **kwargs)``. Pass full ``messages`` as a kwarg
+            # so backends that consult history get it. v1 parity.
+            latest_user_text = ""
+            for msg in reversed(messages):
+                if msg.role == Role.USER:
+                    for block in msg.content:
+                        if block.kind == "text" and block.text:
+                            latest_user_text = block.text
+                            break
+                    if latest_user_text:
+                        break
+            # Pass prompt by NAME rather than positionally so test stubs
+            # whose stream() signature is ``stream(messages, **kwargs)``
+            # absorb ``prompt`` via **kwargs without a positional clash.
+            # Real backends declare ``stream(prompt, **kwargs)`` and pick
+            # it up by name correctly.
+            async for chunk in self._backend.stream(
+                prompt=latest_user_text, messages=messages
+            ):
                 if self._cancel_event.is_set():
                     break
 
@@ -955,6 +987,21 @@ class _TurnDAGContext:
 
 
 def _envelope_to_text(env: _ToolEnvelopeV2) -> str:
-    """Concatenate text blocks for backwards-compatible event payloads."""
-    parts = [b.text for b in env.content if b.kind == "text" and b.text]
+    """Concatenate text-bearing blocks for backwards-compatible event payloads.
+
+    Reads ``b.text`` from any block that has a non-empty ``text`` attribute
+    (TextBlock, ThinkingBlock) AND the ``content`` field of ToolResultBlock
+    (which holds the displayable text for tool results). Skips blocks with
+    no string body.
+    """
+    parts: list[str] = []
+    for b in env.content:
+        text = getattr(b, "text", "")
+        if not text:
+            # ToolResultBlock has ``content``, not ``text`` — fall back.
+            content = getattr(b, "content", "")
+            if isinstance(content, str):
+                text = content
+        if text:
+            parts.append(text)
     return "\n".join(parts)

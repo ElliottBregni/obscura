@@ -319,11 +319,21 @@ class ToolSpec:
 
     def __post_init__(self) -> None:
         # Coerce loose string ``side_effects`` from legacy callers (and
-        # plugin manifests) into the enum so downstream callsites never see
-        # a bare ``str`` here.
+        # plugin manifests) into the enum so downstream callsites never
+        # see a bare ``str`` here. Unknown values (e.g. fine-grained
+        # legacy strings like "writes:fs", "network:read") fall back to
+        # SideEffects.MUTATING — conservative default that prevents
+        # speculation and forces confirmation.
         raw = cast(Any, self.side_effects)
         if not isinstance(raw, SideEffects):
-            object.__setattr__(self, "side_effects", SideEffects(raw))
+            try:
+                coerced = SideEffects(raw)
+            except ValueError:
+                # Unknown side_effects string — treat as state-changing
+                # (safest default; downstream can opt back in via the
+                # known enum values).
+                coerced = SideEffects.MUTATING
+            object.__setattr__(self, "side_effects", coerced)
 
     def is_concurrency_safe(self) -> bool:
         """Tools without side effects can run concurrently."""

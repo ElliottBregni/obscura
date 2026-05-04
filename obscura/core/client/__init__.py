@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 _logger = logging.getLogger(__name__)
 
 from obscura.auth.capability import CapabilityTier
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.circuit_breaker import CircuitBreakerRegistry, CircuitOpenError
 from obscura.core.context import load_session_messages
@@ -507,7 +507,7 @@ class ObscuraClient:
         if not context_budget:
             context_budget = int(self.context_window * 0.50 * 4)
 
-        loop = AgentLoop(
+        loop = make_agent_loop(
             self._backend,
             self._tool_registry,
             max_turns=max_turns,
@@ -541,7 +541,7 @@ class ObscuraClient:
         **kwargs: Any,
     ) -> str:
         """Run the agent loop and return the final concatenated text."""
-        loop = AgentLoop(
+        loop = make_agent_loop(
             self._backend,
             self._tool_registry,
             max_turns=max_turns,

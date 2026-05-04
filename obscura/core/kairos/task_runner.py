@@ -1,4 +1,4 @@
-"""obscura.core.kairos.task_runner — Executes a single Task via AgentLoop.
+"""obscura.core.kairos.task_runner — Executes a single Task via the agent loop.
 
 Drives one model turn (or a short loop) to complete a task.
 Returns a TaskResult.
@@ -24,18 +24,18 @@ from obscura.core.kairos.types import (
 )
 
 if TYPE_CHECKING:
-    from obscura.core.agent_loop import AgentLoop
+    from obscura.core.agent_loop_v2 import AgentLoopV2
     from obscura.core.kairos.goal_store import GoalStore
 
 logger = logging.getLogger(__name__)
 
 
 class TaskRunner:
-    """Executes Tasks using an AgentLoop.
+    """Executes Tasks using an :class:`AgentLoopV2`.
 
     Each task gets a fresh execution context. The runner:
     1. Checks budget before executing
-    2. Runs the AgentLoop with a task-specific prompt
+    2. Runs the agent loop with a task-specific prompt
     3. Collects the result summary
     4. Returns a TaskResult
 
@@ -47,7 +47,7 @@ class TaskRunner:
 
     def __init__(
         self,
-        agent_loop: AgentLoop,
+        agent_loop: AgentLoopV2,
         store: GoalStore,
         config: KairosConfig,
     ) -> None:

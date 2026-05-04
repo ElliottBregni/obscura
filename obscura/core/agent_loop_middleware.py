@@ -96,9 +96,13 @@ def capability_gate(
                     "capability_gate: denied %s (capability not granted)",
                     node.tool_name,
                 )
+                # Return a tool_result-shaped block so the aggregator's
+                # is_error detection picks it up (TextBlock doesn't carry
+                # is_error; ToolResultBlock does).
                 return [
                     ContentBlock(
-                        kind="text",
+                        kind="tool_result",
+                        tool_use_id=node.tool_use_id,
                         text=(
                             f"Capability denied: tool '{node.tool_name}' "
                             "is not authorized for this token."
@@ -140,7 +144,8 @@ def tool_allowlist(
                 )
                 return [
                     ContentBlock(
-                        kind="text",
+                        kind="tool_result",
+                        tool_use_id=node.tool_use_id,
                         text=f"Tool '{node.tool_name}' is not in the allowlist.",
                         is_error=True,
                     ),
@@ -178,7 +183,8 @@ def tool_denylist(
                 logger.info("tool_denylist: denied %s (in denylist)", node.tool_name)
                 return [
                     ContentBlock(
-                        kind="text",
+                        kind="tool_result",
+                        tool_use_id=node.tool_use_id,
                         text=f"Tool '{node.tool_name}' is in the denylist.",
                         is_error=True,
                     ),
@@ -287,7 +293,8 @@ def tool_confirmation(
                 )
                 return [
                     ContentBlock(
-                        kind="text",
+                        kind="tool_result",
+                        tool_use_id=node.tool_use_id,
                         text="Tool call denied by user",
                         is_error=True,
                     ),

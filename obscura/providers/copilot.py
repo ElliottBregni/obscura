@@ -12,7 +12,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, cast, override
 
-from obscura.core.agent_loop import AgentLoop, call_tool_handler
+from obscura.core.agent_loop_factory import make_agent_loop
+from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
 from obscura.core.tool_policy import ToolPolicy
@@ -549,7 +550,7 @@ class CopilotBackend(BackendToolHostMixin):
             async for event in backend.run_loop("Fix the bug", max_turns=5):
                 print(event)
         """
-        loop = AgentLoop(
+        loop = make_agent_loop(
             self,
             self._tool_registry,
             max_turns=max_turns,

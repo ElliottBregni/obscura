@@ -1,5 +1,7 @@
 # Refactor Plan — String Literals → StrEnum, Dict Args → Pydantic Models
 
+> **Status (Round 1+2 complete).** Foundation, Round 1 (~60 enum migrations into `core/enums/`), and Round 2 (Pydantic record/boundary/discriminated-union models in `core/models/`) all merged to main. ~120 backlog pyright errors are concentrated in the user's in-flight v1-loop removal (agent_loop_v2.py, kairos integration, providers); they are not refactor regressions. Round 3 (Phase 9 — delete back-compat shims, add ruff rules) is deferred until the v1 removal lands.
+
 **Goal.** Eliminate loose string literals (used as dict keys, in conditionals, or in `Literal[...]` annotations) by replacing them with `StrEnum`s, and replace untyped `dict[str, Any]` parameters with `pydantic.BaseModel` subclasses (composed via mixins). Pyright enforces it module by module.
 
 **Source of truth.** Existing inventory: 54 enum classes across 27 files (some duplicated), ~500+ conditional string-literal sites in 15 domains, 22 dict-shape patterns (mix of internal-state and wire-format), 18 promotable `Literal[]` aliases.

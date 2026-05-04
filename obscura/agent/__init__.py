@@ -30,7 +30,8 @@ from obscura.agent.peers import (
     RemoteAgentRef,
 )
 from obscura.agent.supervised_runtime import SupervisedRuntime, SupervisedRuntimeConfig
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
+from obscura.core.agent_loop_v2 import AgentLoopV2
 
 # ---------------------------------------------------------------------------
 # Agent type registry — maps spec ``agent_type`` values to concrete classes
@@ -48,7 +49,7 @@ __all__ = [
     "APERLoopAgent",
     "APERMode",
     "Agent",
-    "AgentLoop",
+    "AgentLoopV2",
     "AgentRef",
     "AgentRuntime",
     "AgentStatus",
@@ -69,4 +70,5 @@ __all__ = [
     "SupervisedRuntime",
     "SupervisedRuntimeConfig",
     "UserResponse",
+    "make_agent_loop",
 ]

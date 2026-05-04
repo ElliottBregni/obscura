@@ -19,7 +19,8 @@ from typing import Any, cast
 
 import click
 
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
+from obscura.core.agent_loop_v2 import AgentLoopV2
 from obscura.core.auth import resolve_auth
 from obscura.core.kairos import (
     Kairos,
@@ -40,7 +41,7 @@ def _get_db_path() -> str:
     return str(resolve_obscura_home() / "kairos.db")
 
 
-def _get_kairos(agent_loop: AgentLoop | None = None) -> Kairos:
+def _get_kairos(agent_loop: AgentLoopV2 | None = None) -> Kairos:
     """Instantiate Kairos with the default DB path."""
     auth = resolve_auth(Backend.COPILOT)
     backend = CopilotBackend(auth)
@@ -48,7 +49,7 @@ def _get_kairos(agent_loop: AgentLoop | None = None) -> Kairos:
     loop = (
         agent_loop
         if agent_loop is not None
-        else AgentLoop(backend=backend, tool_registry=registry)
+        else make_agent_loop(backend=backend, tool_registry=registry)
     )
 
     # Read notification recipient from settings so interventions ping iMessage

@@ -62,7 +62,7 @@ from obscura.core.kairos.types import (
 )
 
 if TYPE_CHECKING:
-    from obscura.core.agent_loop import AgentLoop
+    from obscura.core.agent_loop_v2 import AgentLoopV2
     from obscura.core.types import BackendProtocol
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ class Kairos:
         self,
         db_path: str | Path,
         *,
-        agent_loop: AgentLoop,
+        agent_loop: AgentLoopV2,
         backend: BackendProtocol | None = None,
         config: KairosConfig | None = None,
     ) -> None:

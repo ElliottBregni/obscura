@@ -15,7 +15,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
 from obscura.core.models.content import (
@@ -455,7 +455,7 @@ class LocalLLMBackend(BackendToolHostMixin):
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
         """Run an iterative agent loop with tool execution."""
-        loop = AgentLoop(
+        loop = make_agent_loop(
             self,
             self._tool_registry,
             max_turns=max_turns,

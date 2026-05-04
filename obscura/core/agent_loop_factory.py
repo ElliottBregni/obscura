@@ -42,7 +42,6 @@ import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from obscura.core.agent_loop import AgentLoop
     from obscura.core.agent_loop_v2 import AgentLoopV2
     from obscura.core.tools import ToolRegistry
     from obscura.core.types import BackendProtocol
@@ -54,12 +53,15 @@ logger = logging.getLogger(__name__)
 __all__ = ["AgentLoopHandle", "is_v2_enabled", "make_agent_loop"]
 
 
-# A union of the two loop types. The factory's return type is the union;
-# callers iterate ``run()`` the same way on both.
-type AgentLoopHandle = "AgentLoop | AgentLoopV2"
+# v1 has been removed; the handle is now just AgentLoopV2. Kept as an
+# alias for callers that imported the union name historically.
+type AgentLoopHandle = "AgentLoopV2"
 
 
 _V1_OPTOUT: frozenset[str] = frozenset({"v1", "0", "false", "no", "off"})
+
+# One-time warn when caller explicitly asks for v1 (which is gone).
+_warned_v1_optout: bool = False
 
 # Track which unsupported v1 kwargs we've already warned about, to avoid
 # spamming the log on every loop instantiation.
@@ -82,6 +84,13 @@ _V2_SUPPORTED_V1_KWARGS: frozenset[str] = frozenset(
         "context_budget",
         "host_callbacks",
         "compiled_agent",
+        # Benign no-ops under v2 — accepted silently. ``auto_complete``
+        # is always True in v2 (the only mode); ``backend_name`` was
+        # informational metadata; ``turn_timeout_s`` should be wrapped
+        # by the caller via asyncio.timeout instead.
+        "auto_complete",
+        "backend_name",
+        "turn_timeout_s",
     }
 )
 
@@ -93,12 +102,25 @@ def _flag_enabled(env_name: str, default: str = "1") -> bool:
 
 
 def is_v2_enabled() -> bool:
-    """True when v2 is in use. Default True; set ``OBSCURA_AGENT_LOOP=v1``
-    (or any falsy synonym — ``0``, ``false``, ``no``, ``off``) to opt out
-    and use the legacy v1 loop."""
+    """Always True — v1 has been removed. Kept for backward compatibility
+    with callers that previously gated behavior on the env var.
+
+    The ``OBSCURA_AGENT_LOOP=v1`` opt-out still parses (we log a warning
+    if it's set) but the function returns True regardless because there
+    is no v1 to fall back to.
+    """
     raw = os.environ.get("OBSCURA_AGENT_LOOP", "").strip().lower()
-    # Empty / unset / anything not in the v1-opt-out list → v2.
-    return raw not in _V1_OPTOUT
+    if raw in _V1_OPTOUT:
+        global _warned_v1_optout
+        if not _warned_v1_optout:
+            _warned_v1_optout = True
+            logger.warning(
+                "OBSCURA_AGENT_LOOP=%r requested v1 fallback, but v1 has "
+                "been removed. Using v2 anyway. Unset the env var to "
+                "silence this warning.",
+                raw,
+            )
+    return True
 
 
 def make_agent_loop(
@@ -106,33 +128,17 @@ def make_agent_loop(
     registry: ToolRegistry,
     **v1_kwargs: Any,
 ) -> AgentLoopHandle:
-    """Return either an ``AgentLoop`` (v1) or an ``AgentLoopV2`` based on env.
+    """Return an ``AgentLoopV2`` configured from v1-shaped kwargs.
 
-    The returned object exposes ``.run(prompt, ...)`` returning an async
-    iterator of :class:`AgentEvent` — the same interface on both.
-
-    All keyword arguments are the v1 ``AgentLoop`` signature. When v2 is
-    selected, this function translates them into v2 middleware + hooks.
-    Unrecognized / unsupported kwargs are dropped with a one-time WARNING.
+    Translates v1's flat kwarg surface into the v2 middleware + hook
+    composition. Unrecognized kwargs drop with a one-time WARNING. The
+    function is named ``make_agent_loop`` (not ``make_agent_loop_v2``)
+    so existing call sites that historically passed v1 kwargs continue
+    to work without churn.
     """
-    if is_v2_enabled():
-        return _build_v2(backend, registry, v1_kwargs)
-    return _build_v1(backend, registry, v1_kwargs)
-
-
-# ---------------------------------------------------------------------------
-# v1 builder — straight passthrough
-# ---------------------------------------------------------------------------
-
-
-def _build_v1(
-    backend: BackendProtocol,
-    registry: ToolRegistry,
-    kwargs: dict[str, Any],
-) -> AgentLoop:
-    from obscura.core.agent_loop import AgentLoop
-
-    return AgentLoop(backend, registry, **kwargs)
+    # Honor the v1 opt-out env var (logs warning, returns v2 anyway).
+    is_v2_enabled()
+    return _build_v2(backend, registry, v1_kwargs)
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.hooks import HookRegistry
 from obscura.core.types import AgentEvent, AgentEventKind, BackendProtocol
 from obscura.parity.models import ScenarioExpectation, ScenarioResult, ScenarioSpec
@@ -130,7 +130,7 @@ class AgentLoopScenarioExecutor:
             )
             middleware.install(hooks)
 
-        agent_loop = AgentLoop(
+        agent_loop = make_agent_loop(
             self._backend,
             self._tool_registry,
             max_turns=self._max_turns,

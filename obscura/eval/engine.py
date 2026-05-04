@@ -8,7 +8,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING
 
-from obscura.core.agent_loop import AgentLoop
+from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.hooks import HookRegistry
 from obscura.core.types import AgentEventKind
 from obscura.eval.models import (
@@ -80,7 +80,7 @@ class EvalEngine:
         except (TimeoutError, Exception):
             logger.debug("suppressed exception in run_case", exc_info=True)
 
-        loop = AgentLoop(
+        loop = make_agent_loop(
             backend=self._backend,
             tool_registry=self._tool_registry,
             max_turns=case.max_turns,

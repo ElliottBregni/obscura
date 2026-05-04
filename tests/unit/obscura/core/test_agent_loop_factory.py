@@ -1,9 +1,13 @@
-"""Tests for the v1↔v2 toggle factory.
+"""Tests for the agent-loop factory.
+
+v1 has been removed; ``make_agent_loop`` now always returns an
+``AgentLoopV2``. The factory still accepts v1-shape kwargs and translates
+them into v2 middleware/hook composition.
 
 Exercises:
-- ``is_v2_enabled`` env-var detection.
-- ``make_agent_loop`` returns ``AgentLoop`` (v1) by default.
-- ``make_agent_loop`` returns ``AgentLoopV2`` when ``OBSCURA_AGENT_LOOP=v2``.
+- ``is_v2_enabled`` returns True regardless of env (kept for back-compat).
+- ``make_agent_loop`` always returns ``AgentLoopV2``.
+- ``OBSCURA_AGENT_LOOP=v1`` logs a one-time warning but still uses v2.
 - v1 kwargs translate to the right v2 middleware/hook composition.
 - Unsupported v1 kwargs are dropped with a one-time WARNING.
 """
@@ -27,24 +31,39 @@ from obscura.core.tools import ToolRegistry
 
 
 class TestIsV2Enabled:
-    def test_default_is_true(self) -> None:
-        """v2 is default. Unset env → use v2."""
+    """v1 has been removed — is_v2_enabled() now always returns True.
+
+    Kept as a compatibility shim so existing callers that gated on the
+    env var continue to compile. The function logs a one-time warning
+    when v1 is explicitly requested.
+    """
+
+    def test_returns_true_unset(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("OBSCURA_AGENT_LOOP", None)
             assert is_v2_enabled() is True
 
     @pytest.mark.parametrize(
-        "value", ["v2", "1", "true", "TRUE", "yes", "on", "anything-else"]
+        "value", ["v2", "1", "true", "yes", "on", "anything-else"]
     )
-    def test_v2_or_unrecognized_uses_v2(self, value: str) -> None:
-        """v2 is default; only the explicit v1-opt-out synonyms revert."""
+    def test_returns_true_for_v2_synonyms(self, value: str) -> None:
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
             assert is_v2_enabled() is True
 
     @pytest.mark.parametrize("value", ["v1", "0", "false", "no", "off"])
-    def test_explicit_v1_optout(self, value: str) -> None:
+    def test_v1_optout_still_returns_true_with_warning(
+        self, value: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Reset the dedup so the warning fires per call in the test.
+        from obscura.core.agent_loop_factory import _warned_v1_optout  # noqa: F401
+
+        import obscura.core.agent_loop_factory as factory_mod
+
+        factory_mod._warned_v1_optout = False
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
-            assert is_v2_enabled() is False
+            with caplog.at_level("WARNING"):
+                assert is_v2_enabled() is True
+            assert any("v1 has been removed" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +104,14 @@ class TestMakeAgentLoopSelection:
             loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
             assert isinstance(loop, AgentLoopV2)
 
-    def test_env_v1_returns_v1(self) -> None:
-        """Explicit v1 opt-out reverts to legacy loop."""
-        from obscura.core.agent_loop import AgentLoop
+    def test_env_v1_still_returns_v2(self) -> None:
+        """v1 has been removed — explicit opt-out logs a warning but
+        still returns AgentLoopV2."""
+        from obscura.core.agent_loop_v2 import AgentLoopV2
 
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v1"}):
             loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
-            assert isinstance(loop, AgentLoop)
+            assert isinstance(loop, AgentLoopV2)
 
 
 # ---------------------------------------------------------------------------
@@ -303,13 +323,13 @@ class TestUnsupportedKwargsWarn:
         # Reset the dedup so the warning fires deterministically.
         from obscura.core.agent_loop_factory import _warned_unsupported
 
-        _warned_unsupported.discard("turn_timeout_s")
+        _warned_unsupported.discard("truly_unknown_kwarg")
 
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
             with caplog.at_level(logging.WARNING):
                 make_agent_loop(
                     _StubBackend(),
                     ToolRegistry(),  # type: ignore[arg-type]
-                    turn_timeout_s=60.0,
+                    truly_unknown_kwarg=60.0,
                 )
-            assert any("turn_timeout_s" in r.message for r in caplog.records)
+            assert any("truly_unknown_kwarg" in r.message for r in caplog.records)

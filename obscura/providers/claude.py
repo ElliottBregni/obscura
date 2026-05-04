@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.agent_loop import AgentLoop, call_tool_handler
+from obscura.core.agent_loop_factory import make_agent_loop
+from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
 from obscura.core.tool_policy import ToolPolicy
@@ -527,7 +528,7 @@ class ClaudeBackend(BackendToolHostMixin):
         Yields ``AgentEvent`` instances as the model streams text,
         calls tools, and iterates across multiple turns.
         """
-        loop = AgentLoop(
+        loop = make_agent_loop(
             self,
             self._tool_registry,
             max_turns=max_turns,

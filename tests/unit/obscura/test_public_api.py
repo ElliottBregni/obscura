@@ -155,7 +155,6 @@ def test_known_names_matches_registry() -> None:
     from obscura.lazy import known_names
 
     expected = {
-        "AgentLoop",
         "AgentLoopV2",
         "AgentLoopV2Config",
         "AuthConfig",
