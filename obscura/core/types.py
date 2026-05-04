@@ -34,14 +34,14 @@ from obscura.core.enums.agent import (
     Role,
 )
 from obscura.core.enums.tools import ContentBlockKind, SideEffects, ToolChoiceMode
-
-logger = logging.getLogger(__name__)
 from obscura.core.models.content import (
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from obscura.core.tools import ToolRegistry

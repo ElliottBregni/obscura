@@ -34,8 +34,6 @@ from typing import Any, Self, cast
 
 from pydantic import Field, field_validator, model_validator
 
-logger = logging.getLogger(__name__)
-
 from obscura.core.enums._base import parse_lenient
 from obscura.core.enums.lifecycle import (
     ApprovalStatus,
@@ -53,6 +51,8 @@ from obscura.core.models._mixins import (
     StatusedMixin,
     TimestampedMixin,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
