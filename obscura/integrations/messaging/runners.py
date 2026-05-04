@@ -76,8 +76,8 @@ class ObscuraAgentRunner:
 
         hooks = HookRegistry()
         loop = make_agent_loop(
-            backend=self._backend,
-            tool_registry=self._tool_registry,
+            self._backend,
+            self._tool_registry,
             hooks=hooks,
             event_store=self._event_store,
         )

@@ -215,8 +215,8 @@ class KairosAgentRunner:
     ) -> str:
         cfg = self._config
         loop = make_agent_loop(
-            backend=self._backend,
-            tool_registry=self._tool_registry,
+            self._backend,
+            self._tool_registry,
         )
         kairos = Kairos(
             db_path=cfg.db_path,

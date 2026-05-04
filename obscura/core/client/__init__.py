@@ -28,6 +28,7 @@ from obscura.core.retry import with_retry
 from obscura.core.throttle import ThrottledBackend, wrap_if_enabled
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.types import (
     AgentEvent,
     BackendCapabilities,
@@ -524,7 +525,7 @@ class ObscuraClient:
         self._current_loop = loop
         return loop.run(
             prompt,
-            session_id=session_id,
+            session_id=session_id or "",
             initial_messages=initial_messages,
             **kwargs,
         )
@@ -552,7 +553,11 @@ class ObscuraClient:
             tool_allowlist=tool_allowlist,
             host_callbacks=self._host_callbacks,
         )
-        return await loop.run_to_completion(prompt, **kwargs)
+        parts: list[str] = []
+        async for event in loop.run(prompt, **kwargs):
+            if event.kind == AgentEventKind.TEXT_DELTA and event.text:
+                parts.append(event.text)
+        return "".join(parts)
 
     # -- Sessions ------------------------------------------------------------
 
