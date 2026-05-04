@@ -32,10 +32,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.models.configs import HookContext
 from obscura.core.types import AgentEvent, AgentEventKind
 
 if TYPE_CHECKING:
     from obscura.manifest.models import HookDefinition
+
+__all__ = ["AfterHook", "BeforeHook", "HookContext", "HookRegistry"]
 
 logger = logging.getLogger(__name__)
 
@@ -311,13 +314,12 @@ def _make_command_before_hook(defn: HookDefinition) -> BeforeHook:
         if defn.matcher and event.tool_name != defn.matcher:
             return event  # pass through unmodified
         try:
-            payload = json.dumps(
-                {
-                    "event": event.kind.value,
-                    "tool_name": event.tool_name,
-                    "tool_input": event.tool_input,
-                },
+            ctx = HookContext(
+                event=event.kind.value,
+                tool_name=event.tool_name,
+                tool_input=event.tool_input,
             )
+            payload = ctx.model_dump_json(exclude_none=True)
             proc = await asyncio.create_subprocess_exec(
                 "bash",
                 "-c",
@@ -355,15 +357,12 @@ def _make_command_after_hook(defn: HookDefinition) -> AfterHook:
         if defn.matcher and event.tool_name != defn.matcher:
             return
         try:
-            payload = json.dumps(
-                {
-                    "event": event.kind.value,
-                    "tool_name": event.tool_name,
-                    "tool_result": event.tool_result
-                    if hasattr(event, "tool_result")
-                    else "",
-                },
+            ctx = HookContext(
+                event=event.kind.value,
+                tool_name=event.tool_name,
+                tool_result=getattr(event, "tool_result", "") or "",
             )
+            payload = ctx.model_dump_json(exclude_none=True)
             proc = await asyncio.create_subprocess_exec(
                 "bash",
                 "-c",

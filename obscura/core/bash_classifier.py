@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 
 from obscura.core.enums.tools import BashRisk
+from obscura.core.models.configs import BashClassification
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,14 @@ class Classification:
     level: BashRisk
     reasons: tuple[str, ...] = field(default_factory=tuple)
     latency_ms: int = 0
+
+    def to_model(self) -> BashClassification:
+        """Promote the legacy dataclass to the typed Pydantic model."""
+        return BashClassification(
+            risk=self.level,
+            reasons=self.reasons,
+            latency_ms=self.latency_ms,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +144,7 @@ class BashClassifier:
 
 
 __all__ = [
+    "BashClassification",
     "BashClassifier",
     "BashRisk",
     "Classification",

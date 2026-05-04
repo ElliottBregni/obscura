@@ -31,12 +31,22 @@ class Backend(StrEnum):
 class ExecutionMode(StrEnum):
     """How a request should be executed.
 
-    ``UNIFIED`` uses Obscura's normalized contract and event model.
-    ``NATIVE`` preserves provider semantics and metadata as-is.
+    The first two members preserve Round 1's contract (``UNIFIED`` /
+    ``NATIVE``).  The remaining members come from the plan's §3.2 promotion
+    of the four scattered Literal aliases used in
+    ``schemas/templates.py``, ``agent/peers.py``, and ``routes/agents.py``;
+    they live on the same enum so ``AgentConfig.mode`` carries one type
+    across every callsite.
     """
 
     UNIFIED = "unified"
     NATIVE = "native"
+    RUN = "run"
+    LOOP = "loop"
+    STREAM = "stream"
+    STREAM_LOOP = "stream_loop"
+    BLOCKING = "blocking"
+    APER = "aper"
 
 
 class Role(StrEnum):
