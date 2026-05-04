@@ -21,8 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
 
+from obscura.core.enums.storage import ProfileSource
 from obscura.vector_memory.decay import DecayProfile
 
 
@@ -74,7 +74,7 @@ class ProfileFact:
     value: str
     category: ProfileCategory
     confidence: float = 1.0
-    source: Literal["user_stated", "inferred", "observed"] = "user_stated"
+    source: ProfileSource = ProfileSource.USER_STATED
     learned_at: str = field(
         default_factory=lambda: datetime.now(UTC).isoformat(),
     )

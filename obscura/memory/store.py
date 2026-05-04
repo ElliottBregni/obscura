@@ -24,7 +24,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 from obscura.core.pg_config import is_pg_configured
-from obscura.memory.events import EventKind, EventSink, get_default_sink, make_event
+from obscura.memory.events import (
+    EventKind,
+    EventSink,
+    EventSource,
+    get_default_sink,
+    make_event,
+)
 from obscura.memory.postgres_memory import PostgreSQLMemoryStore
 from obscura.memory.types import MemoryEntry, MemoryKey
 
@@ -90,14 +96,13 @@ class MemoryStore:
     ) -> None:
         """Emit a memory event."""
         sink = self._event_sink if self._event_sink is not None else get_default_sink()
-        event_kind: EventKind = kind  # type: ignore[assignment]
         sink.emit(
             make_event(
-                kind=event_kind,
+                kind=EventKind(kind),
                 key=key,
                 value=value,
                 ttl_seconds=ttl_seconds,
-                source="kv",
+                source=EventSource.KV,
                 user_id=self.user_id,
             ),
         )

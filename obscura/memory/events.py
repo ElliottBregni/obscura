@@ -30,8 +30,9 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from queue import Empty, Full, Queue
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from obscura.core.enums.storage import MemoryEventKind, MemorySource
 from obscura.memory.types import MemoryKey
 
 if TYPE_CHECKING:
@@ -42,8 +43,9 @@ _log = logging.getLogger(__name__)
 # Postgres NOTIFY payload ceiling is 8000 bytes; leave headroom for framing.
 _PG_PAYLOAD_SOFT_LIMIT = 7000
 
-EventKind = Literal["set", "delete", "expire"]
-EventSource = Literal["kv", "vector"]
+# Backward-compat aliases: existing call sites import these names.
+EventKind = MemoryEventKind
+EventSource = MemorySource
 
 
 @dataclass(frozen=True)
@@ -304,4 +306,6 @@ def event_from_pg_payload(payload: str) -> MemoryEvent:
     key_data = body.pop("key")
     key = MemoryKey(namespace=key_data["namespace"], key=key_data["key"])
     at = datetime.fromisoformat(body.pop("at"))
+    body["kind"] = MemoryEventKind(body["kind"])
+    body["source"] = MemorySource(body["source"])
     return MemoryEvent(key=key, at=at, **body)

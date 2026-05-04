@@ -17,7 +17,9 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
+
+from obscura.core.enums.storage import ComparisonOperator, FilterMode
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -37,7 +39,7 @@ class TagFilter:
     """Filter by tags stored in metadata JSON."""
 
     tags: list[str]
-    mode: Literal["all", "any"] = "any"
+    mode: FilterMode = FilterMode.ANY
 
 
 @dataclass
@@ -46,7 +48,7 @@ class KeyValueFilter:
 
     key: str
     value: Any
-    operator: Literal["eq", "ne", "gt", "lt", "gte", "lte", "contains"] = "eq"
+    operator: ComparisonOperator = ComparisonOperator.EQ
 
 
 @dataclass

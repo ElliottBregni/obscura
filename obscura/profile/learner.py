@@ -18,6 +18,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from obscura.core.enums.storage import ProfileSource
 from obscura.profile.models import ProfileCategory, ProfileFact
 
 if TYPE_CHECKING:
@@ -95,7 +96,7 @@ class ProfileLearner:
                     value=value,
                     category=category,
                     confidence=0.6,
-                    source="inferred",
+                    source=ProfileSource.INFERRED,
                 )
 
                 try:
