@@ -198,12 +198,18 @@ class ModernRenderer:
                 self._flush_text()
                 self._stop_spinner()
             case AgentEventKind.ERROR:
+                # Stream-error during a turn — committed to scrollback for
+                # permanent record, but in the v2 left-bar system-notice
+                # format so it's visually distinct from assistant text.
                 self._flush_all()
                 self._stop_spinner()
                 self._commit_lines(
                     [
-                        _styled(f"  {_HOOK}  ", STYLE_DIM)
-                        + _styled(f"error: {_sanitize(event.text)}", STYLE_ERROR),
+                        _styled("  ▎ ", STYLE_DIM)
+                        + _styled("✗  ", STYLE_ERROR)
+                        + _styled(
+                            f"error · {_sanitize(event.text)}", STYLE_ERROR
+                        ),
                     ]
                 )
             case AgentEventKind.CONTEXT_COMPACT:
@@ -574,6 +580,155 @@ class ModernRenderer:
 
         return lines
 
+    # ── System-event notification helpers ────────────────────────────────
+    #
+    # SDK system messages (TaskStartedMessage / TaskProgressMessage /
+    # TaskNotificationMessage / RateLimitEvent / MirrorErrorMessage)
+    # surface as AgentEvents with a dedicated kind. We translate each into
+    # a typed :class:`Notification` so the channel system renders them in
+    # the inline-toast region above the status bar — never interleaved
+    # with assistant text. Same-task progress entries share a ``key`` so
+    # they roll in place rather than stacking.
+
+    def _notify_task_started(self, event: AgentEvent) -> None:
+        from obscura.cli.renderer.channels import Notification, Severity
+
+        task_id = event.tool_use_id or "task"
+        self.add_notification(
+            Notification(
+                title="Task started",
+                body=_sanitize(event.text or ""),
+                severity=Severity.INFO,
+                source="task",
+                key=f"task:{task_id}",
+                ttl_seconds=8.0,
+            )
+        )
+
+    def _notify_task_progress(self, event: AgentEvent) -> None:
+        from obscura.cli.renderer.channels import Notification, Severity
+
+        task_id = event.tool_use_id or "task"
+        body_parts: list[str] = []
+        if event.text:
+            body_parts.append(_sanitize(event.text))
+        if event.tool_name:
+            body_parts.append(f"using {_sanitize(event.tool_name)}")
+        self.add_notification(
+            Notification(
+                title="Task progress",
+                body=" · ".join(body_parts),
+                severity=Severity.INFO,
+                source="task",
+                key=f"task:{task_id}",
+                ttl_seconds=10.0,
+            )
+        )
+
+    def _notify_task_notification(self, event: AgentEvent) -> None:
+        from obscura.cli.renderer.channels import Notification, Severity
+
+        task_id = event.tool_use_id or "task"
+        raw = event.raw
+        status = ""
+        if raw is not None:
+            status_val = getattr(raw, "status", "")
+            if isinstance(status_val, str):
+                status = status_val
+        severity = {
+            "completed": Severity.SUCCESS,
+            "failed": Severity.ERROR,
+            "stopped": Severity.WARN,
+        }.get(status, Severity.INFO)
+        title = f"Task {status}" if status else "Task notification"
+        self.add_notification(
+            Notification(
+                title=title,
+                body=_sanitize(event.text or ""),
+                severity=severity,
+                source="task",
+                key=f"task:{task_id}",
+                ttl_seconds=15.0,
+            )
+        )
+
+    def _notify_rate_limit(self, event: AgentEvent) -> None:
+        from obscura.cli.renderer.channels import Notification, Severity
+
+        raw = event.raw
+        info = getattr(raw, "rate_limit_info", None) if raw is not None else None
+        status = ""
+        util: float | None = None
+        rate_type = ""
+        resets_at: int | None = None
+        if info is not None:
+            status_val = getattr(info, "status", "")
+            if isinstance(status_val, str):
+                status = status_val
+            util_val = getattr(info, "utilization", None)
+            if isinstance(util_val, (int, float)):
+                util = float(util_val)
+            rt_val = getattr(info, "rate_limit_type", "")
+            if isinstance(rt_val, str):
+                rate_type = rt_val
+            ra_val = getattr(info, "resets_at", None)
+            if isinstance(ra_val, int):
+                resets_at = ra_val
+        if not status:
+            status = event.text or ""
+
+        severity = {
+            "rejected": Severity.ERROR,
+            "allowed_warning": Severity.WARN,
+        }.get(status, Severity.INFO)
+
+        body_parts: list[str] = []
+        if util is not None:
+            body_parts.append(f"{int(util * 100)}%")
+        if rate_type:
+            body_parts.append(rate_type.replace("_", "-"))
+        if resets_at:
+            now = time.time()
+            secs = max(0, int(resets_at - now))
+            if secs < 60:
+                body_parts.append(f"resets in {secs}s")
+            elif secs < 3600:
+                body_parts.append(f"resets in {secs // 60}m")
+            else:
+                h = secs // 3600
+                m = (secs % 3600) // 60
+                body_parts.append(f"resets in {h}h{m:02d}m")
+
+        title = {
+            "rejected": "Rate limit hit",
+            "allowed_warning": "Rate limit warning",
+        }.get(status, "Rate limit")
+
+        self.add_notification(
+            Notification(
+                title=title,
+                body=" · ".join(body_parts),
+                severity=severity,
+                source="claude",
+                key="rate_limit",
+                ttl_seconds=30.0 if status == "rejected" else 12.0,
+            )
+        )
+
+    def _notify_mirror_error(self, event: AgentEvent) -> None:
+        from obscura.cli.renderer.channels import Notification, Severity
+
+        self.add_notification(
+            Notification(
+                title="Session mirror error",
+                body=_sanitize(event.text or "Failed to write mirrored session"),
+                severity=Severity.WARN,
+                source="session",
+                key="mirror_error",
+                ttl_seconds=8.0,
+            )
+        )
+
     # ── Notification + banner channels ───────────────────────────────────
 
     def add_notification(self, notification: Any) -> None:
@@ -631,44 +786,64 @@ class ModernRenderer:
             self._dirty = True
 
     def _render_notifications(self) -> list[str]:
-        """Render the notification stack as inline lines."""
+        """Render the notification stack as inline lines.
+
+        Format: ``  ▎ <icon>  <source> · <title>  —  <body>``.
+
+        The dim left bar visually separates system notices from assistant
+        text. The icon is colored by severity; header (source + title) is
+        colored to match; body is dim. Empty fields collapse cleanly.
+        """
         if not self._notifications:
             return []
         lines: list[str] = []
         for n in self._notifications:
             severity = getattr(n, "severity", "info")
             sev = severity.value if isinstance(severity, Enum) else str(severity)
-            style = {
-                "info": STYLE_DIM,
+            icon_style = {
+                "info": STYLE_ACCENT,
                 "warn": STYLE_WARN,
                 "error": STYLE_ERROR,
                 "success": STYLE_OK,
             }.get(sev, STYLE_DIM)
             icon = {
-                "info": "i",  # noqa: RUF001 — ASCII for terminal compat
-                "warn": "!",
-                "error": "x",
-                "success": "+",
-            }.get(sev, "-")
-            source = getattr(n, "source", "") or ""
-            title = getattr(n, "title", "") or ""
-            body = getattr(n, "body", "") or ""
-            # Format: "  i source - title - body" (truncated to width)
-            parts: list[str] = [icon]
+                "info": "ℹ",  # noqa: RUF001 — Unicode info icon (parity with ⚠/✗/✓)
+                "warn": "⚠",
+                "error": "✗",
+                "success": "✓",
+            }.get(sev, "·")
+
+            source = _sanitize(getattr(n, "source", "") or "")
+            title = _sanitize(getattr(n, "title", "") or "")
+            body = _sanitize(getattr(n, "body", "") or "")
+
+            header_parts: list[str] = []
             if source:
-                parts.append(source)
+                header_parts.append(source)
             if title:
-                if source:
-                    parts.append("·")
-                parts.append(title)
-            if body:
-                parts.append("—")
-                parts.append(body)
-            line = "  " + _sanitize(" ".join(parts))
-            # Truncate to terminal width.
-            if len(line) > self._width - 1:
-                line = line[: max(0, self._width - 4)] + "..."
-            lines.append(_styled(line, style))
+                header_parts.append(title)
+            header_text = " · ".join(header_parts)
+
+            # Truncate body if the full plain-text rendering would exceed
+            # terminal width. Compute against the visible (un-styled) form
+            # so ANSI escapes don't throw off the math.
+            visible_prefix = f"  ▎ {icon}  {header_text}"
+            sep = "  —  " if (body and header_text) else ("  " if body else "")
+            visible_full = visible_prefix + sep + body
+            if len(visible_full) > self._width - 1:
+                budget = max(0, self._width - 1 - len(visible_prefix) - len(sep))
+                if budget < 4:
+                    body = ""
+                    sep = ""
+                else:
+                    body = body[: max(0, budget - 3)] + "..."
+
+            bar = _styled("  ▎ ", STYLE_DIM)
+            icon_str = _styled(f"{icon}  ", icon_style)
+            header_str = _styled(header_text, icon_style) if header_text else ""
+            sep_str = _styled(sep, STYLE_DIM) if sep else ""
+            body_str = _styled(body, STYLE_DIM) if body else ""
+            lines.append(bar + icon_str + header_str + sep_str + body_str)
         return lines
 
     def _render_banners(self) -> list[str]:

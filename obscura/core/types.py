@@ -5,8 +5,8 @@ session references, hook definitions, and the BackendProtocol that each backend
 must implement.
 
 Agent enums (`Backend`, `Role`, `ChunkKind`, `AgentPhase`, `HookPoint`,
-`AgentEventKind`, `ExecutionMode`) live in `obscura.core.enums.agent` and are
-re-exported from here for one release cycle so existing imports keep working.
+`AgentEventKind`, `ExecutionMode`) live in `obscura.core.enums.agent`. Import
+them from there directly — they are no longer re-exported via this module.
 """
 
 from __future__ import annotations
@@ -47,25 +47,18 @@ if TYPE_CHECKING:
 __all__ = [
     "AgentContext",
     "AgentEvent",
-    "AgentEventKind",
     "AgentHookConfig",
-    "AgentPhase",
-    "Backend",
     "BackendCapabilities",
     "BackendProtocol",
-    "ChunkKind",
     "ConfirmationCapable",
     "ContentBlock",
     "ContentBlockKind",
     "EFFORT_THINKING_BUDGETS",
     "EffortLevel",
-    "ExecutionMode",
     "HookContext",
-    "HookPoint",
     "Message",
     "NativeHandle",
     "ProviderNativeRequest",
-    "Role",
     "SessionRef",
     "SideEffects",
     "StreamChunk",

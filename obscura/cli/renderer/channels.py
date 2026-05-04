@@ -155,13 +155,29 @@ _BANNER_AGENT_KINDS: frozenset[str] = frozenset(
     }
 )
 
+# AgentEventKind values that should land in the notification channel
+# (inline auto-dismissing toasts above the status line). These are SDK
+# system messages (task lifecycle, rate-limit transitions, mirror
+# errors) — meaningful but not part of the transcript proper.
+_NOTIFICATION_AGENT_KINDS: frozenset[str] = frozenset(
+    {
+        "task_started",
+        "task_progress",
+        "task_notification",
+        "rate_limit_warning",
+        "mirror_error",
+    }
+)
+
 
 def from_agent_event(event: "AgentEvent") -> RenderEvent:
     """Route an :class:`AgentEvent` to the appropriate channel.
 
     Most events (TEXT_DELTA, TOOL_CALL, TOOL_RESULT, THINKING_DELTA,
     AGENT_DONE, TURN_*, ERROR) land in the transcript. Compaction and
-    plan-approval requests go to the banner channel.
+    plan-approval requests go to the banner channel. Task lifecycle,
+    rate-limit transitions, and session-mirror errors go to the
+    notification channel.
     """
     kind_value = (
         event.kind.value if hasattr(event.kind, "value") else str(event.kind)
@@ -181,7 +197,97 @@ def from_agent_event(event: "AgentEvent") -> RenderEvent:
             body=getattr(event, "text", "") or "",
             actions=("approve", "reject"),
         )
+    if kind_value in _NOTIFICATION_AGENT_KINDS:
+        return _notification_for_agent_event(event, kind_value)
     return TranscriptEvent(event=event)
+
+
+def _notification_for_agent_event(
+    event: "AgentEvent", kind_value: str
+) -> Notification:
+    """Build a :class:`Notification` for an SDK system-message AgentEvent."""
+    text = getattr(event, "text", "") or ""
+    tool_name = getattr(event, "tool_name", "") or ""
+    tool_use_id = getattr(event, "tool_use_id", "") or ""
+    raw = getattr(event, "raw", None)
+
+    if kind_value == "task_started":
+        return Notification(
+            title="Task started",
+            body=text,
+            severity=Severity.INFO,
+            source="task",
+            key=f"task:{tool_use_id or 'task'}",
+            ttl_seconds=8.0,
+        )
+    if kind_value == "task_progress":
+        body_parts: list[str] = []
+        if text:
+            body_parts.append(text)
+        if tool_name:
+            body_parts.append(f"using {tool_name}")
+        return Notification(
+            title="Task progress",
+            body=" · ".join(body_parts),
+            severity=Severity.INFO,
+            source="task",
+            key=f"task:{tool_use_id or 'task'}",
+            ttl_seconds=10.0,
+        )
+    if kind_value == "task_notification":
+        status = ""
+        if raw is not None:
+            sval = getattr(raw, "status", "")
+            if isinstance(sval, str):
+                status = sval
+        severity = {
+            "completed": Severity.SUCCESS,
+            "failed": Severity.ERROR,
+            "stopped": Severity.WARN,
+        }.get(status, Severity.INFO)
+        title = f"Task {status}" if status else "Task notification"
+        return Notification(
+            title=title,
+            body=text,
+            severity=severity,
+            source="task",
+            key=f"task:{tool_use_id or 'task'}",
+            ttl_seconds=15.0,
+        )
+    if kind_value == "rate_limit_warning":
+        info = getattr(raw, "rate_limit_info", None) if raw is not None else None
+        status = ""
+        if info is not None:
+            sval = getattr(info, "status", "")
+            if isinstance(sval, str):
+                status = sval
+        if not status:
+            status = text
+        severity = {
+            "rejected": Severity.ERROR,
+            "allowed_warning": Severity.WARN,
+        }.get(status, Severity.INFO)
+        title = {
+            "rejected": "Rate limit hit",
+            "allowed_warning": "Rate limit warning",
+        }.get(status, "Rate limit")
+        return Notification(
+            title=title,
+            body=status,
+            severity=severity,
+            source="claude",
+            key="rate_limit",
+            ttl_seconds=30.0 if status == "rejected" else 12.0,
+        )
+    # mirror_error
+    return Notification(
+        title="Session mirror error",
+        body=text or "Failed to write mirrored session",
+        severity=Severity.WARN,
+        source="session",
+        key="mirror_error",
+        ttl_seconds=8.0,
+    )
 
 
 def from_agent_output(output: Any) -> Notification:

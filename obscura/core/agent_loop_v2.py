@@ -689,6 +689,11 @@ class AgentLoopV2:
                     else "",
                     tool_use_id=origin_tu_id,
                     tool_result=_envelope_to_text(env),
+                    # Propagate envelope error state so the renderer's
+                    # _handle_tool_result picks the error branch (red ✗
+                    # instead of green ✓) for things like "tool not
+                    # found", capability denial, or handler exceptions.
+                    is_error=env.is_error,
                 )
 
             # Build user turn — ONE tool_result per SDK tool_use_id (the
