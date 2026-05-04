@@ -41,6 +41,8 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.tool_context import ToolContext
+
 if TYPE_CHECKING:
     from obscura.core.agent_loop_v2 import AgentLoopV2
     from obscura.core.tools import ToolRegistry
@@ -272,14 +274,16 @@ def _build_v2(
         predictor = ToolPredictor(tool_registry=pred_specs)
         dispatch_middleware.append(predictive_cache_middleware(pred_cache))
 
-        # Stable observer object that closes over a mutable holder for
-        # the current turn's ToolContext. on_turn_start updates the
-        # holder; the observer reads the latest value on each delta.
-        # This avoids the "mutate list passed to v2 constructor" foot-gun.
-        ctx_holder: dict[str, Any] = {"ctx": None}
+        # Stable observer object that closes over a mutable single-slot
+        # holder for the current turn's ToolContext. on_turn_start
+        # updates the slot; the observer reads the latest value on each
+        # delta. List-of-one (rather than dict) keeps the slot strictly
+        # typed and avoids the "mutate list passed to v2 constructor"
+        # foot-gun.
+        ctx_holder: list[ToolContext | None] = [None]
 
         async def _predictive_observer(delta: str) -> None:
-            ctx = ctx_holder.get("ctx")
+            ctx = ctx_holder[0]
             if ctx is None:
                 return
             obs = make_predictive_observer(
@@ -292,10 +296,10 @@ def _build_v2(
 
         text_observers.append(_predictive_observer)
 
-        async def _start_predictive_turn(_turn: int, ctx: Any) -> None:
+        async def _start_predictive_turn(_turn: int, ctx: ToolContext) -> None:
             predictor.reset()
             pred_cache.clear()
-            ctx_holder["ctx"] = ctx
+            ctx_holder[0] = ctx
 
         on_turn_start = _start_predictive_turn
 
