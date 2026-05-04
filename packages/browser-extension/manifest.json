@@ -3,7 +3,7 @@
   "name": "Obscura",
   "short_name": "Obscura",
   "description": "Chat with Obscura from any tab. Side-panel agent with optional page context.",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0ZIwvphSoaTVEph8C7ekrb2UnNdoVNC81ux8RGd5mVOMoChTKb/kgsIswYSMw+gbcftKfqKYC/m7BY8AXGHRH3W6whykXr5rblsIMEm1uc0PNtQIM7Rn8tqmobkHnlQo+q+8SMgUU7C6mHh14/YvZbIhMsxAXjs0ba4rBL27wYLG8mro8ds7RTm2YBbycxu5eImOKSxoOmgetE95tl4r+Q7ad4dXM3/vLRWmn5TVQUFswWfzqwFP/mqS7yOnrDpdNKXB5OwpDb+5wu+mrz2ShQ4Lddk2sGaRp5QwZhRNAN4nKK/zMiMK/Cc9o2lVdIiThWkwV7ZFb4yd8PFNb4exQwIDAQAB",
   "action": {
