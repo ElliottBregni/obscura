@@ -431,8 +431,19 @@ class REPLContext:
                 await bus.respond(request.request_id, result.action, result.text)
 
             async def _cli_output_handler(output: AgentOutput) -> None:
-                """Render agent output streamed via the bus."""
-                render_agent_output(output)
+                """Render agent output streamed via the bus.
+
+                Routes through the v2 notification channel when a renderer
+                is active so supervisor/daemon outputs stack as inline
+                notifications above the prompt instead of interleaving
+                with the main loop's transcript. Falls back to the
+                legacy direct-print path for headless / scripted callers.
+                """
+                from obscura.cli.render import push_notification
+                from obscura.cli.renderer.channels import from_agent_output
+
+                if not push_notification(from_agent_output(output)):
+                    render_agent_output(output)
 
             bus.on_attention(_cli_attention_handler)
             bus.on_output(_cli_output_handler)

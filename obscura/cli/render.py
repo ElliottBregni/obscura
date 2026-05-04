@@ -310,6 +310,42 @@ def get_active_text() -> str:
         return ""
 
 
+def push_notification(notification: Any) -> bool:
+    """Push a Notification onto the active renderer's stack.
+
+    Returns True if delivered, False if no renderer is active (caller
+    can fall back to a console.print). Safe to call from any thread /
+    any module — supervisor, daemon, rate limiter, etc. all use this
+    instead of printing directly.
+    """
+    if _active_renderer is None:
+        return False
+    fn = getattr(_active_renderer, "add_notification", None)
+    if fn is None:
+        return False
+    try:
+        fn(notification)
+        return True
+    except Exception:
+        logger.debug("suppressed exception in push_notification", exc_info=True)
+        return False
+
+
+def push_banner(banner: Any) -> bool:
+    """Pin a sticky Banner on the active renderer. Returns delivery success."""
+    if _active_renderer is None:
+        return False
+    fn = getattr(_active_renderer, "set_banner", None)
+    if fn is None:
+        return False
+    try:
+        fn(banner)
+        return True
+    except Exception:
+        logger.debug("suppressed exception in push_banner", exc_info=True)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # StreamRenderer
 # ---------------------------------------------------------------------------

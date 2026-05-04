@@ -69,9 +69,13 @@ async def start_imessage_daemon(
         bus = InteractionBus()
 
         async def _on_output(output: Any) -> None:
-            text = getattr(output, "text", str(output))
-            source = getattr(output, "source", agent_def.name)
-            _console.print(f"[dim]\\[{source}][/] {text}")
+            from obscura.cli.render import push_notification
+            from obscura.cli.renderer.channels import from_agent_output
+
+            if not push_notification(from_agent_output(output)):
+                text = getattr(output, "text", str(output))
+                source = getattr(output, "source", agent_def.name)
+                _console.print(f"[dim]\\[{source}][/] {text}")
 
         bus.on_output(_on_output)
 
