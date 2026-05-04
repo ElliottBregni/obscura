@@ -136,6 +136,19 @@ def _build_v2(
     registry: ToolRegistry,
     v1_kwargs: dict[str, Any],
 ) -> AgentLoopV2:
+    # Wrap backend with retry-on-transient-error semantics. Default ON
+    # (mid-stream resume) — set OBSCURA_V2_RESUME_RETRY=0 to disable
+    # entirely, or =safe to use safe-mode (pre-first-chunk only).
+    retry_mode = os.environ.get("OBSCURA_V2_RESUME_RETRY", "1").strip().lower()
+    if retry_mode not in {"0", "false", "no", "off"}:
+        from obscura.core.backend_retry import RetryingBackend
+
+        # "safe" mode = pre-first-chunk only (no risk of dupes); anything
+        # else (including "1"/"true"/"on"/"v2") enables mid-stream resume,
+        # relying on AgentLoopV2._seen_calls for tool_use_id dedup.
+        allow_mid = retry_mode != "safe"
+        backend = RetryingBackend(backend, allow_mid_stream=allow_mid)
+
     from obscura.core.agent_loop_hooks import (
         compact_pre_turn,
         event_store_post_turn,

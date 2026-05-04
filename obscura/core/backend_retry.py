@@ -51,9 +51,23 @@ _DEFAULT_TRANSIENT_EXC: tuple[type[BaseException], ...] = (
 class RetryingBackend:
     """Wraps a :class:`BackendProtocol` with retry-on-transient-error semantics.
 
-    Only retries when the **first chunk** hasn't been yielded yet. Once any
-    chunk has been emitted to the caller, retry is unsafe and the original
-    exception propagates.
+    Two modes:
+
+    * **Default** (``allow_mid_stream=False``) — retries only when the
+      first chunk hasn't been yielded yet. Once any chunk has been
+      emitted, retry is unsafe (re-streaming would duplicate output)
+      and the original exception propagates.
+    * **Mid-stream resume** (``allow_mid_stream=True``) — retries even
+      after chunks have been yielded. Restarts the stream from the
+      caller's ``messages`` list. The caller (typically AgentLoopV2)
+      is responsible for deduplicating tool_use_ids that re-emit on
+      retry — its ``_seen_calls`` map handles this. Without that map,
+      side-effecting tools could double-execute.
+
+    A synthetic ``StreamRetryNotice`` chunk is yielded between attempts
+    in mid-stream mode so the consumer can flush accumulated state
+    (text buffers, partial tool_use_ids) and re-start from the next
+    backend stream.
 
     Parameters
     ----------
@@ -65,6 +79,9 @@ class RetryingBackend:
     base_delay_s:
         Base delay for exponential backoff. Each retry waits
         ``base_delay_s * (2 ** attempt)`` seconds.
+    allow_mid_stream:
+        Retry mid-stream errors too. Requires the caller to dedupe
+        tool_use_ids; safe-by-construction otherwise.
     transient_exceptions:
         Exception types treated as transient. Default: ``ConnectionError``,
         ``TimeoutError``, ``asyncio.TimeoutError``.
@@ -76,11 +93,13 @@ class RetryingBackend:
         *,
         max_retries: int = 3,
         base_delay_s: float = 0.5,
+        allow_mid_stream: bool = False,
         transient_exceptions: tuple[type[BaseException], ...] | None = None,
     ) -> None:
         self._inner = inner
         self._max_retries = max(1, max_retries)
         self._base_delay = base_delay_s
+        self._allow_mid_stream = allow_mid_stream
         self._transient = transient_exceptions or _DEFAULT_TRANSIENT_EXC
 
     @property
@@ -104,8 +123,13 @@ class RetryingBackend:
     ) -> AsyncIterator[StreamChunk]:
         """Stream from the inner backend, retrying on transient errors.
 
-        Retry is attempted only before the first chunk is yielded. After
-        that, errors propagate (re-streaming would double-emit content).
+        Retry policy depends on ``allow_mid_stream``:
+
+        * False (default): retries only before the first chunk; after
+          that, errors propagate (re-streaming would double-emit).
+        * True: retries even after chunks have been yielded. Caller must
+          dedupe tool_use_ids that re-emit on retry — AgentLoopV2's
+          ``_seen_calls`` map does this.
         """
         last_exc: BaseException | None = None
         for attempt in range(self._max_retries):
@@ -117,16 +141,18 @@ class RetryingBackend:
                 return
             except self._transient as exc:
                 last_exc = exc
-                if yielded_any:
-                    # Mid-stream — retry would duplicate. Re-raise.
+                if yielded_any and not self._allow_mid_stream:
+                    # Mid-stream + safe-mode — retry would duplicate.
                     raise
                 if attempt == self._max_retries - 1:
                     # Last attempt; let it propagate.
                     raise
                 delay = self._base_delay * (2**attempt)
+                phase = "mid-stream" if yielded_any else "pre-stream"
                 logger.warning(
-                    "RetryingBackend: %s on attempt %d/%d, retrying in %.2fs",
+                    "RetryingBackend: %s %s on attempt %d/%d, retrying in %.2fs",
                     type(exc).__name__,
+                    phase,
                     attempt + 1,
                     self._max_retries,
                     delay,

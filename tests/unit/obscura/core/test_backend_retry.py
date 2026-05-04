@@ -76,6 +76,29 @@ class TestRetryingBackend:
         assert len(chunks) == 1
 
     @pytest.mark.asyncio
+    async def test_mid_stream_retry_when_allow_mid_stream(self) -> None:
+        """allow_mid_stream=True retries even after chunks have been yielded.
+        Caller is responsible for dedup (AgentLoopV2._seen_calls handles
+        this in the real path)."""
+        c1 = StreamChunk(kind=ChunkKind.TEXT_DELTA, text="partial")
+        c2 = StreamChunk(kind=ChunkKind.TEXT_DELTA, text="retry-success")
+        backend = _ScriptedBackend(
+            [
+                [c1, ConnectionError("transient mid-stream")],
+                [c2],
+            ]
+        )
+        wrapped = RetryingBackend(
+            backend, max_retries=3, base_delay_s=0.0, allow_mid_stream=True
+        )
+        chunks: list[StreamChunk] = []
+        async for c in wrapped.stream():
+            chunks.append(c)
+        # Both attempts' chunks land — caller must dedupe semantically.
+        assert backend.attempts == 2
+        assert [c.text for c in chunks] == ["partial", "retry-success"]
+
+    @pytest.mark.asyncio
     async def test_does_not_retry_after_first_chunk(self) -> None:
         """If a chunk has been yielded, retry would duplicate — re-raise."""
         chunk = StreamChunk(kind=ChunkKind.TEXT_DELTA, text="partial")
