@@ -845,42 +845,45 @@ class ClaudeBackend(BackendToolHostMixin):
 
     def _to_message(self, raw_messages: list[Any]) -> Message:
         """Convert Claude response messages to a normalized Message."""
+        from claude_agent_sdk.types import (
+            AssistantMessage,
+            ResultMessage,
+            TextBlock,
+            ThinkingBlock,
+            ToolResultBlock,
+            ToolUseBlock,
+        )
+
         blocks: list[Any] = []
 
         for msg in raw_messages:
-            type_name = type(msg).__name__
-
-            if type_name == "AssistantMessage" and hasattr(msg, "content"):
+            if isinstance(msg, AssistantMessage):
                 for block in msg.content:
-                    # ``block_type`` is the Claude SDK's class name, not
-                    # ours — coincidence is intentional.
-                    block_type = type(block).__name__
-
-                    if block_type == "TextBlock" and hasattr(block, "text"):
+                    if isinstance(block, TextBlock):
                         blocks.append(ObscuraTextBlock(text=block.text))
-                    elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
+                    elif isinstance(block, ThinkingBlock):
                         blocks.append(ObscuraThinkingBlock(text=block.thinking))
-                    elif block_type == "ToolUseBlock":
+                    elif isinstance(block, ToolUseBlock):
                         blocks.append(
                             ObscuraToolUseBlock(
-                                tool_name=getattr(block, "name", ""),
-                                args=getattr(block, "input", {}) or {},
-                                tool_use_id=getattr(block, "id", ""),
+                                tool_name=block.name,
+                                args=dict(block.input) if block.input else {},
+                                tool_use_id=block.id,
                             ),
                         )
-                    elif block_type == "ToolResultBlock":
-                        content = getattr(block, "content", "")
+                    elif isinstance(block, ToolResultBlock):
+                        content = block.content
                         if not isinstance(content, str):
-                            content = str(content)
+                            content = "" if content is None else str(content)
                         blocks.append(
                             ObscuraToolResultBlock(
                                 content=content,
-                                tool_use_id=getattr(block, "tool_use_id", ""),
-                                is_error=getattr(block, "is_error", False),
+                                tool_use_id=block.tool_use_id,
+                                is_error=bool(block.is_error),
                             ),
                         )
 
-            elif type_name == "ResultMessage":
+            elif isinstance(msg, ResultMessage):
                 # ResultMessage is metadata, not content — skip
                 continue
 
