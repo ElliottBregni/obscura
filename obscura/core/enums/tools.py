@@ -32,17 +32,12 @@ class UIMode(StrEnum):
     MULTI_SELECT = "multi_select"
 
 
-# TODO(phase 6): retype `ToolSpec.side_effects: str` (in `core/types.py`,
-# owned by Team Agent) to use this enum. Defined here so Team Agent has
-# something to import when their phase lands.
 class SideEffects(StrEnum):
     NONE = "none"
     READ = "read"
     WRITE = "write"
 
 
-# TODO(phase 6): retype `ToolChoice.mode: str` (in `core/types.py`,
-# owned by Team Agent). Defined now to lock the canonical wire values.
 class ToolChoiceMode(StrEnum):
     AUTO = "auto"
     NONE = "none"
@@ -60,9 +55,30 @@ class HTTPMethod(StrEnum):
     OPTIONS = "OPTIONS"
 
 
+class ContentBlockKind(StrEnum):
+    """Discriminator for the four message ContentBlock variants."""
+
+    TEXT = "text"
+    THINKING = "thinking"
+    TOOL_USE = "tool_use"
+    TOOL_RESULT = "tool_result"
+
+
+class CompilerSpecKind(StrEnum):
+    """Discriminator for the five compiler spec types loaded from YAML."""
+
+    TEMPLATE = "Template"
+    AGENT = "Agent"
+    POLICY = "Policy"
+    PACK = "Pack"
+    WORKSPACE = "Workspace"
+
+
 __all__ = [
     "BashRisk",
     "ChangeKind",
+    "CompilerSpecKind",
+    "ContentBlockKind",
     "HTTPMethod",
     "SideEffects",
     "ToolChoiceMode",

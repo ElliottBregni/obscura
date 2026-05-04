@@ -18,6 +18,8 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Protocol,
+    cast,
+    override,
     runtime_checkable,
 )
 
@@ -29,6 +31,13 @@ from obscura.core.enums.agent import (
     ExecutionMode,
     HookPoint,
     Role,
+)
+from obscura.core.enums.tools import ContentBlockKind, SideEffects, ToolChoiceMode
+from obscura.core.models.content import (
+    TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
 
 if TYPE_CHECKING:
@@ -47,6 +56,7 @@ __all__ = [
     "ChunkKind",
     "ConfirmationCapable",
     "ContentBlock",
+    "ContentBlockKind",
     "EFFORT_THINKING_BUDGETS",
     "EffortLevel",
     "ExecutionMode",
@@ -57,17 +67,23 @@ __all__ = [
     "ProviderNativeRequest",
     "Role",
     "SessionRef",
+    "SideEffects",
     "StreamChunk",
     "StreamMetadata",
+    "TextBlock",
+    "ThinkingBlock",
     "ToolCallContext",
     "ToolCallEnvelope",
     "ToolCallInfo",
     "ToolChoice",
+    "ToolChoiceMode",
     "ToolErrorType",
     "ToolExecutionError",
+    "ToolResultBlock",
     "ToolResultEnvelope",
     "ToolRouterCapable",
     "ToolSpec",
+    "ToolUseBlock",
     "UnifiedRequest",
 ]
 
@@ -118,19 +134,75 @@ class UnifiedRequest:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class ContentBlock:
-    """A single block within a message.
+class _ContentBlockMeta(type):
+    """Metaclass enabling ``ContentBlock(...)`` factory + ``isinstance`` checks.
 
-    Covers text, thinking/reasoning, tool invocations, and tool results.
+    Legacy callers use ``ContentBlock(kind="text", text="...")`` to build a
+    block, and check ``isinstance(b, ContentBlock)``. The discriminated
+    Pydantic union in ``obscura.core.models.content`` cannot satisfy both
+    contracts directly. This metaclass dispatches calls to the right
+    variant and treats every variant as a virtual subclass.
     """
 
-    kind: str  # "text", "thinking", "tool_use", "tool_result"
-    text: str = ""
-    tool_name: str = ""
-    tool_input: dict[str, Any] = field(default_factory=_empty_str_any_dict)
-    tool_use_id: str = ""
-    is_error: bool = False
+    @override
+    def __call__(cls, **kwargs: Any) -> Any:
+        return _build_content_block(**kwargs)
+
+    @override
+    def __instancecheck__(cls, instance: Any) -> bool:
+        return isinstance(
+            instance, (TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock)
+        )
+
+
+class ContentBlock(metaclass=_ContentBlockMeta):
+    """Compatibility facade for the discriminated content-block union.
+
+    Calling ``ContentBlock(kind=..., ...)`` returns one of ``TextBlock``,
+    ``ThinkingBlock``, ``ToolUseBlock``, or ``ToolResultBlock``. New code
+    should construct the variant directly and ``match`` / ``isinstance``
+    on the variant types. Use ``ContentBlock.from_dict(payload)`` to
+    rebuild a block from persisted JSON.
+    """
+
+    @staticmethod
+    def from_dict(payload: Mapping[str, Any]) -> Any:
+        """Reconstruct a block from a previously serialized dict payload."""
+        return _build_content_block(**dict(payload))
+
+
+def _build_content_block(
+    *,
+    kind: str = "text",
+    text: str = "",
+    tool_name: str = "",
+    tool_input: Mapping[str, Any] | None = None,
+    tool_use_id: str = "",
+    is_error: bool = False,
+    args: Mapping[str, Any] | None = None,
+    content: Any = None,
+) -> Any:
+    """Construct the right ``ContentBlock`` variant for legacy keyword callers."""
+    block_kind = kind.value if isinstance(kind, ContentBlockKind) else kind
+    if block_kind == ContentBlockKind.TEXT.value:
+        return TextBlock(text=text)
+    if block_kind == ContentBlockKind.THINKING.value:
+        return ThinkingBlock(text=text)
+    if block_kind == ContentBlockKind.TOOL_USE.value:
+        merged_args: Mapping[str, Any] = args if args is not None else (tool_input or {})
+        return ToolUseBlock(
+            tool_use_id=tool_use_id,
+            tool_name=tool_name,
+            args=merged_args,
+        )
+    if block_kind == ContentBlockKind.TOOL_RESULT.value:
+        body = content if content is not None else text
+        return ToolResultBlock(
+            tool_use_id=tool_use_id,
+            content=body,
+            is_error=is_error,
+        )
+    raise ValueError(f"Unknown content block kind: {kind!r}")
 
 
 @dataclass(frozen=True)
@@ -142,7 +214,7 @@ class Message:
     """
 
     role: Role
-    content: list[ContentBlock]
+    content: list[Any]
     session_id: str | None = None
     agent_name: str | None = None
     model: str | None = None
@@ -152,7 +224,9 @@ class Message:
     @property
     def text(self) -> str:
         """Convenience: concatenate all text blocks."""
-        return "".join(b.text for b in self.content if b.kind == "text")
+        return "".join(
+            b.text for b in self.content if isinstance(b, TextBlock)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +285,7 @@ class ToolSpec:
     output_schema: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     _pydantic_model: type | None = None
     required_tier: str = "public"
-    side_effects: str = "none"
+    side_effects: SideEffects = SideEffects.NONE
     auth_scope: tuple[str, ...] = field(default_factory=lambda: ())
     rate_limit_per_minute: int = 0
     cost_hint: float = 0.0
@@ -220,9 +294,17 @@ class ToolSpec:
     examples: tuple[dict[str, Any], ...] = field(default_factory=lambda: ())
     capability: str = ""  # capability group ID (e.g. "git.ops")
 
+    def __post_init__(self) -> None:
+        # Coerce loose string ``side_effects`` from legacy callers (and
+        # plugin manifests) into the enum so downstream callsites never see
+        # a bare ``str`` here.
+        raw = cast(Any, self.side_effects)
+        if not isinstance(raw, SideEffects):
+            object.__setattr__(self, "side_effects", SideEffects(raw))
+
     def is_concurrency_safe(self) -> bool:
         """Tools without side effects can run concurrently."""
-        return not self.side_effects or self.side_effects == "none"
+        return self.side_effects == SideEffects.NONE
 
 
 # Hook config type for Copilot backend
@@ -260,25 +342,30 @@ class ToolChoice:
         ToolChoice.required("my_tool")
     """
 
-    mode: str = "auto"
+    mode: ToolChoiceMode = ToolChoiceMode.AUTO
     function_name: str = ""
+
+    def __post_init__(self) -> None:
+        raw = cast(Any, self.mode)
+        if not isinstance(raw, ToolChoiceMode):
+            object.__setattr__(self, "mode", ToolChoiceMode(raw))
 
     @classmethod
     def auto(cls) -> ToolChoice:
         """Let the model decide whether to call tools."""
-        return cls(mode="auto")
+        return cls(mode=ToolChoiceMode.AUTO)
 
     @classmethod
     def none(cls) -> ToolChoice:
         """Disable tool calling for this request."""
-        return cls(mode="none")
+        return cls(mode=ToolChoiceMode.NONE)
 
     @classmethod
     def required(cls, name: str = "") -> ToolChoice:
         """Force tool calling. Optionally force a specific tool by name."""
         if name:
-            return cls(mode="function", function_name=name)
-        return cls(mode="required")
+            return cls(mode=ToolChoiceMode.FUNCTION, function_name=name)
+        return cls(mode=ToolChoiceMode.REQUIRED)
 
 
 # ---------------------------------------------------------------------------
