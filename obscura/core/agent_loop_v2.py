@@ -10,58 +10,59 @@ execution.
 Architectural diff from v1
 ==========================
 
-+--------------------------+--------------------------------+--------------------------------+
-| Concern                  | v1                             | v2                             |
-+==========================+================================+================================+
-| Tool dispatch            | StreamingToolExecutor          | dag.Scheduler                  |
-| Intra-turn parallelism   | side_effects=="none" only      | DAG edges + concurrency caps   |
-| Retries / backoff        | inline in run()                | (TODO — middleware)            |
-| Predictive cache         | inline in run()                | (TODO — middleware)            |
-| Capability gates         | inline _execute_single_tool    | (TODO — middleware)            |
-| Arbiter                  | inline                         | (TODO — middleware)            |
-| seen_calls dedup         | StreamingToolExecutor.seen_calls| _seen_calls dict + check at   |
-|                          |                                | dispatch (load-bearing)        |
-| Cancellation             | abort_event + task.cancel      | scheduler.cancel_event         |
-| Compaction               | inline                         | hook callbacks                 |
-+--------------------------+--------------------------------+--------------------------------+
++--------------------------+----------------------------------+---------------------------------+
+| Concern                  | v1                               | v2                              |
++==========================+==================================+=================================+
+| Tool dispatch            | StreamingToolExecutor            | dag.Scheduler                   |
+| Intra-turn parallelism   | side_effects=="none" only        | DAG edges + concurrency caps    |
+| Retries / backoff        | inline in run()                  | RetryingBackend wrapper         |
+| Predictive cache         | inline in run()                  | predictive_cache_middleware     |
+| Capability gates         | inline _execute_single_tool      | capability_gate middleware      |
+| Arbiter (turn-level)     | inline                           | arbiter_post_turn hook          |
+| Tool confirmation        | inline + on_confirm callback     | tool_confirmation middleware    |
+| Tool allow/deny          | inline                           | tool_allowlist / tool_denylist  |
+| Hooks (pre/post tool)    | inline HookRegistry calls        | hook_middleware                 |
+| Compaction               | inline                           | compact_pre_turn hook           |
+| Event store              | inline                           | event_store_post_turn hook      |
+| host_callbacks           | ToolContext fields               | ToolContext fields (parity)     |
+| compiled_agent           | inline                           | factory translation             |
+| seen_calls dedup         | StreamingToolExecutor.seen_calls | _seen_calls dict (load-bearing) |
+| Cancellation             | abort_event + task.cancel        | scheduler.cancel_event          |
++--------------------------+----------------------------------+---------------------------------+
 
 What v2 owns
 ------------
 
-A focused, ~400-line implementation that:
+A focused, ~600-line implementation that:
 
 1. Streams from a :class:`BackendProtocol`, one turn at a time.
 2. Collects ``tool_use`` blocks during the stream into ``ToolCallInfo`` objects.
-3. After the assistant turn ends, builds a :class:`TurnDAG` from the collected
+3. Fires text-delta observers (predictive cache observer is the canonical user).
+4. After the assistant turn ends, builds a :class:`TurnDAG` from the collected
    calls (with no edges by default — matches today's batch behavior).
-4. Runs the DAG through :class:`Scheduler`, sequential or parallel depending
+5. Runs the DAG through :class:`Scheduler`, sequential or parallel depending
    on whether any node has declared ``depends_on``.
-5. Yields :class:`AgentEvent` instances throughout (TEXT_DELTA, TOOL_CALL,
+6. Binds a :class:`ToolContext` per turn so tools see host_callbacks /
+   history / session_id / registry just like v1.
+7. Composes any user-supplied dispatch_middleware around the per-node
+   executor (capability_gate, tool_confirmation, predictive_cache_middleware,
+   etc.).
+8. Yields :class:`AgentEvent` instances throughout (TEXT_DELTA, TOOL_CALL,
    TOOL_RESULT, AGENT_DONE) — same shape as v1 so callers don't need
    to change.
-6. Repeats until the model emits no tool calls or ``max_turns`` is exceeded.
+9. Repeats until the model emits no tool calls or ``max_turns`` is exceeded.
 
-What v2 deliberately leaves out
--------------------------------
+Migration
+---------
 
-* Capability tokens, tool allowlists — middleware concern, not core.
-* Predictive cache — speculative-fetch is a separate optimization layer.
-* Arbiter integration — wraps over v2 via hooks.
-* Per-turn retry loop with timeouts — caller wraps with ``asyncio.timeout``.
-* Tool confirmation prompts — caller injects via hooks.
+**v2 is the default loop**. Existing call sites should migrate to
+:func:`obscura.core.agent_loop_factory.make_agent_loop`, which translates
+v1-shape kwargs to v2 middleware/hooks automatically. Set
+``OBSCURA_AGENT_LOOP=v1`` to revert to the legacy loop while debugging.
 
-These all worked fine in v1 — they just made v1 hard to read. v2 keeps
-the core loop legible; advanced behaviors compose on top.
-
-Migration story
----------------
-
-v1 is not deleted. Both classes coexist:
-
-* New code starts on :class:`AgentLoopV2`.
-* Existing callers stay on :class:`obscura.core.agent_loop.AgentLoop` until
-  the eval harness shows v2 reaches feature parity for their workflows.
-* Stage D in the surface-split plan removes v1 once parity is real.
+v1 (:class:`obscura.core.agent_loop.AgentLoop`) is preserved as a fallback
+and deletion target. The deprecation pass and final removal happen once
+eval data confirms parity across all real-world workloads.
 """
 
 from __future__ import annotations

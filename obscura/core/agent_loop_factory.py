@@ -1,6 +1,6 @@
 """obscura.core.agent_loop_factory — toggle between AgentLoop (v1) and AgentLoopV2.
 
-Existing callers can swap to v2 by changing one line:
+Existing callers swap to v2 by changing one line:
 
 .. code-block:: python
 
@@ -12,18 +12,27 @@ Existing callers can swap to v2 by changing one line:
     from obscura.core.agent_loop_factory import make_agent_loop
     loop = make_agent_loop(backend, registry, hooks=hooks, capability_token=token, ...)
 
-Set ``OBSCURA_AGENT_LOOP=v2`` to opt into v2; default is ``v1`` until eval
-data confirms parity. The factory translates v1's flat kwarg surface into
-the v2 middleware composition automatically — capability gates, hooks,
-allowlists, confirmation, output overrides, and compaction all map to the
-right middleware / hook entries.
+**v2 is the default.** Set ``OBSCURA_AGENT_LOOP=v1`` to revert to the
+legacy loop while debugging. The factory translates v1's flat kwarg
+surface into the v2 middleware composition automatically — capability
+gates, hooks, allowlists, confirmation, output overrides, compaction,
+predictive cache, compiled_agent, host_callbacks, and mid-stream retry
+all map to the right middleware / hook entries.
 
-Caveats — features that don't yet have a v2 equivalent (predictive cache,
-intra-turn stream retry with seen_calls, host_callbacks plumbing) are
-**ignored** when the toggle is v2 with a one-time WARNING log per process.
-That's the explicit incremental-port story: v2 is fully usable for the
-features it supports, and unsupported kwargs degrade gracefully rather
-than silently misleading the caller.
+Per-feature opt-outs (each defaults ON under v2):
+
+- ``OBSCURA_V2_PREDICTIVE_CACHE=0`` — disable speculative read-only
+  prefetch
+- ``OBSCURA_V2_SAFE_SKIP_CONFIRM=0`` — prompt for every tool, even
+  read-only ones
+- ``OBSCURA_V2_COMPILED_AGENT=0`` — ignore compiled_agent settings
+  (instructions / max_iterations / allow / deny)
+- ``OBSCURA_V2_RESUME_RETRY=0`` (or ``=safe``) — disable mid-stream
+  retry, or downgrade to safe-mode (pre-first-chunk only)
+
+Unsupported v1 kwargs (rare — long tail like ``compiled_agent``-internal
+fields, ``backend_name``, ``turn_timeout_s``) drop with a one-time
+WARNING per process. v2 IS the production loop; these are footnotes.
 """
 
 from __future__ import annotations
@@ -50,7 +59,7 @@ __all__ = ["AgentLoopHandle", "is_v2_enabled", "make_agent_loop"]
 AgentLoopHandle = "AgentLoop | AgentLoopV2"
 
 
-_TRUTHY: frozenset[str] = frozenset({"v2", "1", "true", "yes", "on", "y", "t"})
+_V1_OPTOUT: frozenset[str] = frozenset({"v1", "0", "false", "no", "off"})
 
 # Track which unsupported v1 kwargs we've already warned about, to avoid
 # spamming the log on every loop instantiation.
@@ -84,12 +93,12 @@ def _flag_enabled(env_name: str, default: str = "1") -> bool:
 
 
 def is_v2_enabled() -> bool:
-    """True when ``OBSCURA_AGENT_LOOP=v2`` (or any truthy synonym).
-
-    Default False. Set this in your shell or your runner config to opt in.
-    """
+    """True when v2 is in use. Default True; set ``OBSCURA_AGENT_LOOP=v1``
+    (or any falsy synonym — ``0``, ``false``, ``no``, ``off``) to opt out
+    and use the legacy v1 loop."""
     raw = os.environ.get("OBSCURA_AGENT_LOOP", "").strip().lower()
-    return raw in _TRUTHY
+    # Empty / unset / anything not in the v1-opt-out list → v2.
+    return raw not in _V1_OPTOUT
 
 
 def make_agent_loop(

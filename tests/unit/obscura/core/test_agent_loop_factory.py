@@ -27,18 +27,22 @@ from obscura.core.tools import ToolRegistry
 
 
 class TestIsV2Enabled:
-    def test_default_is_false(self) -> None:
+    def test_default_is_true(self) -> None:
+        """v2 is default. Unset env → use v2."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("OBSCURA_AGENT_LOOP", None)
-            assert is_v2_enabled() is False
+            assert is_v2_enabled() is True
 
-    @pytest.mark.parametrize("value", ["v2", "1", "true", "TRUE", "yes", "on"])
-    def test_truthy_values(self, value: str) -> None:
+    @pytest.mark.parametrize(
+        "value", ["v2", "1", "true", "TRUE", "yes", "on", "anything-else"]
+    )
+    def test_v2_or_unrecognized_uses_v2(self, value: str) -> None:
+        """v2 is default; only the explicit v1-opt-out synonyms revert."""
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
             assert is_v2_enabled() is True
 
-    @pytest.mark.parametrize("value", ["v1", "0", "false", "no", "off", "", "  "])
-    def test_falsy_values(self, value: str) -> None:
+    @pytest.mark.parametrize("value", ["v1", "0", "false", "no", "off"])
+    def test_explicit_v1_optout(self, value: str) -> None:
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
             assert is_v2_enabled() is False
 
@@ -72,20 +76,22 @@ class _StubBackend:
 
 
 class TestMakeAgentLoopSelection:
-    def test_default_returns_v1(self) -> None:
-        from obscura.core.agent_loop import AgentLoop
+    def test_default_returns_v2(self) -> None:
+        """v2 is the default — unset env uses v2."""
+        from obscura.core.agent_loop_v2 import AgentLoopV2
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("OBSCURA_AGENT_LOOP", None)
             loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
-            assert isinstance(loop, AgentLoop)
-
-    def test_env_v2_returns_v2(self) -> None:
-        from obscura.core.agent_loop_v2 import AgentLoopV2
-
-        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
-            loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
             assert isinstance(loop, AgentLoopV2)
+
+    def test_env_v1_returns_v1(self) -> None:
+        """Explicit v1 opt-out reverts to legacy loop."""
+        from obscura.core.agent_loop import AgentLoop
+
+        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v1"}):
+            loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
+            assert isinstance(loop, AgentLoop)
 
 
 # ---------------------------------------------------------------------------
