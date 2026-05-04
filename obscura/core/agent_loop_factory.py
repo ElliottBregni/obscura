@@ -72,6 +72,7 @@ _V2_SUPPORTED_V1_KWARGS: frozenset[str] = frozenset(
         "model_name",
         "context_budget",
         "host_callbacks",
+        "compiled_agent",
     }
 )
 
@@ -144,9 +145,33 @@ def _build_v2(
         hook_middleware,
         tool_allowlist,
         tool_confirmation,
+        tool_denylist,
         tool_output_level,
     )
     from obscura.core.agent_loop_v2 import AgentLoopV2, AgentLoopV2Config
+
+    # ── compiled_agent translation (OBSCURA_V2_COMPILED_AGENT, default ON)
+    # Pull settings from a CompiledAgent and merge into the v1-style kwargs
+    # before the rest of the translation runs. Caller's explicit kwargs win
+    # over compiled-agent values.
+    compiled_agent = v1_kwargs.get("compiled_agent")
+    compiled_system_prompt = ""
+    compiled_denylist: frozenset[str] | None = None
+    if compiled_agent is not None and _flag_enabled("OBSCURA_V2_COMPILED_AGENT"):
+        # Caller's explicit allowlist overrides the compiled one; same for
+        # max_turns. Compiled values fill in only when caller didn't set.
+        if v1_kwargs.get("tool_allowlist") is None:
+            ca_allow = getattr(compiled_agent, "tool_allowlist", None)
+            if ca_allow is not None:
+                v1_kwargs["tool_allowlist"] = list(ca_allow)
+        ca_deny = getattr(compiled_agent, "tool_denylist", None)
+        if ca_deny:
+            compiled_denylist = frozenset(ca_deny)
+        if v1_kwargs.get("max_turns") is None:
+            ca_max = getattr(compiled_agent, "max_iterations", None)
+            if ca_max is not None:
+                v1_kwargs["max_turns"] = int(ca_max)
+        compiled_system_prompt = getattr(compiled_agent, "instructions", "") or ""
 
     # Warn once per unsupported kwarg.
     for k in v1_kwargs:
@@ -170,6 +195,11 @@ def _build_v2(
 
     if "tool_allowlist" in v1_kwargs and v1_kwargs["tool_allowlist"] is not None:
         dispatch_middleware.append(tool_allowlist(v1_kwargs["tool_allowlist"]))
+
+    # CompiledAgent's denylist (if any) — applied after allowlist so denied
+    # names win over allowed ones.
+    if compiled_denylist:
+        dispatch_middleware.append(tool_denylist(compiled_denylist))
 
     if "on_confirm" in v1_kwargs and v1_kwargs["on_confirm"] is not None:
         # Pass the registry so the middleware can short-circuit prompts
@@ -284,6 +314,7 @@ def _build_v2(
         host_callbacks=v1_kwargs.get("host_callbacks") or None,
         text_delta_observers=text_observers or None,
         on_turn_start=on_turn_start,
+        system_prompt=compiled_system_prompt,
     )
 
 

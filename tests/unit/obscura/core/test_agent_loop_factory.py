@@ -186,6 +186,106 @@ class TestV1KwargTranslation:
 
 
 # ---------------------------------------------------------------------------
+# CompiledAgent translation
+# ---------------------------------------------------------------------------
+
+
+class _FakeCompiledAgent:
+    """A minimal stand-in for obscura.core.compiler.compiled.CompiledAgent.
+
+    Tests don't need the real type — duck-typing on the field names is what
+    the factory actually relies on.
+    """
+
+    def __init__(
+        self,
+        *,
+        instructions: str = "",
+        max_iterations: int = 10,
+        tool_allowlist: frozenset[str] | None = None,
+        tool_denylist: frozenset[str] = frozenset(),
+    ) -> None:
+        self.instructions = instructions
+        self.max_iterations = max_iterations
+        self.tool_allowlist = tool_allowlist
+        self.tool_denylist = tool_denylist
+
+
+class TestCompiledAgentTranslation:
+    def test_compiled_allowlist_becomes_middleware(self) -> None:
+        ca = _FakeCompiledAgent(tool_allowlist=frozenset({"a", "b"}))
+        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
+            loop = make_agent_loop(
+                _StubBackend(),
+                ToolRegistry(),  # type: ignore[arg-type]
+                compiled_agent=ca,
+            )
+            assert len(loop._dispatch_middleware) >= 1  # type: ignore[attr-defined]
+
+    def test_compiled_denylist_adds_middleware(self) -> None:
+        ca = _FakeCompiledAgent(tool_denylist=frozenset({"forbidden"}))
+        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
+            loop = make_agent_loop(
+                _StubBackend(),
+                ToolRegistry(),  # type: ignore[arg-type]
+                compiled_agent=ca,
+            )
+            # At least the predictive_cache middleware (default ON) +
+            # tool_denylist from compiled.
+            assert len(loop._dispatch_middleware) >= 2  # type: ignore[attr-defined]
+
+    def test_compiled_max_iterations_sets_max_turns(self) -> None:
+        ca = _FakeCompiledAgent(max_iterations=42)
+        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
+            loop = make_agent_loop(
+                _StubBackend(),
+                ToolRegistry(),  # type: ignore[arg-type]
+                compiled_agent=ca,
+            )
+            assert loop._config.max_turns == 42  # type: ignore[attr-defined]
+
+    def test_explicit_max_turns_overrides_compiled(self) -> None:
+        ca = _FakeCompiledAgent(max_iterations=42)
+        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
+            loop = make_agent_loop(
+                _StubBackend(),
+                ToolRegistry(),  # type: ignore[arg-type]
+                compiled_agent=ca,
+                max_turns=7,
+            )
+            assert loop._config.max_turns == 7  # type: ignore[attr-defined]
+
+    def test_compiled_instructions_becomes_system_prompt(self) -> None:
+        ca = _FakeCompiledAgent(instructions="You are a helpful test agent.")
+        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
+            loop = make_agent_loop(
+                _StubBackend(),
+                ToolRegistry(),  # type: ignore[arg-type]
+                compiled_agent=ca,
+            )
+            assert loop._system_prompt == "You are a helpful test agent."  # type: ignore[attr-defined]
+
+    def test_disable_via_env_flag(self) -> None:
+        ca = _FakeCompiledAgent(
+            instructions="ignored",
+            max_iterations=42,
+            tool_allowlist=frozenset({"a"}),
+        )
+        with patch.dict(
+            os.environ,
+            {"OBSCURA_AGENT_LOOP": "v2", "OBSCURA_V2_COMPILED_AGENT": "0"},
+        ):
+            loop = make_agent_loop(
+                _StubBackend(),
+                ToolRegistry(),  # type: ignore[arg-type]
+                compiled_agent=ca,
+            )
+            # Compiled values ignored — defaults take over.
+            assert loop._system_prompt == ""  # type: ignore[attr-defined]
+            assert loop._config.max_turns == 10  # default  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
 # Unsupported kwargs warn
 # ---------------------------------------------------------------------------
 
@@ -197,13 +297,13 @@ class TestUnsupportedKwargsWarn:
         # Reset the dedup so the warning fires deterministically.
         from obscura.core.agent_loop_factory import _warned_unsupported
 
-        _warned_unsupported.discard("compiled_agent")
+        _warned_unsupported.discard("turn_timeout_s")
 
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):
             with caplog.at_level(logging.WARNING):
                 make_agent_loop(
                     _StubBackend(),
                     ToolRegistry(),  # type: ignore[arg-type]
-                    compiled_agent="something",
+                    turn_timeout_s=60.0,
                 )
-            assert any("compiled_agent" in r.message for r in caplog.records)
+            assert any("turn_timeout_s" in r.message for r in caplog.records)

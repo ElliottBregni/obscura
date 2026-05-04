@@ -242,6 +242,7 @@ class AgentLoopV2:
         host_callbacks: dict[str, Any] | None = None,
         text_delta_observers: list[Callable[[str], Awaitable[None]]] | None = None,
         on_turn_start: Callable[[int, ToolContext], Awaitable[None]] | None = None,
+        system_prompt: str = "",
     ) -> None:
         self._backend = backend
         self._registry = registry
@@ -269,6 +270,10 @@ class AgentLoopV2:
         # see host_callbacks/registry/etc.). Lightweight — runs sync
         # path inline.
         self._on_turn_start = on_turn_start
+        # Prepended to the conversation as a SYSTEM-role message before
+        # the first user prompt. Empty string = no system message.
+        # Mirrors v1's compiled-agent ``instructions`` field.
+        self._system_prompt = system_prompt
 
         # Per-turn dedup keyed by SDK tool_use_id. LOAD-BEARING for
         # correctness — see the extended note on
@@ -295,6 +300,17 @@ class AgentLoopV2:
         """Drive the agent until the model emits no tool calls or ``max_turns``."""
         session_id = session_id or str(uuid.uuid4())
         messages: list[Message] = list(history or [])
+        # Prepend the system prompt only when no history was provided —
+        # if the caller already passed a history, assume it includes any
+        # system message they wanted.
+        if self._system_prompt and not history:
+            messages.insert(
+                0,
+                Message(
+                    role=Role.SYSTEM,
+                    content=[ContentBlock(kind="text", text=self._system_prompt)],
+                ),
+            )
         messages.append(
             Message(role=Role.USER, content=[ContentBlock(kind="text", text=prompt)])
         )

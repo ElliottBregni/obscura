@@ -45,6 +45,7 @@ __all__ = [
     "hook_middleware",
     "tool_allowlist",
     "tool_confirmation",
+    "tool_denylist",
     "tool_output_level",
 ]
 
@@ -141,6 +142,46 @@ def tool_allowlist(
                     ContentBlock(
                         kind="text",
                         text=f"Tool '{node.tool_name}' is not in the allowlist.",
+                        is_error=True,
+                    ),
+                ]
+            return await inner(node, resolved)
+
+        return wrapped
+
+    return wrap
+
+
+# ---------------------------------------------------------------------------
+# tool_denylist
+# ---------------------------------------------------------------------------
+
+
+def tool_denylist(
+    denied: list[str] | set[str] | tuple[str, ...] | frozenset[str],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Reject dispatches for tool names IN *denied*.
+
+    Inverse of :func:`tool_allowlist`. CompiledAgent uses both: the
+    workspace declares an allowlist (only-these) AND a denylist
+    (never-these). Apply both middleware in series — the workspace
+    can use either or both depending on its policy.
+    """
+    denied_set = frozenset(denied)
+
+    def wrap(inner: Callable[..., Any]) -> Callable[..., Any]:
+        async def wrapped(
+            node: DAGNode,
+            resolved: dict[str, Any],
+        ) -> list[ContentBlock]:
+            if node.tool_name in denied_set:
+                logger.info(
+                    "tool_denylist: denied %s (in denylist)", node.tool_name
+                )
+                return [
+                    ContentBlock(
+                        kind="text",
+                        text=f"Tool '{node.tool_name}' is in the denylist.",
                         is_error=True,
                     ),
                 ]
