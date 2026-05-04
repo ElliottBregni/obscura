@@ -134,43 +134,6 @@ class UnifiedRequest:
 # ---------------------------------------------------------------------------
 
 
-class _ContentBlockMeta(type):
-    """Metaclass enabling ``ContentBlock(...)`` factory + ``isinstance`` checks.
-
-    Legacy callers use ``ContentBlock(kind="text", text="...")`` to build a
-    block, and check ``isinstance(b, ContentBlock)``. The discriminated
-    Pydantic union in ``obscura.core.models.content`` cannot satisfy both
-    contracts directly. This metaclass dispatches calls to the right
-    variant and treats every variant as a virtual subclass.
-    """
-
-    @override
-    def __call__(cls, **kwargs: Any) -> Any:
-        return _build_content_block(**kwargs)
-
-    @override
-    def __instancecheck__(cls, instance: Any) -> bool:
-        return isinstance(
-            instance, (TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock)
-        )
-
-
-class ContentBlock(metaclass=_ContentBlockMeta):
-    """Compatibility facade for the discriminated content-block union.
-
-    Calling ``ContentBlock(kind=..., ...)`` returns one of ``TextBlock``,
-    ``ThinkingBlock``, ``ToolUseBlock``, or ``ToolResultBlock``. New code
-    should construct the variant directly and ``match`` / ``isinstance``
-    on the variant types. Use ``ContentBlock.from_dict(payload)`` to
-    rebuild a block from persisted JSON.
-    """
-
-    @staticmethod
-    def from_dict(payload: Mapping[str, Any]) -> Any:
-        """Reconstruct a block from a previously serialized dict payload."""
-        return _build_content_block(**dict(payload))
-
-
 def _build_content_block(
     *,
     kind: str = "text",
@@ -205,6 +168,61 @@ def _build_content_block(
             is_error=is_error,
         )
     raise ValueError(f"Unknown content block kind: {kind!r}")
+
+
+class _ContentBlockMeta(type):
+    """Metaclass enabling ``ContentBlock(...)`` factory + ``isinstance`` checks.
+
+    Legacy callers use ``ContentBlock(kind="text", text="...")`` to build a
+    block, and check ``isinstance(b, ContentBlock)``. The discriminated
+    Pydantic union in ``obscura.core.models.content`` cannot satisfy both
+    contracts directly. This metaclass dispatches calls to the right
+    variant and treats every variant as a virtual subclass.
+    """
+
+    @override
+    def __call__(cls, **kwargs: Any) -> Any:
+        return _build_content_block(**kwargs)
+
+    @override
+    def __instancecheck__(cls, instance: Any) -> bool:
+        return isinstance(
+            instance, (TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock)
+        )
+
+
+class ContentBlock(metaclass=_ContentBlockMeta):
+    """Compatibility facade for the discriminated content-block union.
+
+    Calling ``ContentBlock(kind=..., ...)`` returns one of ``TextBlock``,
+    ``ThinkingBlock``, ``ToolUseBlock``, or ``ToolResultBlock``. New code
+    should construct the variant directly and ``match`` / ``isinstance``
+    on the variant types. Use ``ContentBlock.from_dict(payload)`` to
+    rebuild a block from persisted JSON.
+
+    The class declares the union's superset of attributes so static type
+    checkers see ``b.kind`` / ``b.text`` / ``b.tool_input`` / ``b.args``
+    on the legacy facade — runtime values come from the variant Pydantic
+    model the metaclass produces.
+    """
+
+    # Static-only attribute declarations that mirror the union's fields.
+    # The runtime class is empty; instances are always the Pydantic
+    # variants the metaclass forwards to.
+    if TYPE_CHECKING:
+        kind: ContentBlockKind
+        text: str
+        tool_name: str
+        tool_input: Mapping[str, Any]
+        tool_use_id: str
+        is_error: bool
+        args: Mapping[str, Any]
+        content: str | list[TextBlock]
+
+    @staticmethod
+    def from_dict(payload: Mapping[str, Any]) -> Any:
+        """Reconstruct a block from a previously serialized dict payload."""
+        return _build_content_block(**dict(payload))
 
 
 @dataclass(frozen=True)
@@ -285,7 +303,12 @@ class ToolSpec:
     output_schema: dict[str, Any] = field(default_factory=_empty_str_any_dict)
     _pydantic_model: type | None = None
     required_tier: str = "public"
-    side_effects: SideEffects = SideEffects.NONE
+    # Accepts ``str`` at the construction boundary so legacy callers
+    # (parallel_plan, plugin loader) pass ``"none"`` / ``"read"`` /
+    # ``"write"`` unchanged. ``__post_init__`` normalises every accepted
+    # value to a real ``SideEffects`` member, so reads always see the
+    # enum.
+    side_effects: SideEffects | str = SideEffects.NONE
     auth_scope: tuple[str, ...] = field(default_factory=lambda: ())
     rate_limit_per_minute: int = 0
     cost_hint: float = 0.0

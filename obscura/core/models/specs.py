@@ -125,7 +125,7 @@ class TemplateSpec(BaseModel):
     model_config = _SPEC_CONFIG
 
     api_version: str = Field("obscura/v1", alias="apiVersion")
-    kind: Literal[CompilerSpecKind.TEMPLATE] = CompilerSpecKind.TEMPLATE
+    kind: Literal["Template"] = CompilerSpecKind.TEMPLATE.value
     metadata: SpecMetadata
     spec: TemplateSpecBody
 
@@ -152,7 +152,7 @@ class AgentInstanceSpec(BaseModel):
     model_config = _SPEC_CONFIG
 
     api_version: str = Field("obscura/v1", alias="apiVersion")
-    kind: Literal[CompilerSpecKind.AGENT] = CompilerSpecKind.AGENT
+    kind: Literal["Agent"] = CompilerSpecKind.AGENT.value
     metadata: SpecMetadata
     spec: AgentInstanceSpecBody
 
@@ -188,7 +188,7 @@ class PolicySpec(BaseModel):
     model_config = _SPEC_CONFIG
 
     api_version: str = Field("obscura/v1", alias="apiVersion")
-    kind: Literal[CompilerSpecKind.POLICY] = CompilerSpecKind.POLICY
+    kind: Literal["Policy"] = CompilerSpecKind.POLICY.value
     metadata: SpecMetadata
     spec: PolicySpecBody
 
@@ -226,7 +226,7 @@ class PackSpec(BaseModel):
     model_config = _SPEC_CONFIG
 
     api_version: str = Field("obscura/v1", alias="apiVersion")
-    kind: Literal[CompilerSpecKind.PACK] = CompilerSpecKind.PACK
+    kind: Literal["Pack"] = CompilerSpecKind.PACK.value
     metadata: SpecMetadata
     spec: PackSpecBody
 
@@ -297,7 +297,7 @@ class WorkspaceSpec(BaseModel):
     model_config = _SPEC_CONFIG
 
     api_version: str = Field("obscura/v1", alias="apiVersion")
-    kind: Literal[CompilerSpecKind.WORKSPACE] = CompilerSpecKind.WORKSPACE
+    kind: Literal["Workspace"] = CompilerSpecKind.WORKSPACE.value
     metadata: SpecMetadata
     spec: WorkspaceSpecBody
 
