@@ -11,6 +11,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from obscura.core.enums.lifecycle import KairosTaskStatus
 from obscura.core.kairos.errors import (
     BudgetExceededError,
 )
@@ -20,7 +21,6 @@ from obscura.core.kairos.types import (
     KairosConfig,
     Task,
     TaskResult,
-    TaskStatus,
 )
 
 if TYPE_CHECKING:
@@ -82,7 +82,7 @@ class TaskRunner:
         while retry <= task.max_retries:
             result = await self._execute_once(task, goal, attempt=retry)
 
-            if result.status == TaskStatus.SUCCEEDED:
+            if result.status == KairosTaskStatus.SUCCEEDED:
                 return result
 
             last_error = result.error
@@ -100,7 +100,7 @@ class TaskRunner:
             retry += 1
             self._store.update_task_status(
                 task.task_id,
-                TaskStatus.RETRYING,
+                KairosTaskStatus.RETRYING,
                 retry_count=retry,
             )
             logger.info(
@@ -117,7 +117,7 @@ class TaskRunner:
             task_id=task.task_id,
             goal_id=task.goal_id,
             plan_id=task.plan_id,
-            status=TaskStatus.FAILED,
+            status=KairosTaskStatus.FAILED,
             error=last_error or "Max retries exceeded",
         )
 
@@ -167,7 +167,7 @@ class TaskRunner:
                 task_id=task.task_id,
                 goal_id=task.goal_id,
                 plan_id=task.plan_id,
-                status=TaskStatus.FAILED,
+                status=KairosTaskStatus.FAILED,
                 error=f"Task timed out after {self._config.task_timeout_seconds}s",
                 elapsed_ms=elapsed,
                 turns_used=turns_used,
@@ -181,7 +181,7 @@ class TaskRunner:
                 task_id=task.task_id,
                 goal_id=task.goal_id,
                 plan_id=task.plan_id,
-                status=TaskStatus.FAILED,
+                status=KairosTaskStatus.FAILED,
                 error=error_str,
                 elapsed_ms=elapsed,
                 turns_used=turns_used,
@@ -206,7 +206,7 @@ class TaskRunner:
             task_id=task.task_id,
             goal_id=task.goal_id,
             plan_id=task.plan_id,
-            status=TaskStatus.SUCCEEDED,
+            status=KairosTaskStatus.SUCCEEDED,
             summary=output[:500],  # First 500 chars as summary
             output=output,
             turns_used=turns_used,

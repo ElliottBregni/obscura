@@ -42,6 +42,12 @@ from obscura.core.kairos.errors import (
     PlanningError,
 )
 from obscura.core.kairos.goal_store import GoalStore
+from obscura.core.enums.lifecycle import (
+    KAIROS_VALID_GOAL_TRANSITIONS,
+    GoalStatus,
+    KairosTaskStatus,
+    PlanStatus,
+)
 from obscura.core.kairos.plan_engine import PlanEngine
 from obscura.core.kairos.task_runner import TaskRunner
 from obscura.core.kairos.types import (
@@ -50,15 +56,11 @@ from obscura.core.kairos.types import (
     CheckpointKind,
     Goal,
     GoalBudget,
-    GoalStatus,
     KairosConfig,
     KairosEvent,
     KairosEventKind,
     Plan,
-    PlanStatus,
     Task,
-    TaskStatus,
-    VALID_GOAL_TRANSITIONS,
 )
 
 if TYPE_CHECKING:
@@ -411,7 +413,7 @@ class Kairos:
                 t
                 for t in pending
                 if all(dep in completed for dep in t.depends_on)
-                and t.status == TaskStatus.PENDING
+                and t.status == KairosTaskStatus.PENDING
             ]
 
             if not ready:
@@ -431,7 +433,7 @@ class Kairos:
             for task in ready:
                 self._store.update_task_status(
                     task.task_id,
-                    TaskStatus.RUNNING,
+                    KairosTaskStatus.RUNNING,
                     started_at=datetime.now(UTC),
                 )
                 start_ev = KairosEvent(
@@ -481,7 +483,7 @@ class Kairos:
                     completed_at=datetime.now(UTC),
                 )
 
-                if result.status == TaskStatus.SUCCEEDED:
+                if result.status == KairosTaskStatus.SUCCEEDED:
                     completed.add(task.task_id)
                     pending.remove(task)
                     yield KairosEvent(
@@ -527,7 +529,7 @@ class Kairos:
                 completed_ids = [
                     t.task_id
                     for t in self._store.list_tasks(current_plan.plan_id)
-                    if t.status == TaskStatus.SUCCEEDED
+                    if t.status == KairosTaskStatus.SUCCEEDED
                 ]
                 last_cp = self._store.get_latest_checkpoint(goal.goal_id)
                 failure_context = (
@@ -643,7 +645,7 @@ class Kairos:
         return self._goal_locks[goal_id]
 
     def _assert_transition(self, goal: Goal, target: GoalStatus) -> None:
-        allowed = VALID_GOAL_TRANSITIONS.get(goal.status, frozenset())
+        allowed = KAIROS_VALID_GOAL_TRANSITIONS.get(goal.status, frozenset())
         if target not in allowed:
             raise GoalStateError(
                 f"Cannot transition goal from {goal.status.value} to {target.value}",

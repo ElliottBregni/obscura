@@ -9,13 +9,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from obscura.core.supervisor.errors import StateTransitionError
-from obscura.core.supervisor.types import (
-    VALID_SUPERVISOR_TRANSITIONS,
-    SupervisorEvent,
-    SupervisorEventKind,
+from obscura.core.enums.lifecycle import (
+    SUPERVISOR_VALID_TRANSITIONS,
     SupervisorState,
 )
+from obscura.core.supervisor.errors import StateTransitionError
+from obscura.core.supervisor.types import SupervisorEvent, SupervisorEventKind
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ class SessionStateMachine:
 
     def can_transition(self, target: SupervisorState) -> bool:
         """Check if a transition to ``target`` is valid from current state."""
-        return target in VALID_SUPERVISOR_TRANSITIONS.get(self._state, frozenset())
+        return target in SUPERVISOR_VALID_TRANSITIONS.get(self._state, frozenset())
 
     def transition(
         self,

@@ -11,15 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from obscura.core.enums.lifecycle import (
-    SUPERVISOR_VALID_TRANSITIONS as SUPERVISOR_VALID_TRANSITIONS,
-)
-from obscura.core.enums.lifecycle import (
-    SupervisorState as SupervisorState,
-)
-
-# Backward-compat alias for the old name; same object.
-VALID_SUPERVISOR_TRANSITIONS = SUPERVISOR_VALID_TRANSITIONS
+from obscura.core.enums.lifecycle import SupervisorState
 
 
 # ---------------------------------------------------------------------------

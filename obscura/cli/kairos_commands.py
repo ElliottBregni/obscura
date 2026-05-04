@@ -22,10 +22,10 @@ import click
 from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.agent_loop_v2 import AgentLoopV2
 from obscura.core.auth import resolve_auth
+from obscura.core.enums.lifecycle import GoalStatus
 from obscura.core.kairos import (
     Kairos,
     GoalBudget,
-    GoalStatus,
     KairosEventKind,
 )
 from obscura.core.kairos.types import KairosConfig

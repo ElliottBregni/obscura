@@ -13,20 +13,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from obscura.core.enums.lifecycle import (
-    GoalStatus as GoalStatus,
+    GoalStatus,
+    KairosTaskStatus,
+    PlanStatus,
 )
-from obscura.core.enums.lifecycle import (
-    KAIROS_VALID_GOAL_TRANSITIONS as KAIROS_VALID_GOAL_TRANSITIONS,
-)
-from obscura.core.enums.lifecycle import (
-    KairosTaskStatus as TaskStatus,
-)
-from obscura.core.enums.lifecycle import (
-    PlanStatus as PlanStatus,
-)
-
-# Backward-compat alias for the old name; same object.
-VALID_GOAL_TRANSITIONS = KAIROS_VALID_GOAL_TRANSITIONS
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +243,7 @@ class Task:
     max_retries: int = 3
 
     # State
-    status: TaskStatus = TaskStatus.PENDING
+    status: KairosTaskStatus = KairosTaskStatus.PENDING
     retry_count: int = 0
 
     # Timing
@@ -271,7 +261,7 @@ class TaskResult:
     task_id: str
     goal_id: str
     plan_id: str
-    status: TaskStatus
+    status: KairosTaskStatus
     summary: str = ""
     output: str = ""
     error: str = ""

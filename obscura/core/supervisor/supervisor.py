@@ -57,6 +57,7 @@ from obscura.core.supervisor.prompt_assembler import PromptAssembler
 from obscura.core.supervisor.session_hooks import SessionHookManager
 from obscura.core.supervisor.state_machine import SessionStateMachine
 from obscura.core.supervisor.tool_snapshot import FrozenToolRegistry, ToolSnapshotStore
+from obscura.core.enums.lifecycle import SupervisorState
 from obscura.core.supervisor.types import (
     MemoryCandidate,
     RunContext,
@@ -64,7 +65,6 @@ from obscura.core.supervisor.types import (
     SupervisorEvent,
     SupervisorEventKind,
     SupervisorHookPoint,
-    SupervisorState,
 )
 
 if TYPE_CHECKING:

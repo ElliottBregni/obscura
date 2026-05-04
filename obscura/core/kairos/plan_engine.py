@@ -12,14 +12,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.enums.lifecycle import KairosTaskStatus, PlanStatus
 from obscura.core.kairos.errors import EmptyPlanError, PlanningError
 from obscura.core.kairos.types import (
     Goal,
     KairosConfig,
     Plan,
-    PlanStatus,
     Task,
-    TaskStatus,
 )
 
 if TYPE_CHECKING:
@@ -106,7 +105,7 @@ class PlanEngine:
                     depends_on=depends_on,
                     tool_hint=t.get("tool_hint", ""),
                     max_retries=self._config.default_budget.max_retries_per_task,
-                    status=TaskStatus.PENDING,
+                    status=KairosTaskStatus.PENDING,
                     created_at=now,
                 )
             )
@@ -170,7 +169,7 @@ class PlanEngine:
                     depends_on=depends_on,
                     tool_hint=t.get("tool_hint", ""),
                     max_retries=self._config.default_budget.max_retries_per_task,
-                    status=TaskStatus.PENDING,
+                    status=KairosTaskStatus.PENDING,
                     created_at=now,
                 )
             )
