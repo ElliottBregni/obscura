@@ -54,13 +54,17 @@ from pathlib import Path
 from typing import Any, cast
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from obscura.core.models.content import (
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     AgentEvent,
     AgentEventKind,
     BackendProtocol,
     ChunkKind,
-    ContentBlock,
     Message,
     Role,
     StreamChunk,
@@ -2779,20 +2783,19 @@ class AgentLoop:
         so backends can persist the full structured conversation.
         """
         # 1) Assistant message: any text + tool_use blocks
-        assistant_blocks: list[ContentBlock] = []
+        assistant_blocks: list[Any] = []
         if turn_text:
-            assistant_blocks.append(ContentBlock(kind="text", text=turn_text))
+            assistant_blocks.append(TextBlock(text=turn_text))
         for tc in tool_calls:
             assistant_blocks.append(
-                ContentBlock(
-                    kind="tool_use",
+                ToolUseBlock(
                     tool_name=tc.name,
-                    tool_input=tc.input,
+                    args=tc.input,
                     tool_use_id=tc.tool_use_id,
                 )
             )
         if not assistant_blocks:
-            assistant_blocks.append(ContentBlock(kind="text", text=""))
+            assistant_blocks.append(TextBlock(text=""))
 
         assistant_msg = Message(
             role=Role.ASSISTANT,
@@ -2800,7 +2803,7 @@ class AgentLoop:
         )
 
         # 2) Tool result message
-        result_blocks: list[ContentBlock] = []
+        result_blocks: list[Any] = []
         result_by_id = {r.tool_use_id: r for r in tool_results}
         for tc in tool_calls:
             result = result_by_id.get(tc.tool_use_id)
@@ -2812,9 +2815,8 @@ class AgentLoop:
                     tc.tool_use_id,
                 )
                 result_blocks.append(
-                    ContentBlock(
-                        kind="tool_result",
-                        text=f"Internal error: no result received for {tc.name}. "
+                    ToolResultBlock(
+                        content=f"Internal error: no result received for {tc.name}. "
                         "The tool call may have been dropped or timed out.",
                         tool_use_id=tc.tool_use_id,
                         is_error=True,
@@ -2822,9 +2824,8 @@ class AgentLoop:
                 )
                 continue
             result_blocks.append(
-                ContentBlock(
-                    kind="tool_result",
-                    text=AgentLoop._render_tool_result_text(result),
+                ToolResultBlock(
+                    content=AgentLoop._render_tool_result_text(result),
                     tool_use_id=tc.tool_use_id,
                     is_error=result.status == "error",
                 )
@@ -2892,7 +2893,7 @@ class AgentLoop:
 
         summary_msg = Message(
             role=Role.USER,
-            content=[ContentBlock(kind="text", text=summary_text)],
+            content=[TextBlock(text=summary_text)],
         )
 
         new_messages = [summary_msg, *keep]
@@ -2959,7 +2960,7 @@ class AgentLoop:
 
         summary_msg = Message(
             role=Role.ASSISTANT,
-            content=[ContentBlock(kind="text", text=summary)],
+            content=[TextBlock(text=summary)],
         )
 
         new_kwargs = {**kwargs, "messages": [summary_msg, *keep]}

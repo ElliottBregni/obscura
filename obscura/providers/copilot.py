@@ -17,13 +17,13 @@ from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
+from obscura.core.models.content import TextBlock
 from obscura.core.types import (
     AgentEvent,
     AgentHookConfig,
     Backend,
     BackendCapabilities,
     ChunkKind,
-    ContentBlock,
     HookPoint,
     Message,
     NativeHandle,
@@ -876,7 +876,7 @@ class CopilotBackend(BackendToolHostMixin):
 
         return Message(
             role=Role.ASSISTANT,
-            content=[ContentBlock(kind="text", text=text)],
+            content=[TextBlock(text=text)],
             raw=raw,
             backend=Backend.COPILOT,
         )

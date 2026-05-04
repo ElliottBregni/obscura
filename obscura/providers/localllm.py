@@ -18,12 +18,16 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.core.agent_loop import AgentLoop
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
+from obscura.core.models.content import (
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from obscura.core.types import (
     AgentEvent,
     Backend,
     BackendCapabilities,
     ChunkKind,
-    ContentBlock,
     HookContext,
     HookPoint,
     Message,
@@ -203,13 +207,13 @@ class LocalLLMBackend(BackendToolHostMixin):
             )
 
             msg = self._to_message(response)
-            tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
+            tool_blocks = [b for b in msg.content if isinstance(b, ToolUseBlock)]
             for block in tool_blocks:
                 await self._run_hooks(
                     HookContext(
                         hook=HookPoint.PRE_TOOL_USE,
                         tool_name=block.tool_name,
-                        tool_input=block.tool_input,
+                        tool_input=dict(block.args),
                         message=msg,
                     ),
                 )
@@ -217,7 +221,7 @@ class LocalLLMBackend(BackendToolHostMixin):
                     HookContext(
                         hook=HookPoint.POST_TOOL_USE,
                         tool_name=block.tool_name,
-                        tool_input=block.tool_input,
+                        tool_input=dict(block.args),
                         message=msg,
                     ),
                 )
@@ -234,7 +238,7 @@ class LocalLLMBackend(BackendToolHostMixin):
                             "type": "function",
                             "function": {
                                 "name": b.tool_name,
-                                "arguments": json.dumps(b.tool_input),
+                                "arguments": json.dumps(dict(b.args)),
                             },
                         }
                         for b in tool_blocks
@@ -591,10 +595,10 @@ class LocalLLMBackend(BackendToolHostMixin):
         """Convert an OpenAI-compatible response to a normalized Message."""
         choice = response.choices[0]
         msg = choice.message
-        blocks: list[ContentBlock] = []
+        blocks: list[Any] = []
 
         if msg.content:
-            blocks.append(ContentBlock(kind="text", text=msg.content))
+            blocks.append(TextBlock(text=msg.content))
 
         if msg.tool_calls:
             for tc in msg.tool_calls:
@@ -604,16 +608,15 @@ class LocalLLMBackend(BackendToolHostMixin):
                     logger.debug("suppressed exception in _to_message", exc_info=True)
                     tool_input = {"raw": tc.function.arguments}
                 blocks.append(
-                    ContentBlock(
-                        kind="tool_use",
+                    ToolUseBlock(
                         tool_name=tc.function.name,
-                        tool_input=tool_input,
+                        args=tool_input,
                         tool_use_id=tc.id,
                     ),
                 )
 
         if not blocks:
-            blocks = [ContentBlock(kind="text", text="")]
+            blocks = [TextBlock(text="")]
 
         return Message(
             role=Role.ASSISTANT,
@@ -663,7 +666,7 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
         role = msg.role.value
         if role == "tool_result":
             for block in msg.content:
-                if block.kind == "tool_result":
+                if isinstance(block, ToolResultBlock):
                     result.append(
                         {
                             "role": "tool",
@@ -673,14 +676,14 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
                     )
             continue
 
-        text_parts = [b.text for b in msg.content if b.kind == "text"]
+        text_parts = [b.text for b in msg.content if isinstance(b, TextBlock)]
         content: str | list[dict[str, Any]] = (
             text_parts[0] if len(text_parts) == 1 else "\n".join(text_parts)
         )
 
         d: dict[str, Any] = {"role": role, "content": content}
 
-        tool_blocks = [b for b in msg.content if b.kind == "tool_use"]
+        tool_blocks = [b for b in msg.content if isinstance(b, ToolUseBlock)]
         if tool_blocks:
             d["tool_calls"] = [
                 {
@@ -688,7 +691,7 @@ def _convert_messages_to_openai(messages: list[Message]) -> list[dict[str, Any]]
                     "type": "function",
                     "function": {
                         "name": b.tool_name,
-                        "arguments": json.dumps(b.tool_input),
+                        "arguments": json.dumps(dict(b.args)),
                     },
                 }
                 for b in tool_blocks
