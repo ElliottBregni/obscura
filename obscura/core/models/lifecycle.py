@@ -196,6 +196,27 @@ class ApprovalRecord(
             "decision_reason": self.decision_reason,
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        """Public HTTP wire shape — historical key set, ISO-string timestamps.
+
+        Distinct from ``to_row()`` because route consumers don't see
+        ``status_changed_at`` / ``updated_at``.
+        """
+        return {
+            "approval_id": self.id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "tool_use_id": self.tool_use_id,
+            "tool_name": self.tool_name,
+            "tool_input": dict(self.tool_input),
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "resolved_at": self.resolved_at.isoformat()
+            if self.resolved_at is not None
+            else None,
+            "decision_reason": self.decision_reason,
+        }
+
 
 # ---------------------------------------------------------------------------
 # TaskRecord

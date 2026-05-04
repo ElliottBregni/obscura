@@ -56,7 +56,7 @@ __all__ = ["AgentLoopHandle", "is_v2_enabled", "make_agent_loop"]
 
 # A union of the two loop types. The factory's return type is the union;
 # callers iterate ``run()`` the same way on both.
-AgentLoopHandle = "AgentLoop | AgentLoopV2"
+type AgentLoopHandle = "AgentLoop | AgentLoopV2"
 
 
 _V1_OPTOUT: frozenset[str] = frozenset({"v1", "0", "false", "no", "off"})
@@ -156,7 +156,7 @@ def _build_v2(
         # else (including "1"/"true"/"on"/"v2") enables mid-stream resume,
         # relying on AgentLoopV2._seen_calls for tool_use_id dedup.
         allow_mid = retry_mode != "safe"
-        backend = RetryingBackend(backend, allow_mid_stream=allow_mid)
+        backend = RetryingBackend(backend, allow_mid_stream=allow_mid)  # pyright: ignore[reportAssignmentType]
 
     from obscura.core.agent_loop_hooks import (
         compact_pre_turn,

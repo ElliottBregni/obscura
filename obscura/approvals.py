@@ -31,34 +31,6 @@ _wait_events: dict[str, asyncio.Event] = {}
 _approvals_lock = asyncio.Lock()
 
 
-def _wire_dict(record: ApprovalRecord) -> dict[str, Any]:
-    """Serialize an approval to the public HTTP wire shape.
-
-    Distinct from ``record.to_row()`` because the route consumers expect
-    the historical key set (no ``status_changed_at`` / ``updated_at``
-    leakage) and ISO-string timestamps.
-    """
-    return {
-        "approval_id": record.id,
-        "user_id": record.user_id,
-        "agent_id": record.agent_id,
-        "tool_use_id": record.tool_use_id,
-        "tool_name": record.tool_name,
-        "tool_input": dict(record.tool_input),
-        "status": record.status.value,
-        "created_at": record.created_at.isoformat(),
-        "resolved_at": record.resolved_at.isoformat()
-        if record.resolved_at is not None
-        else None,
-        "decision_reason": record.decision_reason,
-    }
-
-
-# Attach the wire-format serializer onto the model so routes that call
-# ``entry.to_dict()`` keep working without import changes.
-ApprovalRecord.to_dict = _wire_dict  # type: ignore[attr-defined]
-
-
 async def create_tool_approval_request(
     *,
     user_id: str,

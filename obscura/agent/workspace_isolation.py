@@ -23,7 +23,7 @@ import asyncio
 import contextlib
 import logging
 import os
-import time
+from datetime import UTC, datetime
 
 from obscura.tools import worktree_observer
 from obscura.tools import worktree_registry
@@ -130,7 +130,7 @@ class AgentWorkspaceIsolation:
                     original_cwd=self._original_cwd,
                     owner="agent",
                     pid=os.getpid(),
-                    created_at=time.time(),
+                    created_at=datetime.now(UTC),
                     agent_name=self._agent_name,
                 ),
             )

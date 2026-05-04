@@ -17,7 +17,7 @@ registry lives in :mod:`obscura.lazy`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # --- Eager: contracts, types, registries. Must NOT pull SDK chains. ---------
 from obscura.auth.models import AuthenticatedUser
@@ -46,6 +46,28 @@ from obscura.core.types import (
 # --- Lazy: heavier names accessed via PEP 562 __getattr__ -------------------
 from obscura.lazy import MissingExtraError
 from obscura.lazy import resolve as _resolve
+
+if TYPE_CHECKING:
+    from obscura.agent.agent import BaseAgent
+    from obscura.core.agent_loop import AgentLoop
+    from obscura.core.agent_loop_factory import is_v2_enabled, make_agent_loop
+    from obscura.core.agent_loop_v2 import AgentLoopV2, AgentLoopV2Config
+    from obscura.core.auth import AuthConfig
+    from obscura.core.client import ObscuraClient
+    from obscura.core.config import ObscuraConfig
+    from obscura.core.context import ContextLoader
+    from obscura.core.handlers import RequestHandler, SimpleHandler
+    from obscura.openclaw_bridge import (
+        BackendRoutingPolicy,
+        MemoryWriteRequest,
+        OpenClawBridge,
+        OpenClawBridgeConfig,
+        RequestMetadata,
+        RunAgentRequest,
+        SemanticSearchRequest,
+        SpawnAgentRequest,
+        WorkflowRunRequest,
+    )
 
 
 def __getattr__(name: str) -> Any:
