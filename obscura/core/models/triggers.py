@@ -16,7 +16,7 @@ push-notification sink).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -57,7 +57,7 @@ class StopTrigger(ObscuraModel):
 
 
 Trigger = Annotated[
-    Union[IMessageTrigger, MessageTrigger, EmailTrigger, StopTrigger],
+    IMessageTrigger | MessageTrigger | EmailTrigger | StopTrigger,
     Field(discriminator="kind"),
 ]
 
