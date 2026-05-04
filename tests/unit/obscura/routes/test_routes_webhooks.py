@@ -20,9 +20,7 @@ def _enable_test_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     hashed-key lookup in ``user_from_api_key`` returns None, so every
     request 401s before the webhook routes ever see it.
     """
-    monkeypatch.setenv(
-        "OBSCURA_API_KEYS", "test-api-key:test-user:admin,agent:write"
-    )
+    monkeypatch.setenv("OBSCURA_API_KEYS", "test-api-key:test-user:admin,agent:write")
     from obscura.auth import rbac
 
     rbac._load_api_keys()

@@ -345,9 +345,7 @@ class AgentLoopV2:
 
         # Strip loop-level kwargs that shouldn't reach the backend.
         # Everything else flows through to backend.stream() as **kwargs.
-        backend_kwargs = {
-            k: v for k, v in kwargs.items() if k not in _LOOP_ONLY_KWARGS
-        }
+        backend_kwargs = {k: v for k, v in kwargs.items() if k not in _LOOP_ONLY_KWARGS}
         # Prepend the system prompt only when no history was provided —
         # if the caller already passed a history, assume it includes any
         # system message they wanted.

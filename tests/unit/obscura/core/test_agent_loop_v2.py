@@ -260,9 +260,7 @@ class TestMultipleToolCallsNoEdges:
                 _StubTurn(text="ok"),
             ]
         )
-        registry = _make_registry(
-            {"a": make_handler("a"), "b": make_handler("b")}
-        )
+        registry = _make_registry({"a": make_handler("a"), "b": make_handler("b")})
         loop = AgentLoopV2(backend, registry)
         events = [e async for e in loop.run("multi")]
 
@@ -727,9 +725,7 @@ class TestMissingToolUseIdFallback:
         # in-flight entry — not "tool not found:".
         assert invoked == [{"q": "trump"}]
         # TOOL_CALL event carries the recovered name (renderer uses this).
-        tool_calls = [
-            e for e in events if e.kind == AgentEventKind.TOOL_CALL
-        ]
+        tool_calls = [e for e in events if e.kind == AgentEventKind.TOOL_CALL]
         assert len(tool_calls) == 1
         assert tool_calls[0].tool_name == "search"
 

@@ -343,15 +343,11 @@ class AgentHeartbeatClient:
 
         return metrics
 
-    def on_status_change(
-        self, callback: Callable[[AgentHealthStatus], None]
-    ) -> None:
+    def on_status_change(self, callback: Callable[[AgentHealthStatus], None]) -> None:
         """Register a callback for status changes."""
         self._status_callbacks.append(callback)
 
-    def remove_callback(
-        self, callback: Callable[[AgentHealthStatus], None]
-    ) -> bool:
+    def remove_callback(self, callback: Callable[[AgentHealthStatus], None]) -> bool:
         """Remove a status change callback."""
         if callback in self._status_callbacks:
             self._status_callbacks.remove(callback)

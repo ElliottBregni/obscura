@@ -179,9 +179,7 @@ def from_agent_event(event: "AgentEvent") -> RenderEvent:
     rate-limit transitions, and session-mirror errors go to the
     notification channel.
     """
-    kind_value = (
-        event.kind.value if hasattr(event.kind, "value") else str(event.kind)
-    )
+    kind_value = event.kind.value if hasattr(event.kind, "value") else str(event.kind)
     if kind_value in _BANNER_AGENT_KINDS:
         # Re-route to a banner. The renderer's banner handler reads
         # title/body off the underlying event.
@@ -202,9 +200,7 @@ def from_agent_event(event: "AgentEvent") -> RenderEvent:
     return TranscriptEvent(event=event)
 
 
-def _notification_for_agent_event(
-    event: "AgentEvent", kind_value: str
-) -> Notification:
+def _notification_for_agent_event(event: "AgentEvent", kind_value: str) -> Notification:
     """Build a :class:`Notification` for an SDK system-message AgentEvent."""
     text = getattr(event, "text", "") or ""
     tool_name = getattr(event, "tool_name", "") or ""

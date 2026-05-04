@@ -124,9 +124,7 @@ def adapter() -> ClaudeIteratorAdapter:
 
 
 class TestClaudeAdapterRoutesSdkSubclasses:
-    def test_task_started_becomes_chunk(
-        self, adapter: ClaudeIteratorAdapter
-    ) -> None:
+    def test_task_started_becomes_chunk(self, adapter: ClaudeIteratorAdapter) -> None:
         msg = TaskStartedMessage(task_id="tk_42", description="Search code")
         chunks = adapter._adapt(msg)
         assert len(chunks) == 1
@@ -164,9 +162,7 @@ class TestClaudeAdapterRoutesSdkSubclasses:
         assert chunks[0].text == "Found 12 matches"
         assert chunks[0].tool_use_id == "tk_42"
 
-    def test_mirror_error_routes_to_chunk(
-        self, adapter: ClaudeIteratorAdapter
-    ) -> None:
+    def test_mirror_error_routes_to_chunk(self, adapter: ClaudeIteratorAdapter) -> None:
         msg = MirrorErrorMessage(error="connection timeout")
         chunks = adapter._adapt(msg)
         assert chunks[0].kind is ChunkKind.MIRROR_ERROR
@@ -270,9 +266,7 @@ class TestFromAgentEventRouting:
     ) -> None:
         info = _RateLimitInfo(status=status, utilization=0.5)
         raw = RateLimitEvent(rate_limit_info=info)
-        ev = AgentEvent(
-            kind=AgentEventKind.RATE_LIMIT_WARNING, text=status, raw=raw
-        )
+        ev = AgentEvent(kind=AgentEventKind.RATE_LIMIT_WARNING, text=status, raw=raw)
         routed = from_agent_event(ev)
         assert isinstance(routed, Notification)
         assert routed.severity is expected_severity
@@ -289,9 +283,7 @@ class TestFromAgentEventRouting:
         assert routed.ttl_seconds >= 30.0
 
     def test_mirror_error_routes_to_warn_notification(self) -> None:
-        ev = AgentEvent(
-            kind=AgentEventKind.MIRROR_ERROR, text="upstream 5xx"
-        )
+        ev = AgentEvent(kind=AgentEventKind.MIRROR_ERROR, text="upstream 5xx")
         routed = from_agent_event(ev)
         assert isinstance(routed, Notification)
         assert routed.severity is Severity.WARN
@@ -313,9 +305,7 @@ class TestRendererHandlePushesNotifications:
     """``handle()`` should push the matching notification onto the stack
     instead of committing to scrollback."""
 
-    def test_task_started_pushes_notification(
-        self, renderer: ModernRenderer
-    ) -> None:
+    def test_task_started_pushes_notification(self, renderer: ModernRenderer) -> None:
         ev = AgentEvent(
             kind=AgentEventKind.TASK_STARTED, text="Indexing", tool_use_id="tk_a"
         )
@@ -393,9 +383,7 @@ class TestRenderNotificationsFormat:
     """``_render_notifications`` should produce the v2 left-bar style
     instead of the legacy ASCII format."""
 
-    def test_left_bar_present_in_rendered_line(
-        self, renderer: ModernRenderer
-    ) -> None:
+    def test_left_bar_present_in_rendered_line(self, renderer: ModernRenderer) -> None:
         renderer.add_notification(
             Notification(
                 title="Task started",
@@ -427,9 +415,7 @@ class TestRenderNotificationsFormat:
         lines = renderer._render_notifications()
         assert icon in lines[0]
 
-    def test_long_body_truncated_with_ellipsis(
-        self, renderer: ModernRenderer
-    ) -> None:
+    def test_long_body_truncated_with_ellipsis(self, renderer: ModernRenderer) -> None:
         renderer._width = 60
         renderer.add_notification(
             Notification(
@@ -444,9 +430,7 @@ class TestRenderNotificationsFormat:
         # Conservative: just assert ellipsis was added.
         assert "..." in lines[0]
 
-    def test_empty_stack_renders_nothing(
-        self, renderer: ModernRenderer
-    ) -> None:
+    def test_empty_stack_renders_nothing(self, renderer: ModernRenderer) -> None:
         assert renderer._render_notifications() == []
 
 
@@ -568,9 +552,7 @@ class TestEndToEndPipeline:
         assert AgentEventKind.MIRROR_ERROR in kinds
 
         # Assistant text deltas survive — system events did not eat them.
-        text_events = [
-            e for e in events if e.kind is AgentEventKind.TEXT_DELTA
-        ]
+        text_events = [e for e in events if e.kind is AgentEventKind.TEXT_DELTA]
         assert "".join(e.text for e in text_events) == "Working on it. Done."
 
         # Renderer state: TASK_STARTED/PROGRESS/NOTIFICATION share key

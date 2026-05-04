@@ -112,7 +112,9 @@ class RetryingBackend:
         # test stubs expose it as a class attribute. Accept both shapes by
         # calling when callable.
         inner_caps: Any = self._inner.capabilities
-        return cast("BackendCapabilities", inner_caps() if callable(inner_caps) else inner_caps)
+        return cast(
+            "BackendCapabilities", inner_caps() if callable(inner_caps) else inner_caps
+        )
 
     async def start(self) -> None:
         await self._inner.start()

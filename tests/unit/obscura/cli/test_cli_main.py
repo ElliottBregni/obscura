@@ -132,7 +132,7 @@ class TestWhoamiSlashCommand:
     @pytest.mark.asyncio
     async def test_reports_not_signed_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "obscura.cli.auth_commands.load_session",
+            "obscura.cli.commands.load_session",
             MagicMock(return_value=None),
         )
         info_mock = MagicMock()
@@ -479,8 +479,8 @@ class TestSendMessage:
         ctx.client.run_loop = _fake_run_loop
 
         # Suppress console output and other side effects
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
@@ -500,8 +500,8 @@ class TestSendMessage:
             yield _text_event("Response")
 
         ctx.client.run_loop = _fake_run_loop
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
@@ -524,8 +524,8 @@ class TestSendMessage:
             yield _done_event()
 
         ctx.client.run_loop = _fake_run_loop
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
@@ -548,8 +548,8 @@ class TestSendMessage:
             raise KeyboardInterrupt
 
         ctx.client.run_loop = _fake_run_loop
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
@@ -576,14 +576,17 @@ class TestSendMessage:
 
         ctx.client.run_loop = _fake_run_loop
         mock_console = MagicMock()
-        monkeypatch.setattr(cli_module, "console", mock_console)
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", mock_console)
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
         )
+        # _send imports both functions at module load time, so patching the
+        # source module doesn't update the local bindings. Patch the names
+        # _send actually calls.
         monkeypatch.setattr(
-            "obscura.cli.commands.estimate_effective_context_tokens",
+            "obscura.cli._send.estimate_effective_context_tokens",
             lambda *_a, **_kw: token_count,
         )
 
@@ -593,7 +596,7 @@ class TestSendMessage:
             nonlocal compact_called
             compact_called = True
 
-        monkeypatch.setattr("obscura.cli.commands.cmd_compact", _fake_compact)
+        monkeypatch.setattr("obscura.cli._send.cmd_compact", _fake_compact)
 
         await send_message(ctx, "test", {})
         assert compact_called
@@ -616,20 +619,18 @@ class TestSendMessage:
             yield _text_event("ok")
 
         ctx.client.run_loop = _fake_run_loop
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
         )
         monkeypatch.setattr(
-            cli_module,
-            "search_relevant_context",
+            "obscura.cli._send.search_relevant_context",
             lambda vs, q, top_k: "[memory] relevant info",
         )
         monkeypatch.setattr(
-            cli_module,
-            "auto_save_turn",
+            "obscura.cli._send.auto_save_turn",
             lambda *a, **kw: None,
         )
 
@@ -653,15 +654,14 @@ class TestSendMessage:
             yield _text_event("ok")
 
         ctx.client.run_loop = _fake_run_loop
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
             lambda **kw: None,
         )
         monkeypatch.setattr(
-            cli_module,
-            "search_relevant_context",
+            "obscura.cli._send.search_relevant_context",
             lambda vs, q, top_k: "",
         )
         monkeypatch.setattr(
@@ -698,8 +698,8 @@ class TestSendMessage:
             yield _text_event("Recovered")
 
         ctx.client.run_loop = _fake_run_loop
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr("obscura.cli.commands._estimate_tokens", lambda x: 100)
         monkeypatch.setattr(
             "obscura.tools.system.update_token_usage",
@@ -744,11 +744,16 @@ class TestSendMessage:
                 last_tick = next(ticks)
             return last_tick
 
-        monkeypatch.setattr(cli_module, "console", MagicMock())
-        monkeypatch.setattr(cli_module, "trace_mod", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.console", MagicMock())
+        monkeypatch.setattr("obscura.cli._send.trace_mod", MagicMock())
         monkeypatch.setattr("obscura.cli.commands._estimate_tokens", lambda x: 100)
-        monkeypatch.setattr("obscura.tools.system.update_token_usage", _capture_usage)
-        monkeypatch.setattr(cli_module.time, "monotonic", _fake_monotonic)
+        monkeypatch.setattr(
+            "obscura.tools.system._session.Session.update_token_usage",
+            _capture_usage,
+        )
+        from obscura.cli import _send as _send_mod
+
+        monkeypatch.setattr(_send_mod.time, "monotonic", _fake_monotonic)
 
         await send_message(ctx, "stream please", {})
 
@@ -767,8 +772,7 @@ class TestSendMessage:
         ctx = _make_ctx()
         ctx.client.run_loop = AsyncMock()
         monkeypatch.setattr(
-            cli_module,
-            "_run_inline_agent_from_mention",
+            "obscura.cli._send._run_inline_agent_from_mention",
             AsyncMock(return_value="inline agent output"),
         )
 

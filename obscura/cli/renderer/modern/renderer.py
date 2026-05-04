@@ -207,9 +207,7 @@ class ModernRenderer:
                     [
                         _styled("  ▎ ", STYLE_DIM)
                         + _styled("✗  ", STYLE_ERROR)
-                        + _styled(
-                            f"error · {_sanitize(event.text)}", STYLE_ERROR
-                        ),
+                        + _styled(f"error · {_sanitize(event.text)}", STYLE_ERROR),
                     ]
                 )
             case AgentEventKind.CONTEXT_COMPACT:

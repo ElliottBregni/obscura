@@ -226,9 +226,7 @@ def hook_middleware(
     return wrap
 
 
-async def _safe_run_hook(
-    hooks: HookRegistry, phase: str, node: DAGNode
-) -> None:
+async def _safe_run_hook(hooks: HookRegistry, phase: str, node: DAGNode) -> None:
     """Build a TOOL_CALL AgentEvent for *node* and dispatch it through the
     registry's before/after pipeline. Per-hook exceptions are already
     logged inside ``HookRegistry``; the outer try only catches registry-

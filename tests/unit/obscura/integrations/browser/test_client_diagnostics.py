@@ -50,9 +50,7 @@ class TestDiagnosticForError:
         assert "re-open" in out.lower() or "reopen" in out.lower()
 
     def test_bridge_connection_closed_hint_mentions_disconnect(self) -> None:
-        out = _diagnostic_for_error(
-            "browser_native_click", "bridge connection closed"
-        )
+        out = _diagnostic_for_error("browser_native_click", "bridge connection closed")
         assert "disconnect" in out.lower() or "side panel" in out.lower()
 
     def test_debugger_already_attached_hint_mentions_devtools(self) -> None:

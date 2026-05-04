@@ -46,11 +46,7 @@ def _get_kairos(agent_loop: AgentLoopV2 | None = None) -> Kairos:
     auth = resolve_auth(Backend.COPILOT)
     backend = CopilotBackend(auth)
     registry = ToolRegistry()
-    loop = (
-        agent_loop
-        if agent_loop is not None
-        else make_agent_loop(backend, registry)
-    )
+    loop = agent_loop if agent_loop is not None else make_agent_loop(backend, registry)
 
     # Read notification recipient from settings so interventions ping iMessage
     settings = _read_settings()

@@ -43,9 +43,7 @@ class TestIsV2Enabled:
             os.environ.pop("OBSCURA_AGENT_LOOP", None)
             assert is_v2_enabled() is True
 
-    @pytest.mark.parametrize(
-        "value", ["v2", "1", "true", "yes", "on", "anything-else"]
-    )
+    @pytest.mark.parametrize("value", ["v2", "1", "true", "yes", "on", "anything-else"])
     def test_returns_true_for_v2_synonyms(self, value: str) -> None:
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
             assert is_v2_enabled() is True

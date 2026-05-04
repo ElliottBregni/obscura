@@ -227,6 +227,7 @@ class TestOpenAILifecycle:
             async for _ in b.stream("hello"):
                 pass
 
+
 # MCP execution bridge tests removed — the bridge module was dropped in
 # the April 2026 cleanup commit (5b3779a9). Discovery is the only MCP
 # integration the OpenAI backend still owns; runtime dispatch goes

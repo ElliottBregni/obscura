@@ -54,7 +54,9 @@ class HeartbeatStore(ABC):
         """List all health records."""
 
     @abstractmethod
-    async def update_computed_status(self, agent_id: str, status: AgentHealthStatus) -> None:
+    async def update_computed_status(
+        self, agent_id: str, status: AgentHealthStatus
+    ) -> None:
         """Update the computed health status for an agent."""
 
     @abstractmethod
@@ -152,7 +154,9 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         return list(self._records.values())
 
     @override
-    async def update_computed_status(self, agent_id: str, status: AgentHealthStatus) -> None:
+    async def update_computed_status(
+        self, agent_id: str, status: AgentHealthStatus
+    ) -> None:
         """Update the computed health status for an agent."""
         if agent_id in self._records:
             self._records[agent_id].computed_status = status
@@ -311,7 +315,9 @@ class FileHeartbeatStore(HeartbeatStore):
         return await self._memory_store.list_records()
 
     @override
-    async def update_computed_status(self, agent_id: str, status: AgentHealthStatus) -> None:
+    async def update_computed_status(
+        self, agent_id: str, status: AgentHealthStatus
+    ) -> None:
         await self._memory_store.update_computed_status(agent_id, status)
         await self._persist_to_disk()
 

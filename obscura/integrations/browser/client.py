@@ -411,9 +411,7 @@ def _build_proxy_spec(
         except BrowserBridgeError as e:
             # Wrap every bridge/host error with the tool name and an action
             # hint so the LLM agent knows what to do, not just what failed.
-            raise BrowserBridgeError(
-                _diagnostic_for_error(real_name, str(e))
-            ) from e
+            raise BrowserBridgeError(_diagnostic_for_error(real_name, str(e))) from e
 
     return ToolSpec(
         name=name,
