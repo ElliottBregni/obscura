@@ -81,8 +81,8 @@ class EvalEngine:
             logger.debug("suppressed exception in run_case", exc_info=True)
 
         loop = make_agent_loop(
-            backend=self._backend,
-            tool_registry=self._tool_registry,
+            self._backend,
+            self._tool_registry,
             max_turns=case.max_turns,
             hooks=hooks,
             event_store=self._event_store,
