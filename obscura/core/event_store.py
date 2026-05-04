@@ -6,7 +6,8 @@ source of truth for session state.
 
 Usage::
 
-    from obscura.core.event_store import SQLiteEventStore, SessionStatus
+    from obscura.core.enums.lifecycle import SessionStatus
+    from obscura.core.event_store import SQLiteEventStore
 
     store = SQLiteEventStore("/tmp/events.db")
     await store.create_session("sess-1", agent="oncall", backend="claude", model="claude-sonnet-4-5-20250929")
