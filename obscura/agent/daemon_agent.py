@@ -43,6 +43,7 @@ from obscura.agent.interaction import (
     UserResponse,
 )
 from obscura.auth.cli_user import current_cli_user
+from obscura.core.enums.messaging import TriggerKind
 from obscura.core.types import AgentEventKind
 from obscura.integrations.messaging.factory import get_adapter
 from obscura.integrations.messaging.identity import (
@@ -201,7 +202,7 @@ class PeerMessageTrigger(Trigger):
 class IMessageTrigger(Trigger):
     """Fires when a new iMessage arrives from configured contacts."""
 
-    kind: str = "imessage"
+    kind: str = TriggerKind.IMESSAGE.value
     contacts: tuple[str, ...] = ()  # phone numbers or emails
     poll_interval: int = 30  # seconds
 
@@ -210,7 +211,7 @@ class IMessageTrigger(Trigger):
 class MessageTrigger(Trigger):
     """Generic message-platform trigger (platform adapter driven)."""
 
-    kind: str = "message"
+    kind: str = TriggerKind.MESSAGE.value
     platform: str = "imessage"
     contacts: tuple[str, ...] = ()  # identity strings for direct messages
     poll_interval: int = 30  # seconds
@@ -562,7 +563,7 @@ class DaemonAgent:
         # Unblock the trigger queue
         with contextlib.suppress(asyncio.QueueFull):
             self._trigger_queue.put_nowait(
-                Trigger(kind="__stop__"),
+                Trigger(kind=TriggerKind.STOP.value),
             )
 
     # -- Trigger handling (override in subclasses) ---------------------------
@@ -573,7 +574,7 @@ class DaemonAgent:
         The default implementation sends ``trigger.prompt`` through the
         LLM tool loop and optionally notifies the user.
         """
-        if trigger.kind in {"imessage", "message"}:
+        if trigger.kind in {TriggerKind.IMESSAGE.value, TriggerKind.MESSAGE.value}:
             await self._handle_message_trigger(trigger)
             return
 
@@ -920,7 +921,7 @@ class DaemonAgent:
         while not self._stopped:
             try:
                 trigger = await asyncio.wait_for(self._trigger_queue.get(), timeout=0.5)
-                if trigger.kind == "__stop__":
+                if trigger.kind == TriggerKind.STOP.value:
                     return None
                 return trigger
             except TimeoutError:
@@ -1101,9 +1102,9 @@ class DaemonAgent:
                                 break
 
                         fire_trigger = Trigger(
-                            kind="imessage"
+                            kind=TriggerKind.IMESSAGE.value
                             if msg.platform == "imessage"
-                            else "message",
+                            else TriggerKind.MESSAGE.value,
                             description=f"{msg.platform} message from {sender_display}",
                             notify_user=matching.notify_user,
                             priority=matching.priority,

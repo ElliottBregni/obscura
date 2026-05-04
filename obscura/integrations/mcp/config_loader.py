@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.enums.protocol import MCPTransport
+from obscura.core.models.configs import MCPServerSpec
 from obscura.core.paths import resolve_all_mcp_dirs, resolve_obscura_mcp_dir
 from obscura.integrations.mcp.types import MCPTransportType
 
@@ -34,6 +36,27 @@ class DiscoveredMCPServer:
     tools: tuple[str, ...]
     missing_env: tuple[str, ...]
     headers: dict[str, str] = field(default_factory=dict[str, str])
+
+    def to_spec(self) -> MCPServerSpec:
+        """Promote the legacy dataclass to the typed boundary model."""
+        # MCPTransportType is the legacy enum living in
+        # ``integrations/mcp/types``; map its members to the canonical
+        # ``MCPTransport`` (Round 1) so downstream code reads one type.
+        canonical_transport = (
+            MCPTransport.STDIO
+            if self.transport is MCPTransportType.STDIO
+            else MCPTransport.SSE
+        )
+        return MCPServerSpec(
+            name=self.name,
+            transport=canonical_transport,
+            command=self.command or None,
+            args=self.args,
+            env=dict(self.env),
+            url=self.url or None,
+            headers=dict(self.headers),
+            tools=self.tools,
+        )
 
 
 def _resolve_env_value(raw: str, *, resolve_env: bool) -> tuple[str, str | None]:

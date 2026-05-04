@@ -59,6 +59,7 @@ class AgentConfig(ObscuraModel, MetadataMixin):
     max_turns: int | None = None
     mode: ExecutionMode = ExecutionMode.UNIFIED
     enabled: bool = True
+    type: str = "loop"
     tools: tuple[str, ...] = ()
     mcp_servers: tuple[str, ...] | str = ()
     can_delegate: bool = False
