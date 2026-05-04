@@ -24,11 +24,11 @@ import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.enums.protocol import A2ATaskState
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
     TaskNotFoundError,
-    TaskState,
 )
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ class A2AServicer:
         limit_raw: Any = params.get("limit", 20)
         tasks, cursor = await self._service.tasks_list(
             context_id=_optional_str(params, "contextId"),
-            state=TaskState(state_value) if isinstance(state_value, str) else None,
+            state=A2ATaskState(state_value) if isinstance(state_value, str) else None,
             cursor=_optional_str(params, "cursor"),
             limit=int(limit_raw or 20),
         )

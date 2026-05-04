@@ -18,6 +18,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from obscura.core.enums.protocol import A2ATaskState
 from obscura.integrations.a2a.types import (
     TERMINAL_STATES,
     VALID_TRANSITIONS,
@@ -29,7 +30,6 @@ from obscura.integrations.a2a.types import (
     TaskArtifactUpdateEvent,
     TaskNotCancelableError,
     TaskNotFoundError,
-    TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
 )
@@ -60,7 +60,7 @@ class TaskStore(Protocol):
     async def list_tasks(
         self,
         context_id: str | None = None,
-        state: TaskState | None = None,
+        state: A2ATaskState | None = None,
         cursor: str | None = None,
         limit: int = 20,
     ) -> tuple[list[Task], str | None]: ...
@@ -68,7 +68,7 @@ class TaskStore(Protocol):
     async def transition(
         self,
         task_id: str,
-        new_state: TaskState,
+        new_state: A2ATaskState,
         message: A2AMessage | None = None,
     ) -> Task: ...
 
@@ -109,7 +109,7 @@ class InMemoryTaskStore:
         task = Task(
             id=task_id,
             contextId=context_id,
-            status=TaskStatus(state=TaskState.PENDING, timestamp=now),
+            status=TaskStatus(state=A2ATaskState.PENDING, timestamp=now),
             history=[initial_message],
         )
 
@@ -123,7 +123,7 @@ class InMemoryTaskStore:
     async def list_tasks(
         self,
         context_id: str | None = None,
-        state: TaskState | None = None,
+        state: A2ATaskState | None = None,
         cursor: str | None = None,
         limit: int = 20,
     ) -> tuple[list[Task], str | None]:
@@ -162,7 +162,7 @@ class InMemoryTaskStore:
     async def transition(
         self,
         task_id: str,
-        new_state: TaskState,
+        new_state: A2ATaskState,
         message: A2AMessage | None = None,
     ) -> Task:
         task = self._tasks.get(task_id)
@@ -209,7 +209,7 @@ class InMemoryTaskStore:
         if current in TERMINAL_STATES:
             raise TaskNotCancelableError(task_id, current.value)
 
-        return await self.transition(task_id, TaskState.CANCELED)
+        return await self.transition(task_id, A2ATaskState.CANCELED)
 
     async def subscribe(self, task_id: str) -> AsyncIterator[StreamEvent]:
         task = self._tasks.get(task_id)
@@ -315,7 +315,7 @@ class RedisTaskStore:
         task = Task(
             id=task_id,
             contextId=context_id,
-            status=TaskStatus(state=TaskState.PENDING, timestamp=now),
+            status=TaskStatus(state=A2ATaskState.PENDING, timestamp=now),
             history=[initial_message],
         )
 
@@ -333,7 +333,7 @@ class RedisTaskStore:
     async def list_tasks(
         self,
         context_id: str | None = None,
-        state: TaskState | None = None,
+        state: A2ATaskState | None = None,
         cursor: str | None = None,
         limit: int = 20,
     ) -> tuple[list[Task], str | None]:
@@ -383,7 +383,7 @@ class RedisTaskStore:
     async def transition(
         self,
         task_id: str,
-        new_state: TaskState,
+        new_state: A2ATaskState,
         message: A2AMessage | None = None,
     ) -> Task:
         task = await self._load_task(task_id)
@@ -427,7 +427,7 @@ class RedisTaskStore:
         current = task.status.state
         if current in TERMINAL_STATES:
             raise TaskNotCancelableError(task_id, current.value)
-        return await self.transition(task_id, TaskState.CANCELED)
+        return await self.transition(task_id, A2ATaskState.CANCELED)
 
     async def subscribe(self, task_id: str) -> AsyncIterator[StreamEvent]:
         task = await self._load_task(task_id)

@@ -16,12 +16,12 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from obscura.core.enums.protocol import A2ATaskState
 from obscura.core.types import AgentEvent, AgentEventKind
 from obscura.integrations.a2a.types import (
     Artifact,
     StreamEvent,
     TaskArtifactUpdateEvent,
-    TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
@@ -43,7 +43,7 @@ class EventMapper:
 
     def status_event(
         self,
-        state: TaskState,
+        state: A2ATaskState,
         *,
         final: bool = False,
         message: str | None = None,
@@ -92,7 +92,7 @@ class EventMapper:
         kind = event.kind
 
         if kind == AgentEventKind.TURN_START:
-            return [self.status_event(TaskState.WORKING)]
+            return [self.status_event(A2ATaskState.WORKING)]
 
         if kind == AgentEventKind.TEXT_DELTA:
             if event.text:
@@ -105,7 +105,7 @@ class EventMapper:
 
         if kind == AgentEventKind.TOOL_CALL:
             # Inform client that a tool is being invoked.
-            return [self.status_event(TaskState.WORKING)]
+            return [self.status_event(A2ATaskState.WORKING)]
 
         if kind == AgentEventKind.TOOL_RESULT:
             # Tool results are internal; the agent will incorporate them
@@ -113,7 +113,7 @@ class EventMapper:
             return []
 
         if kind == AgentEventKind.CONFIRMATION_REQUEST:
-            return [self.status_event(TaskState.INPUT_REQUIRED)]
+            return [self.status_event(A2ATaskState.INPUT_REQUIRED)]
 
         if kind == AgentEventKind.TURN_COMPLETE:
             # Close the current artifact if one was being streamed.
@@ -129,7 +129,7 @@ class EventMapper:
             if self._artifact_id is not None:
                 events.append(self._artifact_event("", append=True, last_chunk=True))
                 self._artifact_id = None
-            events.append(self.status_event(TaskState.COMPLETED, final=True))
+            events.append(self.status_event(A2ATaskState.COMPLETED, final=True))
             return events
 
         if kind == AgentEventKind.ERROR:
@@ -137,7 +137,7 @@ class EventMapper:
             if self._artifact_id is not None:
                 events.append(self._artifact_event("", append=True, last_chunk=True))
                 self._artifact_id = None
-            events.append(self.status_event(TaskState.FAILED, final=True))
+            events.append(self.status_event(A2ATaskState.FAILED, final=True))
             return events
 
         # Unknown event kind — ignore gracefully.

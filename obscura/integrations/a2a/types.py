@@ -23,11 +23,7 @@ from typing import Any, TypeAlias
 
 from pydantic import BaseModel, Field
 
-from obscura.core.enums.protocol import (
-    A2AMethod as A2AMethod,
-    A2ARole as A2ARole,
-    A2ATaskState as A2ATaskState,
-)
+from obscura.core.enums.protocol import A2ATaskState
 from obscura.core.models.a2a import (
     A2AArtifactUpdateEvent,
     A2AMessage as A2AMessage,
@@ -50,7 +46,6 @@ from obscura.core.models.a2a import (
 # ---------------------------------------------------------------------------
 
 # Pre-rename names kept in scope; consumers that haven't migrated still resolve.
-TaskState: TypeAlias = A2ATaskState  # noqa: UP040
 TaskStatus = A2ATaskStatus
 Task = A2ATask
 TaskStatusUpdateEvent = A2AStatusUpdateEvent
@@ -69,45 +64,45 @@ StreamEvent: TypeAlias = A2AStatusUpdateEvent | A2AArtifactUpdateEvent  # noqa: 
 
 
 # Valid state transitions enforced by the task store.
-VALID_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
-    TaskState.PENDING: frozenset(
-        {TaskState.WORKING, TaskState.REJECTED, TaskState.CANCELED},
+VALID_TRANSITIONS: dict[A2ATaskState, frozenset[A2ATaskState]] = {
+    A2ATaskState.PENDING: frozenset(
+        {A2ATaskState.WORKING, A2ATaskState.REJECTED, A2ATaskState.CANCELED},
     ),
-    TaskState.WORKING: frozenset(
+    A2ATaskState.WORKING: frozenset(
         {
-            TaskState.INPUT_REQUIRED,
-            TaskState.AUTH_REQUIRED,
-            TaskState.COMPLETED,
-            TaskState.FAILED,
-            TaskState.CANCELED,
+            A2ATaskState.INPUT_REQUIRED,
+            A2ATaskState.AUTH_REQUIRED,
+            A2ATaskState.COMPLETED,
+            A2ATaskState.FAILED,
+            A2ATaskState.CANCELED,
         },
     ),
-    TaskState.INPUT_REQUIRED: frozenset(
+    A2ATaskState.INPUT_REQUIRED: frozenset(
         {
-            TaskState.WORKING,
-            TaskState.CANCELED,
-            TaskState.FAILED,
+            A2ATaskState.WORKING,
+            A2ATaskState.CANCELED,
+            A2ATaskState.FAILED,
         },
     ),
-    TaskState.AUTH_REQUIRED: frozenset(
+    A2ATaskState.AUTH_REQUIRED: frozenset(
         {
-            TaskState.WORKING,
-            TaskState.CANCELED,
-            TaskState.FAILED,
+            A2ATaskState.WORKING,
+            A2ATaskState.CANCELED,
+            A2ATaskState.FAILED,
         },
     ),
-    TaskState.COMPLETED: frozenset(),
-    TaskState.FAILED: frozenset(),
-    TaskState.CANCELED: frozenset(),
-    TaskState.REJECTED: frozenset(),
+    A2ATaskState.COMPLETED: frozenset(),
+    A2ATaskState.FAILED: frozenset(),
+    A2ATaskState.CANCELED: frozenset(),
+    A2ATaskState.REJECTED: frozenset(),
 }
 
-TERMINAL_STATES: frozenset[TaskState] = frozenset(
+TERMINAL_STATES: frozenset[A2ATaskState] = frozenset(
     {
-        TaskState.COMPLETED,
-        TaskState.FAILED,
-        TaskState.CANCELED,
-        TaskState.REJECTED,
+        A2ATaskState.COMPLETED,
+        A2ATaskState.FAILED,
+        A2ATaskState.CANCELED,
+        A2ATaskState.REJECTED,
     },
 )
 
@@ -244,14 +239,11 @@ __all__ = [
     "VALID_TRANSITIONS",
     "A2AError",
     "A2AMessage",
-    "A2AMethod",
     "A2APart",
     "A2APartAdapter",
-    "A2ARole",
     "A2ATask",
     "A2ATaskMessage",
     "A2ATaskMessageAdapter",
-    "A2ATaskState",
     "A2ATaskStatus",
     "AgentCapabilities",
     "AgentCard",
@@ -270,7 +262,6 @@ __all__ = [
     "TaskArtifactUpdateEvent",
     "TaskNotCancelableError",
     "TaskNotFoundError",
-    "TaskState",
     "TaskStatus",
     "TaskStatusUpdateEvent",
     "TextPart",
