@@ -26,12 +26,15 @@ boundaries:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Self, cast
 
 from pydantic import Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 from obscura.core.enums._base import parse_lenient
 from obscura.core.enums.lifecycle import (
@@ -67,6 +70,7 @@ def _coerce_dt(value: object) -> datetime:
         try:
             parsed = datetime.fromisoformat(value)
         except ValueError:
+            logger.debug("could not parse datetime string %r — using now", value)
             return datetime.now(UTC)
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     return datetime.now(UTC)
@@ -95,6 +99,7 @@ def _decode_json_list(value: object) -> list[Any]:
         try:
             parsed: object = json.loads(value)
         except json.JSONDecodeError:
+            logger.debug("could not JSON-decode list column: %r", value)
             return []
         return list(cast("list[Any]", parsed)) if isinstance(parsed, list) else []
     return []
@@ -110,6 +115,7 @@ def _decode_json_dict(value: object) -> dict[str, Any]:
         try:
             parsed: object = json.loads(value)
         except json.JSONDecodeError:
+            logger.debug("could not JSON-decode dict column: %r", value)
             return {}
         return dict(cast("dict[str, Any]", parsed)) if isinstance(parsed, dict) else {}
     return {}

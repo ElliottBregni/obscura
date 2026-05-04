@@ -12,6 +12,7 @@ them from there directly — they are no longer re-exported via this module.
 from __future__ import annotations
 
 import enum
+import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import (
@@ -33,6 +34,8 @@ from obscura.core.enums.agent import (
     Role,
 )
 from obscura.core.enums.tools import ContentBlockKind, SideEffects, ToolChoiceMode
+
+logger = logging.getLogger(__name__)
 from obscura.core.models.content import (
     TextBlock,
     ThinkingBlock,
@@ -325,6 +328,11 @@ class ToolSpec:
                 # Unknown side_effects string — treat as state-changing
                 # (safest default; downstream can opt back in via the
                 # known enum values).
+                logger.debug(
+                    "ToolSpec %s: unknown side_effects %r — coercing to MUTATING",
+                    self.name,
+                    raw,
+                )
                 coerced = SideEffects.MUTATING
             object.__setattr__(self, "side_effects", coerced)
 

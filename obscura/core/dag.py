@@ -39,6 +39,7 @@ placeholders that reference upstream node results. See
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from collections import deque
@@ -47,6 +48,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from obscura.core.types import ContentBlock
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from obscura.core.tools import ToolRegistry
@@ -606,6 +609,7 @@ class Scheduler:
             try:
                 resolved = resolve_args(node.tool_input, completed)
             except DAGArgResolutionError as exc:
+                logger.debug("arg resolution failed for %s: %s", node.id, exc)
                 result = self._synth_failure(node, str(exc))
                 completed[node.id] = result
                 yield result
@@ -665,6 +669,7 @@ class Scheduler:
                 try:
                     resolved = resolve_args(node.tool_input, completed)
                 except DAGArgResolutionError as exc:
+                    logger.debug("arg resolution failed for %s: %s", node.id, exc)
                     result = self._synth_failure(node, str(exc))
                     completed[node.id] = result
                     pending_ids.discard(node.id)
@@ -718,6 +723,7 @@ class Scheduler:
                             pending_ids.discard(nid)
                             yield result
                         except asyncio.CancelledError:
+                            logger.debug("task %s cancelled by external signal", nid)
                             cancelled = self._synth_cancelled(
                                 dag.get(nid),
                                 "external cancel",
@@ -784,11 +790,13 @@ class Scheduler:
                     try:
                         result = task.result()
                     except asyncio.CancelledError:
+                        logger.debug("task %s cancelled during await", nid)
                         result = self._synth_cancelled(
                             dag.get(nid),
                             "task cancelled",
                         )
                     except Exception as exc:  # noqa: BLE001
+                        logger.debug("task %s raised: %s", nid, exc, exc_info=True)
                         result = self._synth_failure(dag.get(nid), str(exc))
                     completed[nid] = result
                     yield result
@@ -886,6 +894,13 @@ class Scheduler:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "dispatch failure on %s (%s): %s",
+                node.id,
+                node.tool_name,
+                exc,
+                exc_info=True,
+            )
             return DAGNodeResult(
                 node_id=node.id,
                 tool_use_id=node.tool_use_id,

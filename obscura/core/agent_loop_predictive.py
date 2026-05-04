@@ -82,6 +82,10 @@ class V2PredictiveCache:
         try:
             args_json = json.dumps(args, sort_keys=True, default=str)
         except TypeError:
+            # Args contain something json can't even default-stringify
+            # (a circular ref, a sentinel object, etc.). Fall back to a
+            # repr-based key — collisions are fine, dedup is best-effort.
+            logger.debug("predictive cache key fell back to repr", exc_info=True)
             args_json = repr(sorted(args.items()))
         return f"{name}::{args_json}"
 
