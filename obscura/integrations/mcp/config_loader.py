@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast
 from obscura.core.enums.protocol import MCPTransport
 from obscura.core.models.configs import MCPServerSpec
 from obscura.core.paths import resolve_all_mcp_dirs, resolve_obscura_mcp_dir
-from obscura.integrations.mcp.types import MCPTransportType
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -28,7 +27,7 @@ class DiscoveredMCPServer:
     """Normalized MCP server loaded from a JSON config file."""
 
     name: str
-    transport: MCPTransportType
+    transport: MCPTransport
     command: str
     args: tuple[str, ...]
     url: str
@@ -39,17 +38,9 @@ class DiscoveredMCPServer:
 
     def to_spec(self) -> MCPServerSpec:
         """Promote the legacy dataclass to the typed boundary model."""
-        # MCPTransportType is the legacy enum living in
-        # ``integrations/mcp/types``; map its members to the canonical
-        # ``MCPTransport`` (Round 1) so downstream code reads one type.
-        canonical_transport = (
-            MCPTransport.STDIO
-            if self.transport is MCPTransportType.STDIO
-            else MCPTransport.SSE
-        )
         return MCPServerSpec(
             name=self.name,
-            transport=canonical_transport,
+            transport=self.transport,
             command=self.command or None,
             args=self.args,
             env=dict(self.env),
@@ -244,9 +235,9 @@ def discover_mcp_servers(
             entry.get("transport", entry.get("type", "stdio")),
         ).lower()
         if raw_transport == "stdio":
-            transport = MCPTransportType.STDIO
+            transport = MCPTransport.STDIO
         elif raw_transport in ("sse", "http"):
-            transport = MCPTransportType.SSE
+            transport = MCPTransport.SSE
         else:
             msg = f"Unsupported MCP transport '{raw_transport}' for '{name}'"
             raise ValueError(
@@ -341,7 +332,7 @@ def build_runtime_server_configs(
             "env": dict(server.env),
             "tools": list(server.tools),
         }
-        if server.transport is MCPTransportType.STDIO:
+        if server.transport is MCPTransport.STDIO:
             payload["command"] = server.command
             payload["args"] = list(server.args)
         else:

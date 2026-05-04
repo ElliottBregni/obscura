@@ -6,13 +6,9 @@ Based on the Model Context Protocol specification.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, TypeAlias, override
+from typing import Any, Literal, override
 
-from obscura.core.enums.protocol import (
-    MCPLogLevel as MCPLogLevel,
-    MCPMethod as MCPMethod,
-    MCPTransport as MCPTransport,
-)
+from obscura.core.enums.protocol import MCPLogLevel, MCPTransport
 
 # ---------------------------------------------------------------------------
 # JSON-RPC Types
@@ -183,17 +179,11 @@ class MCPLoggingMessage:
 # ---------------------------------------------------------------------------
 
 
-# Backwards-compatible alias for the canonical MCPTransport StrEnum.
-# UP040 ignored: `type X = ...` produces a TypeAliasType that strips enum
-# member access; we need the runtime to stay the actual enum class.
-MCPTransportType: TypeAlias = MCPTransport  # noqa: UP040
-
-
 @dataclass
 class MCPConnectionConfig:
     """Configuration for MCP connection."""
 
-    transport: MCPTransportType
+    transport: MCPTransport
     command: str | None = None  # For stdio transport
     args: list[str] = field(default_factory=list[str])  # For stdio transport
     url: str | None = None  # For SSE/WebSocket transport
@@ -212,7 +202,7 @@ class MCPServerInfo:
     name: str
     version: str
     capabilities: MCPCapabilities
-    transport: MCPTransportType
+    transport: MCPTransport
 
 
 # ---------------------------------------------------------------------------

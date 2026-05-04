@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from obscura.core.enums.protocol import MCPTransport
 from obscura.integrations.mcp.config_loader import (
     DiscoveredMCPServer,
     build_runtime_server_configs,
     discover_mcp_servers,
 )
-from obscura.integrations.mcp.types import MCPTransportType
 
 
 class TestDiscoverMCPServers:
@@ -47,7 +47,7 @@ class TestDiscoverMCPServers:
         assert len(discovered) == 1
         server = discovered[0]
         assert server.name == "playwright"
-        assert server.transport is MCPTransportType.STDIO
+        assert server.transport is MCPTransport.STDIO
         assert Path(server.command).name == "npx"
         assert server.args == ("-y", "@playwright/mcp@latest")
         assert server.env["PLAYWRIGHT_TOKEN"] == "token-value"
@@ -106,7 +106,7 @@ class TestBuildRuntimeServerConfigs:
         discovered = [
             DiscoveredMCPServer(
                 name="playwright",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="npx",
                 args=("-y", "@playwright/mcp@latest"),
                 url="",
@@ -116,7 +116,7 @@ class TestBuildRuntimeServerConfigs:
             ),
             DiscoveredMCPServer(
                 name="remote",
-                transport=MCPTransportType.SSE,
+                transport=MCPTransport.SSE,
                 command="",
                 args=(),
                 url="https://example.com/sse",
@@ -138,7 +138,7 @@ class TestBuildRuntimeServerConfigs:
         discovered = [
             DiscoveredMCPServer(
                 name="one",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="cmd-one",
                 args=(),
                 url="",
@@ -148,7 +148,7 @@ class TestBuildRuntimeServerConfigs:
             ),
             DiscoveredMCPServer(
                 name="two",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="cmd-two",
                 args=(),
                 url="",
@@ -166,7 +166,7 @@ class TestBuildRuntimeServerConfigs:
         discovered = [
             DiscoveredMCPServer(
                 name="jira",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="jira",
                 args=(),
                 url="",
@@ -176,7 +176,7 @@ class TestBuildRuntimeServerConfigs:
             ),
             DiscoveredMCPServer(
                 name="github",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="github",
                 args=(),
                 url="",
@@ -196,7 +196,7 @@ class TestBuildRuntimeServerConfigs:
         discovered = [
             DiscoveredMCPServer(
                 name="one",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="one",
                 args=(),
                 url="",
@@ -206,7 +206,7 @@ class TestBuildRuntimeServerConfigs:
             ),
             DiscoveredMCPServer(
                 name="two",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="two",
                 args=(),
                 url="",
@@ -225,7 +225,7 @@ class TestBuildRuntimeServerConfigs:
         discovered = [
             DiscoveredMCPServer(
                 name="known",
-                transport=MCPTransportType.STDIO,
+                transport=MCPTransport.STDIO,
                 command="npx",
                 args=(),
                 url="",

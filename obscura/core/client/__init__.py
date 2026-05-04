@@ -20,6 +20,7 @@ from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.circuit_breaker import CircuitBreakerRegistry, CircuitOpenError
 from obscura.core.context import load_session_messages
+from obscura.core.enums.protocol import MCPTransport
 from obscura.core.llm_cache import LLMCache
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.retry import with_retry
@@ -42,7 +43,7 @@ from obscura.core.types import (
     ToolCallInfo,
     ToolSpec,
 )
-from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+from obscura.integrations.mcp.types import MCPConnectionConfig
 from obscura.providers.claude import ClaudeBackend
 from obscura.providers.codex import CodexBackend
 from obscura.providers.copilot import CopilotBackend
@@ -266,7 +267,7 @@ class ObscuraClient:
         if self._mcp_server_configs:
             configs: list[MCPConnectionConfig] = []
             for server in self._mcp_server_configs:
-                transport = MCPTransportType(server.get("transport", "stdio"))
+                transport = MCPTransport(server.get("transport", "stdio"))
                 configs.append(
                     MCPConnectionConfig(
                         transport=transport,

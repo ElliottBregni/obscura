@@ -33,9 +33,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from obscura.core.enums.protocol import MCPTransport
 from obscura.core.types import ToolSpec
 from obscura.integrations.mcp.client import MCPClient
-from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+from obscura.integrations.mcp.types import MCPConnectionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def _build_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
         if not command:
             return None
         return MCPConnectionConfig(
-            transport=MCPTransportType.STDIO,
+            transport=MCPTransport.STDIO,
             command=str(command),
             args=list(server.get("args") or []),
             env=dict(server.get("env") or {}),
@@ -151,7 +152,7 @@ def _build_config(server: dict[str, Any]) -> MCPConnectionConfig | None:
             return None
         # SSE & HTTP both go through SSETransport in obscura's MCP client.
         return MCPConnectionConfig(
-            transport=MCPTransportType.SSE,
+            transport=MCPTransport.SSE,
             url=str(url),
             env=dict(server.get("env") or {}),
             headers=dict(server.get("headers") or {}),

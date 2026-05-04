@@ -15,11 +15,12 @@ Usage::
     await server.initialize()
 
     # As MCP Client
+    from obscura.core.enums.protocol import MCPTransport
     from obscura.integrations.mcp.client import MCPClient
-    from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+    from obscura.integrations.mcp.types import MCPConnectionConfig
 
     config = MCPConnectionConfig(
-        transport=MCPTransportType.STDIO,
+        transport=MCPTransport.STDIO,
         command="npx",
         args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     )
@@ -91,7 +92,6 @@ from obscura.integrations.mcp.types import (
     MCPTool,
     MCPToolCall,
     MCPToolResult,
-    MCPTransportType,
     ObscuraMCPConfig,
     ObscuraMCPToolContext,
 )
@@ -149,7 +149,6 @@ __all__ = [
     "MCPTool",
     "MCPToolCall",
     "MCPToolResult",
-    "MCPTransportType",
     "ObscuraMCPConfig",
     # Server (lazy)
     "ObscuraMCPServer",

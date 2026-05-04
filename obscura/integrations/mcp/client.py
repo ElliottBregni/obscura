@@ -4,12 +4,13 @@ Supports stdio and SSE transports for connecting to MCP servers.
 
 Usage::
 
+    from obscura.core.enums.protocol import MCPTransport
     from obscura.integrations.mcp.client import MCPClient
-    from obscura.integrations.mcp.types import MCPConnectionConfig, MCPTransportType
+    from obscura.integrations.mcp.types import MCPConnectionConfig
 
     # Connect via stdio
     config = MCPConnectionConfig(
-        transport=MCPTransportType.STDIO,
+        transport=MCPTransport.STDIO,
         command="npx",
         args=["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
     )
@@ -31,6 +32,7 @@ from typing import Any, Self, override
 import httpx
 
 from obscura.auth.secrets import safe_subprocess_env
+from obscura.core.enums.protocol import MCPTransport
 from obscura.integrations.mcp.types import (
     MCPConnectionConfig,
     MCPError,
@@ -42,7 +44,6 @@ from obscura.integrations.mcp.types import (
     MCPResourceContent,
     MCPTool,
     MCPToolResult,
-    MCPTransportType,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class MCPClient:
 
     def __init__(self, config: MCPConnectionConfig) -> None:
         self.config = config
-        self._transport: MCPTransport | None = None
+        self._transport: MCPTransportBase | None = None
         self._initialized = False
         self._request_id = 0
         self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -78,9 +79,9 @@ class MCPClient:
         if self._initialized:
             return
 
-        if self.config.transport == MCPTransportType.STDIO:
+        if self.config.transport == MCPTransport.STDIO:
             self._transport = StdioTransport(self.config)
-        elif self.config.transport == MCPTransportType.SSE:
+        elif self.config.transport == MCPTransport.SSE:
             self._transport = SSETransport(self.config)
         else:
             raise MCPError(
@@ -142,11 +143,11 @@ class MCPClient:
         return self._request_id
 
     @property
-    def transport(self) -> "MCPTransport | None":
+    def transport(self) -> "MCPTransportBase | None":
         return self._transport
 
     @transport.setter
-    def transport(self, value: "MCPTransport | None") -> None:
+    def transport(self, value: "MCPTransportBase | None") -> None:
         self._transport = value
 
     @property
@@ -380,7 +381,7 @@ class MCPClient:
 # ---------------------------------------------------------------------------
 
 
-class MCPTransport:
+class MCPTransportBase:
     """Base class for MCP transports."""
 
     async def connect(self) -> None:
@@ -396,7 +397,7 @@ class MCPTransport:
         raise NotImplementedError
 
 
-class StdioTransport(MCPTransport):
+class StdioTransport(MCPTransportBase):
     """Stdio transport for MCP (spawns subprocess)."""
 
     def __init__(self, config: MCPConnectionConfig) -> None:
@@ -517,7 +518,7 @@ class StdioTransport(MCPTransport):
             logger.exception(f"Error reading from MCP server: {e}")
 
 
-class SSETransport(MCPTransport):
+class SSETransport(MCPTransportBase):
     """Server-Sent Events transport for MCP."""
 
     def __init__(self, config: MCPConnectionConfig) -> None:
