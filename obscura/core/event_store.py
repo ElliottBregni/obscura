@@ -20,10 +20,10 @@ import asyncio
 import json
 import sqlite3
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from obscura.core.enums.lifecycle import (
     SESSION_VALID_TRANSITIONS as VALID_TRANSITIONS,
@@ -31,6 +31,7 @@ from obscura.core.enums.lifecycle import (
 from obscura.core.enums.lifecycle import (
     SessionStatus as SessionStatus,
 )
+from obscura.core.models.lifecycle import SessionRecord as SessionRecord
 from obscura.core.session_utils import list_active_sessions
 from obscura.core.types import AgentEvent, AgentEventKind
 import logging
@@ -41,29 +42,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Records
 # ---------------------------------------------------------------------------
-
-
-def _empty_dict() -> dict[str, Any]:
-    return {}
-
-
-@dataclass(frozen=True)
-class SessionRecord:
-    """Persistent session metadata."""
-
-    id: str
-    status: SessionStatus
-    backend: str = ""
-    model: str = ""
-    active_agent: str = ""
-    source: str = "live"
-    parent_session_id: str = ""
-    project: str = ""
-    summary: str = ""
-    message_count: int = 0
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -182,30 +160,7 @@ _SESSION_COLS = (
 
 def _row_to_session(row: sqlite3.Row) -> SessionRecord:
     """Convert a DB row to a SessionRecord."""
-    raw_meta = row["metadata"]
-    meta: dict[str, Any] = {}
-    if raw_meta:
-        try:
-            parsed: Any = json.loads(raw_meta)
-            if isinstance(parsed, dict):
-                meta = cast(dict[str, Any], parsed)
-        except (json.JSONDecodeError, TypeError):
-            logger.debug("suppressed exception in _row_to_session", exc_info=True)
-    return SessionRecord(
-        id=row["id"],
-        status=SessionStatus(row["status"]),
-        backend=row["backend"] or "",
-        model=row["model"] or "",
-        active_agent=row["active_agent"] or "",
-        source=row["source"] or "live",
-        parent_session_id=row["parent_session_id"] or "",
-        project=row["project"] or "",
-        summary=row["summary"] or "",
-        message_count=int(row["message_count"] or 0),
-        metadata=meta,
-        created_at=datetime.fromisoformat(row["created_at"]),
-        updated_at=datetime.fromisoformat(row["updated_at"]),
-    )
+    return SessionRecord.from_row(row)
 
 
 class SQLiteEventStore:
@@ -557,8 +512,15 @@ class SQLiteEventStore:
 
     def _reap_orphaned_sessions_sync(self) -> int:
         conn = self._conn()
+        active_statuses = (
+            SessionStatus.RUNNING,
+            SessionStatus.WAITING_FOR_TOOL,
+            SessionStatus.WAITING_FOR_USER,
+        )
+        placeholders = ",".join("?" * len(active_statuses))
         rows = conn.execute(
-            "SELECT id FROM sessions WHERE status IN ('running', 'waiting_for_tool', 'waiting_for_user')"
+            f"SELECT id FROM sessions WHERE status IN ({placeholders})",
+            [s.value for s in active_statuses],
         ).fetchall()
 
         if not rows:

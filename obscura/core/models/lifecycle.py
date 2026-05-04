@@ -465,8 +465,16 @@ class SessionRecord(
     TimestampedMixin,
     StatusedMixin[SessionStatus],
 ):
-    """A durable agent session row in the event store."""
+    """A durable agent session row in the event store.
 
+    ``status_changed_at`` defaults to ``updated_at`` (or ``created_at``)
+    when omitted by callsites that predate the StatusedMixin contract —
+    notably the Postgres backing store at
+    ``obscura/core/postgres_event_store.py`` which constructs records
+    without an explicit transition timestamp.
+    """
+
+    status_changed_at: datetime = Field(default=None)  # type: ignore[assignment]
     backend: str = ""
     model: str = ""
     active_agent: str = ""
@@ -476,6 +484,12 @@ class SessionRecord(
     summary: str = ""
     message_count: int = 0
     metadata: Mapping[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _backfill_status_changed_at(self) -> Self:
+        if self.status_changed_at is None:  # type: ignore[truthy-bool]
+            object.__setattr__(self, "status_changed_at", self.updated_at)
+        return self
 
     @classmethod
     def from_row(cls, row: sqlite3.Row | Mapping[str, Any]) -> Self:
