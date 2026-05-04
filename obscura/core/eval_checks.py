@@ -22,9 +22,62 @@ import json
 import logging
 import os
 import subprocess
-from typing import Any, cast
+from collections.abc import Callable
+from typing import Any
+
+from obscura.core.models import BoundaryModel
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Pyright CLI JSON shape (wire-format, lenient)
+# ---------------------------------------------------------------------------
+
+
+class _PyrightPosition(BoundaryModel):
+    """One row in pyright's per-diagnostic range. Lenient — wire format."""
+
+    line: int = 0
+    character: int = 0
+
+
+class _PyrightRange(BoundaryModel):
+    """Range produced by ``pyright --outputjson``. Lenient — wire format."""
+
+    start: _PyrightPosition = _PyrightPosition()
+    end: _PyrightPosition = _PyrightPosition()
+
+
+class _PyrightDiagnostic(BoundaryModel):
+    """One ``generalDiagnostics`` entry from ``pyright --outputjson``."""
+
+    severity: str = ""
+    message: str = ""
+    range: _PyrightRange = _PyrightRange()
+
+
+class _PyrightOutput(BoundaryModel):
+    """Top-level ``pyright --outputjson`` envelope.
+
+    Lenient on ``extra`` because pyright versions add fields without us
+    caring about them (summary, version, time, ...).
+    """
+
+    generalDiagnostics: list[_PyrightDiagnostic] = []  # noqa: N815 — pyright wire field
+
+
+# ---------------------------------------------------------------------------
+# Tool-result checker signature
+# ---------------------------------------------------------------------------
+
+# Tool inputs/results are heterogeneous JSON, so each checker receives the
+# tool-specific dict[str, Any] / Any that the agent loop produced. This is
+# the legitimate "Any at the seam" use — the value space is union-of-all-
+# tool-arg-shapes, not a single schema.
+ToolInput = dict[str, Any]
+ToolResult = str | Any
+CheckerFn = Callable[[str, ToolInput, ToolResult], str | None]
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +87,7 @@ logger = logging.getLogger(__name__)
 
 def check_python_syntax(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Parse Python file with ast to catch syntax errors (instant, no deps)."""
@@ -53,7 +106,7 @@ def check_python_syntax(
 
 def check_python_ruff(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Run ``ruff check`` on a Python file after write/edit."""
@@ -76,7 +129,7 @@ def check_python_ruff(
 
 def check_python_pyright(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Run ``pyright`` on a Python file for type errors.
@@ -111,23 +164,19 @@ def check_python_pyright(
         )
         if proc.returncode != 0 and proc.stdout.strip():
             try:
-                data = cast(dict[str, Any], json.loads(proc.stdout))
-                diagnostics = cast(
-                    list[dict[str, Any]], data.get("generalDiagnostics", [])
-                )
-                errors = [d for d in diagnostics if d.get("severity") == "error"]
-                if errors:
-                    msgs: list[str] = []
-                    for e in errors[:5]:  # cap at 5
-                        rng = cast(dict[str, Any], e.get("range", {}))
-                        start = cast(dict[str, Any], rng.get("start", {}))
-                        line = start.get("line", "?")
-                        msgs.append(f"  line {line}: {e.get('message', '?')}")
-                    return "\n⚠ pyright type errors:\n" + "\n".join(msgs)
-            except json.JSONDecodeError:
+                output = _PyrightOutput.model_validate_json(proc.stdout)
+            except (json.JSONDecodeError, ValueError):
                 logger.debug(
                     "suppressed exception in check_python_pyright", exc_info=True
                 )
+            else:
+                errors = [d for d in output.generalDiagnostics if d.severity == "error"]
+                if errors:
+                    msgs: list[str] = [
+                        f"  line {e.range.start.line}: {e.message or '?'}"
+                        for e in errors[:5]  # cap at 5
+                    ]
+                    return "\n⚠ pyright type errors:\n" + "\n".join(msgs)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         logger.debug("suppressed exception in check_python_pyright", exc_info=True)
     return None
@@ -135,7 +184,7 @@ def check_python_pyright(
 
 def check_python_imports(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Verify that top-level imports in a Python file can be resolved."""
@@ -187,7 +236,7 @@ def _can_import(module_name: str) -> bool:
 
 def check_written_yaml_toml(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Validate YAML/TOML files after write."""
@@ -221,7 +270,7 @@ def check_written_yaml_toml(
 
 def check_written_json(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Validate JSON files after write."""
@@ -244,7 +293,7 @@ def check_written_json(
 
 def check_shell_syntax(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Run ``bash -n`` to check shell script syntax."""
@@ -277,7 +326,7 @@ def check_shell_syntax(
 
 def check_dockerfile(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Run ``hadolint`` on Dockerfiles (if available)."""
@@ -309,7 +358,7 @@ def check_dockerfile(
 
 def check_written_file_exists(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Verify the file was actually written to disk."""
@@ -321,7 +370,7 @@ def check_written_file_exists(
     return None
 
 
-def _coerce_result_str(tool_result: str | dict[str, Any] | Any) -> str:
+def _coerce_result_str(tool_result: ToolResult) -> str:
     """Coerce a tool result to string for eval checks.
 
     MCP tools may return dicts; system tools return JSON strings.
@@ -335,7 +384,7 @@ def _coerce_result_str(tool_result: str | dict[str, Any] | Any) -> str:
 
 def check_empty_tool_result(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str | Any,
 ) -> str | None:
     """Flag tool results that are completely empty (likely an error)."""
@@ -347,7 +396,7 @@ def check_empty_tool_result(
 
 def check_bash_error(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str | Any,
 ) -> str | None:
     """Flag bash commands that produced error output."""
@@ -362,13 +411,13 @@ def check_bash_error(
 # ---------------------------------------------------------------------------
 
 
-def _chain_checks(*checkers: Any) -> Any:
+def _chain_checks(*checkers: CheckerFn) -> CheckerFn:
     """Run multiple checkers, accumulate all errors (not just first)."""
 
     def _combined(
         tool_name: str,
-        tool_input: dict[str, Any],
-        tool_result: str,
+        tool_input: ToolInput,
+        tool_result: ToolResult,
     ) -> str | None:
         errors: list[str] = []
         for checker in checkers:
@@ -403,7 +452,7 @@ _write_check = _chain_checks(
 )
 
 # Maps tool names to checker functions.
-TOOL_CHECKS: dict[str, Any] = {
+TOOL_CHECKS: dict[str, CheckerFn] = {
     # File write/edit tools
     "write_file": _write_check,
     "create_file": _write_check,
@@ -417,14 +466,14 @@ TOOL_CHECKS: dict[str, Any] = {
 }
 
 # Generic checks that run on ALL tool results regardless of tool name
-GENERIC_CHECKS: list[Any] = [
+GENERIC_CHECKS: list[CheckerFn] = [
     check_empty_tool_result,
 ]
 
 
 def run_tool_check(
     tool_name: str,
-    tool_input: dict[str, Any],
+    tool_input: ToolInput,
     tool_result: str,
 ) -> str | None:
     """Look up and run checks for *tool_name*.
