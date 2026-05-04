@@ -36,9 +36,9 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any, Protocol
 
+from obscura.core.enums.messaging import ChannelMode as ChannelMode
 from obscura.core.paths import resolve_obscura_home
 from obscura.integrations.messaging.identity import build_conversation_key
 from obscura.integrations.messaging.kairos_runner import (
@@ -60,20 +60,7 @@ from obscura.integrations.messaging.store import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# ChannelMode — controls which runtime handles messages on a channel
-# ---------------------------------------------------------------------------
-
-
-class ChannelMode(StrEnum):
-    """Execution mode for a channel.
-
-    CHAT    — standard single-turn AgentLoop (snappy, conversational).
-    KAIROS  — long-horizon goal runtime (durable, task-decomposed, budgeted).
-    """
-
-    CHAT = "chat"
-    KAIROS = "kairos"
+# ChannelMode now lives in obscura.core.enums.messaging — re-exported above.
 
 
 # ---------------------------------------------------------------------------

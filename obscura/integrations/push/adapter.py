@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from obscura.integrations.push.client import Provider, PushClient
+from obscura.core.enums.messaging import PushProvider
+from obscura.integrations.push.client import PushClient
 from obscura.integrations.push.state import PushState
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ class PushAdapter:
         contacts: list[str],
         *,
         account_id: str = "default",
-        provider: Provider = "expo",
+        provider: PushProvider | str = PushProvider.EXPO,
         apns_key_id: str | None = None,
         apns_team_id: str | None = None,
         apns_bundle_id: str | None = None,
