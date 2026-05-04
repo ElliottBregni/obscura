@@ -7,25 +7,13 @@ operations, UI layout changes).
 
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.enums.ui import TUIMode
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Mode enum
-# ---------------------------------------------------------------------------
-
-
-class TUIMode(enum.Enum):
-    """Available TUI interaction modes."""
-
-    ASK = "ask"
-    PLAN = "plan"
-    CODE = "code"
-    DIFF = "diff"
 
 
 # ---------------------------------------------------------------------------

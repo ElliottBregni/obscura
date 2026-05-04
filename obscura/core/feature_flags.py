@@ -15,19 +15,8 @@ NONE                   No banner at all
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
-
-class BannerTheme(StrEnum):
-    OBSCURA_DEFAULT = "obscura_default"  # original purple/blue wave -- OBSCURA
-    OVERHAUL_GREEN_BLUE = (
-        "overhaul_green_blue"  # oscillating green <-> blue block letters
-    )
-    OVERHAUL_ORANGE = "overhaul_orange"  # solid orange block letters
-    OBSCURA_BY_OVERHAUL = (
-        "obscura_by_overhaul"  # OBSCURA (cyan/teal) + "by OVERHAUL" (green/blue)
-    )
-    NONE = "none"  # suppress banner entirely
+from obscura.core.enums.ui import BannerTheme
 
 
 @dataclass(frozen=True)

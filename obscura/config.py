@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import os
 
+from obscura.core.enums._base import parse_lenient
+from obscura.core.enums.ui import OutputMode
+
 
 def _env_flag(name: str, default: bool = False) -> bool:
     """Return True if the env var is set to a truthy string 'true'.
@@ -27,7 +30,11 @@ def _env_flag(name: str, default: bool = False) -> bool:
 # Public configuration values
 # NOTE: defaults chosen to preserve existing behavior where applicable.
 VERBOSE: bool = _env_flag("OBSCURA_VERBOSE", False)
-OUTPUT_MODE: str = os.environ.get("OBSCURA_OUTPUT_MODE", "cli")
+OUTPUT_MODE: OutputMode = parse_lenient(
+    OutputMode,
+    os.environ.get("OBSCURA_OUTPUT_MODE", "cli"),
+    default=OutputMode.CLI,
+)
 CAPTURE_PRINTS: bool = _env_flag("OBSCURA_CAPTURE_PRINTS", False)
 
 

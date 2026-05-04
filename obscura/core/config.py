@@ -24,6 +24,8 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from obscura.auth import secrets as _secrets
+from obscura.core.enums._base import parse_lenient
+from obscura.core.enums.ui import LogFormat
 from obscura.core.paths import resolve_obscura_settings
 
 _log = logging.getLogger(__name__)
@@ -123,7 +125,7 @@ class ObscuraConfig(BaseModel):
     otel_endpoint: str = "http://127.0.0.1:4317"
     otel_service_name: str = "obscura-sdk"
     log_level: str = "INFO"
-    log_format: str = "json"  # "json" | "text"
+    log_format: LogFormat = LogFormat.JSON
 
     # Backends
     default_backend: str = "copilot"
@@ -267,7 +269,11 @@ class ObscuraConfig(BaseModel):
                 "obscura-sdk",
             ),
             log_level=_str("OBSCURA_LOG_LEVEL", "log_level", "INFO"),
-            log_format=_str("OBSCURA_LOG_FORMAT", "log_format", "json"),
+            log_format=parse_lenient(
+                LogFormat,
+                _str("OBSCURA_LOG_FORMAT", "log_format", "json"),
+                default=LogFormat.JSON,
+            ),
             # Backends
             default_backend=_str(
                 "OBSCURA_DEFAULT_BACKEND",
