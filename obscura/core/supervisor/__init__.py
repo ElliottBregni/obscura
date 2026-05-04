@@ -45,7 +45,6 @@ from obscura.core.supervisor.agent_templates import (
 )
 from obscura.core.supervisor.errors import (
     DriftDetectedError,
-    ErrorCategory,
     LockAcquisitionError,
     LockExpiredError,
     MemoryCommitError,
@@ -108,7 +107,6 @@ __all__ = [
     "AgentTemplateStore",
     "AgentVersion",
     "DriftDetectedError",
-    "ErrorCategory",
     # Tools
     "FrozenToolEntry",
     "FrozenToolRegistry",

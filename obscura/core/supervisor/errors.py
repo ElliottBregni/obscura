@@ -6,38 +6,19 @@ for the supervisor to decide retry vs fail.
 
 from __future__ import annotations
 
-import enum
 from typing import Any
 
-
-class ErrorCategory(enum.StrEnum):
-    """Broad error categories for supervisor decision-making.
-
-    Backward-compat shim. The unified registry lives at
-    `obscura.core.enums.error.ErrorCategory`; values here are byte-identical
-    so wire format (persisted in `events.db` via `e.category.value`) and
-    identity-within-this-enum checks keep working.
-    """
-
-    TOOL_TRANSIENT = "tool_transient"
-    TOOL_PERMANENT = "tool_permanent"
-    MODEL_TRANSIENT = "model_transient"
-    MODEL_PERMANENT = "model_permanent"
-    LOCK_CONTENTION = "lock_contention"
-    LOCK_EXPIRED = "lock_expired"
-    STATE_VIOLATION = "state_violation"
-    MEMORY_ERROR = "memory_error"
-    TIMEOUT = "timeout"
+from obscura.core.enums.error import ErrorCategory
 
 
 # Categories that are safe to retry
 RETRYABLE_CATEGORIES: frozenset[ErrorCategory] = frozenset(
     {
-        ErrorCategory.TOOL_TRANSIENT,
-        ErrorCategory.MODEL_TRANSIENT,
-        ErrorCategory.LOCK_CONTENTION,
-        ErrorCategory.LOCK_EXPIRED,
-        ErrorCategory.MEMORY_ERROR,
+        ErrorCategory.SUPERVISOR_TOOL_TRANSIENT,
+        ErrorCategory.SUPERVISOR_MODEL_TRANSIENT,
+        ErrorCategory.SUPERVISOR_LOCK_CONTENTION,
+        ErrorCategory.SUPERVISOR_LOCK_EXPIRED,
+        ErrorCategory.SUPERVISOR_MEMORY_ERROR,
     },
 )
 
@@ -48,7 +29,7 @@ class SupervisorError(Exception):
     def __init__(
         self,
         message: str,
-        category: ErrorCategory = ErrorCategory.STATE_VIOLATION,
+        category: ErrorCategory = ErrorCategory.SUPERVISOR_STATE_VIOLATION,
         *,
         retryable: bool = False,
         context: dict[str, Any] | None = None,
@@ -65,7 +46,7 @@ class StateTransitionError(SupervisorError):
     def __init__(self, from_state: str, to_state: str) -> None:
         super().__init__(
             f"Invalid transition: {from_state} -> {to_state}",
-            ErrorCategory.STATE_VIOLATION,
+            ErrorCategory.SUPERVISOR_STATE_VIOLATION,
             retryable=False,
             context={"from_state": from_state, "to_state": to_state},
         )
@@ -85,7 +66,7 @@ class LockAcquisitionError(SupervisorError):
             f"Failed to acquire lock for session {session_id}"
             + (f" (held by {holder_id})" if holder_id else "")
             + (f" after {timeout:.1f}s" if timeout else ""),
-            ErrorCategory.LOCK_CONTENTION,
+            ErrorCategory.SUPERVISOR_LOCK_CONTENTION,
             retryable=True,
             context={
                 "session_id": session_id,
@@ -101,7 +82,7 @@ class LockExpiredError(SupervisorError):
     def __init__(self, session_id: str, holder_id: str) -> None:
         super().__init__(
             f"Lock expired for session {session_id} (holder: {holder_id})",
-            ErrorCategory.LOCK_EXPIRED,
+            ErrorCategory.SUPERVISOR_LOCK_EXPIRED,
             retryable=True,
             context={"session_id": session_id, "holder_id": holder_id},
         )
@@ -113,7 +94,7 @@ class RunTimeoutError(SupervisorError):
     def __init__(self, run_id: str, duration: float, limit: float) -> None:
         super().__init__(
             f"Run {run_id} timed out after {duration:.1f}s (limit: {limit:.1f}s)",
-            ErrorCategory.TIMEOUT,
+            ErrorCategory.SUPERVISOR_TIMEOUT,
             retryable=False,
             context={
                 "run_id": run_id,
@@ -134,7 +115,9 @@ class ToolExecutionError(SupervisorError):
         retryable: bool = False,
     ) -> None:
         category = (
-            ErrorCategory.TOOL_TRANSIENT if retryable else ErrorCategory.TOOL_PERMANENT
+            ErrorCategory.SUPERVISOR_TOOL_TRANSIENT
+            if retryable
+            else ErrorCategory.SUPERVISOR_TOOL_PERMANENT
         )
         super().__init__(
             f"Tool '{tool_name}' failed: {message}",
@@ -150,7 +133,7 @@ class MemoryCommitError(SupervisorError):
     def __init__(self, message: str) -> None:
         super().__init__(
             f"Memory commit failed: {message}",
-            ErrorCategory.MEMORY_ERROR,
+            ErrorCategory.SUPERVISOR_MEMORY_ERROR,
             retryable=True,
         )
 
@@ -161,7 +144,7 @@ class PromptAssemblyError(SupervisorError):
     def __init__(self, message: str) -> None:
         super().__init__(
             message,
-            ErrorCategory.STATE_VIOLATION,
+            ErrorCategory.SUPERVISOR_STATE_VIOLATION,
             retryable=False,
         )
 
@@ -177,7 +160,7 @@ class DriftDetectedError(SupervisorError):
     ) -> None:
         super().__init__(
             f"{kind} drift detected: expected {expected[:12]}..., got {actual[:12]}...",
-            ErrorCategory.STATE_VIOLATION,
+            ErrorCategory.SUPERVISOR_STATE_VIOLATION,
             retryable=False,
             context={"kind": kind, "expected": expected, "actual": actual},
         )
