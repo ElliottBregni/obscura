@@ -16,11 +16,12 @@ import logging
 import os
 import shutil
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
 from obscura.core.enums.lifecycle import WorktreeStatus as WorktreeStatus
+from obscura.core.models.lifecycle import WorktreeEntry as WorktreeEntry
 
 logger = logging.getLogger(__name__)
 
@@ -45,42 +46,6 @@ def repo_hash(repo_root: str | Path) -> str:
 def worktree_path_for(repo_root: str | Path, slug: str) -> Path:
     """Return the on-disk checkout path for ``(repo_root, slug)``."""
     return registry_root() / repo_hash(repo_root) / slug
-
-
-@dataclass
-class WorktreeEntry:
-    slug: str
-    repo_root: str
-    repo_hash: str
-    worktree_path: str
-    branch: str
-    original_cwd: str
-    owner: str  # "tool" | "agent"
-    pid: int
-    created_at: float
-    agent_name: str = ""
-    status: WorktreeStatus = WorktreeStatus.ACTIVE
-
-    def to_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload["status"] = self.status.value
-        return payload
-
-    @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> WorktreeEntry:
-        return cls(
-            slug=str(raw.get("slug", "")),
-            repo_root=str(raw.get("repo_root", "")),
-            repo_hash=str(raw.get("repo_hash", "")),
-            worktree_path=str(raw.get("worktree_path", "")),
-            branch=str(raw.get("branch", "")),
-            original_cwd=str(raw.get("original_cwd", "")),
-            owner=str(raw.get("owner", "tool")),
-            pid=int(raw.get("pid", 0)),
-            created_at=float(raw.get("created_at", 0.0)),
-            agent_name=str(raw.get("agent_name", "")),
-            status=WorktreeStatus(str(raw.get("status", "active"))),
-        )
 
 
 def _empty_entries() -> list[WorktreeEntry]:
@@ -111,16 +76,16 @@ def _load_locked() -> _Manifest:
     entries: list[WorktreeEntry] = []
     for item in items_list:
         if isinstance(item, dict):
-            entries.append(WorktreeEntry.from_dict(cast("dict[str, Any]", item)))
+            entries.append(WorktreeEntry.from_row(cast("dict[str, Any]", item)))
     return _Manifest(entries=entries)
 
 
 def _save_locked(manifest: _Manifest) -> None:
     path = registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"entries": [e.to_dict() for e in manifest.entries]}
+    payload = {"entries": [e.to_row() for e in manifest.entries]}
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
     tmp.replace(path)
 
 

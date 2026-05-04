@@ -31,7 +31,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Self, cast
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from obscura.core.enums._base import parse_lenient
 from obscura.core.enums.lifecycle import (
@@ -374,8 +374,18 @@ class WorktreeEntry(
     registration time), so this record does not include
     :class:`IdentifiedMixin`. Persistence is JSON in
     ``~/.obscura/worktrees/registry.json``.
+
+    The on-disk JSON stores Unix timestamps (floats), so the timestamp
+    fields accept ``float`` / ``int`` in addition to ``datetime`` —
+    historical callsites pass ``time.time()`` directly. ``updated_at``
+    and ``status_changed_at`` default to ``created_at`` when omitted.
     """
 
+    # Override the mixin defaults so historical positional construction
+    # (`WorktreeEntry(..., created_at=time.time())`) keeps working.
+    updated_at: datetime = Field(default=None)  # type: ignore[assignment]
+    status_changed_at: datetime = Field(default=None)  # type: ignore[assignment]
+    status: WorktreeStatus = WorktreeStatus.ACTIVE
     slug: str
     repo_root: str
     repo_hash: str
@@ -385,6 +395,21 @@ class WorktreeEntry(
     owner: str
     pid: int
     agent_name: str = ""
+
+    @field_validator("created_at", "updated_at", "status_changed_at", mode="before")
+    @classmethod
+    def _coerce_timestamps(cls, value: object) -> object:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value), tz=UTC)
+        return value
+
+    @model_validator(mode="after")
+    def _backfill_timestamps(self) -> Self:
+        if self.updated_at is None:  # type: ignore[truthy-bool]
+            object.__setattr__(self, "updated_at", self.created_at)
+        if self.status_changed_at is None:  # type: ignore[truthy-bool]
+            object.__setattr__(self, "status_changed_at", self.created_at)
+        return self
 
     @classmethod
     def from_row(cls, row: sqlite3.Row | Mapping[str, Any]) -> Self:
