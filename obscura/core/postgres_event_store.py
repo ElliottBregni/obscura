@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -36,6 +37,50 @@ except ImportError:
 
 # Public re-export for callers checking availability before construction.
 HAS_PSYCOPG2 = _has_psycopg2
+
+
+def _coerce_metadata(value: object) -> dict[str, Any]:
+    """Postgres returns JSONB as already-decoded ``dict``; legacy text rows
+    arrive as JSON strings. Normalise either to a ``dict`` for SessionRecord.
+    """
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    if isinstance(value, str) and value:
+        try:
+            decoded: object = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return cast(dict[str, Any], decoded) if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _coerce_payload(value: object) -> dict[str, Any]:
+    """JSONB or JSON-string payload column → ``dict[str, Any]``."""
+    if isinstance(value, dict):
+        return cast(dict[str, Any], value)
+    if isinstance(value, str) and value:
+        try:
+            decoded: object = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return cast(dict[str, Any], decoded) if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _row_to_session(row: Mapping[str, Any]) -> SessionRecord:
+    """Wrap a Postgres row dict into a SessionRecord via the standard parser.
+
+    Postgres returns ``metadata`` as a decoded JSONB ``dict`` and timestamps
+    as ``datetime`` objects, both of which ``SessionRecord.from_row`` already
+    handles. Decoded metadata is re-injected so the row matches the
+    `from_row` contract that expects either a JSON string or a dict.
+    """
+    return SessionRecord.from_row(
+        {
+            **dict(row),
+            "metadata": _coerce_metadata(row.get("metadata")),
+        }
+    )
 
 
 class PostgreSQLEventStore:
@@ -107,7 +152,7 @@ class PostgreSQLEventStore:
         parent_session_id: str = "",
         project: str = "",
         summary: str = "",
-        metadata: dict[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> SessionRecord:
         return await asyncio.to_thread(
             self._create_session_sync,
@@ -132,9 +177,10 @@ class PostgreSQLEventStore:
         parent_session_id: str,
         project: str,
         summary: str,
-        metadata: dict[str, Any] | None,
+        metadata: Mapping[str, Any] | None,
     ) -> SessionRecord:
         now = datetime.now(UTC)
+        meta = dict(metadata) if metadata else {}
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
@@ -150,7 +196,7 @@ class PostgreSQLEventStore:
                         parent_session_id,
                         project,
                         summary,
-                        json.dumps(metadata or {}),
+                        json.dumps(meta),
                         now,
                         now,
                     ),
@@ -169,7 +215,7 @@ class PostgreSQLEventStore:
             project=project,
             summary=summary,
             message_count=0,
-            metadata=metadata or {},
+            metadata=meta,
             created_at=now,
             updated_at=now,
         )
@@ -212,27 +258,7 @@ class PostgreSQLEventStore:
                 row_any: Any = cur.fetchone()
                 if not row_any:
                     return None
-                row = cast(dict[str, Any], row_any)
-                meta_raw: Any = row["metadata"]
-                meta: dict[str, Any] = (
-                    cast(dict[str, Any], meta_raw)
-                    if isinstance(meta_raw, dict)
-                    else json.loads(meta_raw or "{}")
-                )
-                return SessionRecord(
-                    id=str(row["id"]),
-                    status=SessionStatus(row["status"]),
-                    backend=str(row["backend"]),
-                    model=str(row["model"]),
-                    active_agent=str(row["active_agent"]),
-                    source=str(row["source"]),
-                    project=str(row["project"]),
-                    summary=str(row["summary"]),
-                    message_count=int(row["message_count"]),
-                    metadata=meta,
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
+                return _row_to_session(cast(Mapping[str, Any], row_any))
         finally:
             self._put_conn(conn)
 
@@ -256,7 +282,7 @@ class PostgreSQLEventStore:
                     "SELECT COALESCE(MAX(seq), 0) + 1 FROM events.events WHERE session_id = %s",
                     (session_id,),
                 )
-                seq_row = cast(dict[str, Any], cur.fetchone())
+                seq_row = cast(Mapping[str, Any], cur.fetchone())
                 seq = int(seq_row["coalesce"])
                 cur.execute(
                     "INSERT INTO events.events (session_id, seq, kind, payload, timestamp) VALUES (%s, %s, %s, %s, %s)",
@@ -285,15 +311,10 @@ class PostgreSQLEventStore:
                     "SELECT * FROM events.events WHERE session_id = %s AND seq > %s ORDER BY seq",
                     (session_id, after_seq),
                 )
-                rows = cast(list[dict[str, Any]], cur.fetchall())
+                rows = cast(list[Mapping[str, Any]], cur.fetchall())
                 results: list[EventRecord] = []
                 for r in rows:
-                    payload_raw: Any = r["payload"]
-                    payload: dict[str, Any] = (
-                        cast(dict[str, Any], payload_raw)
-                        if isinstance(payload_raw, dict)
-                        else json.loads(payload_raw)
-                    )
+                    payload = _coerce_payload(r["payload"])
                     results.append(
                         EventRecord(
                             session_id=str(r["session_id"]),
@@ -333,33 +354,8 @@ class PostgreSQLEventStore:
                     params.append(parent_session_id)
                 query += " ORDER BY updated_at DESC"
                 cur.execute(query, params)
-                rows = cast(list[dict[str, Any]], cur.fetchall())
-                results: list[SessionRecord] = []
-                for r in rows:
-                    meta_raw: Any = r["metadata"]
-                    meta: dict[str, Any] = (
-                        cast(dict[str, Any], meta_raw)
-                        if isinstance(meta_raw, dict)
-                        else json.loads(meta_raw or "{}")
-                    )
-                    results.append(
-                        SessionRecord(
-                            id=str(r["id"]),
-                            status=SessionStatus(r["status"]),
-                            backend=str(r["backend"]),
-                            model=str(r["model"]),
-                            active_agent=str(r["active_agent"]),
-                            source=str(r["source"]),
-                            parent_session_id=str(r.get("parent_session_id", "") or ""),
-                            project=str(r["project"]),
-                            summary=str(r["summary"]),
-                            message_count=int(r["message_count"]),
-                            metadata=meta,
-                            created_at=r["created_at"],
-                            updated_at=r["updated_at"],
-                        )
-                    )
-                return results
+                rows = cast(list[Mapping[str, Any]], cur.fetchall())
+                return [_row_to_session(r) for r in rows]
         finally:
             self._put_conn(conn)
 

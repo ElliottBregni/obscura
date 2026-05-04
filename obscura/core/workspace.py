@@ -22,6 +22,7 @@ import os
 import shutil
 import stat
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -36,6 +37,7 @@ from obscura.core._default_docs import (
 from obscura.core._default_evals import DEFAULT_EVALS
 from obscura.core._default_skills import DEFAULT_SKILLS
 from obscura.core.config_io import dumps_toml, try_load_config
+from obscura.core.models.file_formats import BootstrapSummary, workspace_default_dict
 from obscura.plugins.bootstrapper import run_bootstrap
 from obscura.plugins.loader import (
     PluginLoader,
@@ -266,7 +268,11 @@ def load_workspace_config(cwd: Path | None = None) -> dict[str, Any]:
 
     Searches local ``.obscura/config.toml`` first, then falls back to
     ``~/.obscura/config.toml``.  Also supports deprecated ``.yaml`` files.
-    Returns the parsed config as a dict.
+    Returns the parsed config as a dict matching the on-disk shape (callers
+    indexing by key like ``cfg["plugins"]["load_builtins"]`` are unchanged).
+    The seed dict comes from
+    :func:`obscura.core.models.file_formats.workspace_default_dict` which
+    preserves the historical wire shape exactly.
     """
     resolved_cwd = (cwd or Path.cwd()).resolve()
     search_dirs = [
@@ -274,7 +280,7 @@ def load_workspace_config(cwd: Path | None = None) -> dict[str, Any]:
         resolved_cwd / _WORKSPACE_DIR,
     ]
 
-    merged: dict[str, Any] = _DEFAULT_CONFIG_DICT.copy()
+    merged: dict[str, Any] = workspace_default_dict()
     for base in search_dirs:  # global first, then local overrides
         data = try_load_config(
             base / "config.toml",
@@ -287,7 +293,7 @@ def load_workspace_config(cwd: Path | None = None) -> dict[str, Any]:
     return merged
 
 
-def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
+def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, list[str]]:
     """Run bootstrap for all builtin plugins.
 
     Reads ``plugins.bootstrap.*`` from the workspace config.yaml and installs
@@ -307,21 +313,16 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
     # Respect config.yaml settings
     if not plugins_cfg.get("load_builtins", True):
         logger.info("Builtin plugins disabled in config.yaml")
-        return {"installed": [], "skipped": [], "errors": [], "warnings": []}
+        return BootstrapSummary().to_dict()
 
     if not bootstrap_cfg.get("auto_install", True):
         logger.info("Auto-install disabled in config.yaml")
-        return {"installed": [], "skipped": [], "errors": [], "warnings": []}
+        return BootstrapSummary().to_dict()
 
     lenient = bootstrap_cfg.get("lenient_builtins", True)
 
     loader = PluginLoader()
-    summary: dict[str, Any] = {
-        "installed": [],
-        "skipped": [],
-        "errors": [],
-        "warnings": [],
-    }
+    summary = BootstrapSummary()
 
     all_specs = _apply_plugin_filters(list(loader.discover_builtins()))
     for spec in all_specs:
@@ -329,18 +330,18 @@ def bootstrap_all_builtins(cwd: Path | None = None) -> dict[str, Any]:
             continue
         result = run_bootstrap(spec)
         for item in result.installed:
-            summary["installed"].append(f"{spec.id}: {item}")
+            summary.installed.append(f"{spec.id}: {item}")
         for item in result.skipped:
-            summary["skipped"].append(f"{spec.id}: {item}")
+            summary.skipped.append(f"{spec.id}: {item}")
         for item in result.errors:
             if lenient:
-                summary["warnings"].append(f"{spec.id}: {item} (lenient)")
+                summary.warnings.append(f"{spec.id}: {item} (lenient)")
             else:
-                summary["errors"].append(f"{spec.id}: {item}")
+                summary.errors.append(f"{spec.id}: {item}")
         for item in result.warnings:
-            summary["warnings"].append(f"{spec.id}: {item}")
+            summary.warnings.append(f"{spec.id}: {item}")
 
-    return summary
+    return summary.to_dict()
 
 
 def ensure_workspace(cwd: Path | None = None) -> Path:
@@ -370,12 +371,12 @@ def ensure_workspace(cwd: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
+def _deep_merge(base: dict[str, Any], override: Mapping[str, Any]) -> None:
     """Recursively merge *override* into *base* (mutates *base*)."""
     for key, value in override.items():
         existing = base.get(key)
-        if isinstance(existing, dict) and isinstance(value, dict):
-            _deep_merge(cast(dict[str, Any], existing), cast(dict[str, Any], value))
+        if isinstance(existing, dict) and isinstance(value, Mapping):
+            _deep_merge(cast(dict[str, Any], existing), cast(Mapping[str, Any], value))
         else:
             base[key] = value
 
@@ -422,39 +423,6 @@ def _make_executable(path: Path) -> None:
     """Add the executable bit for the file owner."""
     current = path.stat().st_mode
     path.chmod(current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-
-# ---------------------------------------------------------------------------
-# Default config dict (used when config.yaml is missing or unreadable)
-# ---------------------------------------------------------------------------
-
-_DEFAULT_CONFIG_DICT: dict[str, Any] = {
-    "plugins": {
-        "load_builtins": True,
-        "bootstrap": {
-            "auto_install": True,
-            "lenient_builtins": True,
-        },
-    },
-    "mode": "code",
-    "defaults": {
-        "capabilities": {
-            "grant": [
-                "shell.exec",
-                "file.read",
-                "file.write",
-                "git.ops",
-                "web.browse",
-                "search.web",
-                "security.scan",
-            ],
-            "deny": [],
-        },
-    },
-    "mcp": {
-        "auto_discover": True,
-    },
-}
 
 
 # ---------------------------------------------------------------------------

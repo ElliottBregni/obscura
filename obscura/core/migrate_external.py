@@ -27,11 +27,15 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
-from collections.abc import Callable
 
+from obscura.core.models.file_formats import (
+    ExternalMigrationDecision,
+    ExternalMigrationMarker,
+)
 from obscura.core.paths import resolve_obscura_global_home
 
 _log = logging.getLogger("obscura.migrate_external")
@@ -477,41 +481,44 @@ def _marker_path(scope: str, cwd: Path) -> Path:
     return resolve_obscura_global_home() / _MARKER_REL
 
 
-def _load_marker(scope: str, cwd: Path) -> dict[str, Any]:
+def _load_marker(scope: str, cwd: Path) -> ExternalMigrationMarker:
+    """Load and validate the marker JSON; returns an empty marker on error."""
     path = _marker_path(scope, cwd)
     if not path.is_file():
-        return {}
+        return ExternalMigrationMarker()
     try:
         parsed: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         _log.debug("suppressed exception in _load_marker", exc_info=True)
-        return {}
-    return _coerce_str_keys(parsed)
+        return ExternalMigrationMarker()
+    if not isinstance(parsed, dict):
+        return ExternalMigrationMarker()
+    return ExternalMigrationMarker.model_validate(_coerce_str_keys(parsed))
 
 
-def _save_marker(scope: str, cwd: Path, data: dict[str, Any]) -> None:
+def _save_marker(scope: str, cwd: Path, marker: ExternalMigrationMarker) -> None:
     path = _marker_path(scope, cwd)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(marker.model_dump(mode="json"), indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _decision_for(src: ExternalSource, cwd: Path) -> str | None:
-    data = _load_marker(src.scope, cwd)
-    decisions = _coerce_str_keys(data.get("decisions"))
-    entry = _coerce_str_keys(decisions.get(src.id))
-    status: Any = entry.get("status")
-    return status if isinstance(status, str) else None
+    marker = _load_marker(src.scope, cwd)
+    decision = marker.decisions.get(src.id)
+    return decision.status if decision is not None else None
 
 
 def _record_decision(src: ExternalSource, cwd: Path, status: str) -> None:
-    data = _load_marker(src.scope, cwd)
-    decisions: dict[str, Any] = _coerce_str_keys(data.get("decisions"))
-    data["decisions"] = decisions
-    decisions[src.id] = {
-        "status": status,
-        "at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
-    }
-    _save_marker(src.scope, cwd, data)
+    marker = _load_marker(src.scope, cwd)
+    decisions = dict(marker.decisions)
+    decisions[src.id] = ExternalMigrationDecision(
+        status=status,
+        at=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+    )
+    _save_marker(src.scope, cwd, marker.model_copy(update={"decisions": decisions}))
 
 
 def clear_decisions(cwd: Path | None = None) -> None:
