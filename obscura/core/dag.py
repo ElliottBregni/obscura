@@ -101,6 +101,11 @@ class DAGExecutionError(DAGError):
 # Data types
 # ---------------------------------------------------------------------------
 
+# DAG nodes carry the heterogeneous JSON arg shape of arbitrary tools — the
+# DAG framework is generic across every registered ToolSpec, so tool_input
+# is legitimately ``dict[str, Any]`` here. Per-tool typing happens inside
+# each tool handler, not at the DAG layer.
+
 
 def _empty_str_any_dict() -> dict[str, Any]:
     return {}
