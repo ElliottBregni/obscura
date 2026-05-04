@@ -171,17 +171,28 @@ class WorktreeStatus(StrEnum):
 
 
 class TaskQueueStatus(StrEnum):
-    """SQL-level lifecycle of a row in the durable task queue."""
+    """SQL-level lifecycle of a row in the durable task queue.
+
+    `IN_PROGRESS` and `DELETED` are emitted by the higher-level
+    ``tools/task_tools.py`` interface that exposes a richer agent-facing
+    lifecycle on top of the same SQLite table.
+    """
 
     PENDING = "pending"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+    DELETED = "deleted"
 
     def is_terminal(self) -> bool:
-        return self in {TaskQueueStatus.COMPLETED, TaskQueueStatus.FAILED}
+        return self in {
+            TaskQueueStatus.COMPLETED,
+            TaskQueueStatus.FAILED,
+            TaskQueueStatus.DELETED,
+        }
 
     def is_active(self) -> bool:
-        return self is TaskQueueStatus.PENDING
+        return self in {TaskQueueStatus.PENDING, TaskQueueStatus.IN_PROGRESS}
 
 
 # ---------------------------------------------------------------------------

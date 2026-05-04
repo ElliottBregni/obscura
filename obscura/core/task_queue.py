@@ -179,11 +179,12 @@ class TaskQueue:
                     max_retries, retry_count, metadata,
                     project_root,
                     created_at, updated_at)
-                   VALUES (?,?,?,'pending',?,?,?,?,?,0,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?)""",
                 (
                     task_id,
                     subject,
                     description,
+                    TaskQueueStatus.PENDING.value,
                     priority,
                     goal_id,
                     json.dumps(blocked_by or []),
@@ -223,13 +224,17 @@ class TaskQueue:
         conn = _open()
         try:
             where = """SELECT * FROM tasks
-                   WHERE status = 'pending'
+                   WHERE status = ?
                      AND run_after <= ?
                      AND (
                            claimed_by = ''
                            OR claimed_at < ?
                      )"""
-            params: list[Any] = [now, stale_threshold]
+            params: list[Any] = [
+                TaskQueueStatus.PENDING.value,
+                now,
+                stale_threshold,
+            ]
             if project_root is not None:
                 where += "\n                     AND project_root = ?"
                 params.append(project_root)
@@ -254,7 +259,7 @@ class TaskQueue:
             row = conn.execute(
                 "SELECT status FROM tasks WHERE task_id = ?", (dep_id,)
             ).fetchone()
-            if row is None or row["status"] != "completed":
+            if row is None or row["status"] != TaskQueueStatus.COMPLETED.value:
                 return False
         return True
 
@@ -276,9 +281,17 @@ class TaskQueue:
                 """UPDATE tasks
                    SET claimed_by = ?, claimed_at = ?, last_heartbeat = ?, updated_at = ?
                    WHERE task_id = ?
-                     AND status = 'pending'
+                     AND status = ?
                      AND (claimed_by = '' OR claimed_at < ?)""",
-                (worker_id, now, now, now, task_id, stale_threshold),
+                (
+                    worker_id,
+                    now,
+                    now,
+                    now,
+                    task_id,
+                    TaskQueueStatus.PENDING.value,
+                    stale_threshold,
+                ),
             )
             conn.commit()
             return cursor.rowcount == 1
@@ -336,10 +349,10 @@ class TaskQueue:
         try:
             cursor = conn.execute(
                 """UPDATE tasks
-                   SET status = 'completed', output = ?,
+                   SET status = ?, output = ?,
                        claimed_by = '', updated_at = ?
                    WHERE task_id = ?""",
-                (output, now, task_id),
+                (TaskQueueStatus.COMPLETED.value, output, now, task_id),
             )
             conn.commit()
             return cursor.rowcount == 1
@@ -376,19 +389,26 @@ class TaskQueue:
                 backoff = 30.0 * (2 ** (new_count - 1))
                 conn.execute(
                     """UPDATE tasks
-                       SET status = 'pending', error = ?,
+                       SET status = ?, error = ?,
                            claimed_by = '', claimed_at = 0,
                            retry_count = ?, run_after = ?, updated_at = ?
                        WHERE task_id = ?""",
-                    (error, new_count, now + backoff, now, task_id),
+                    (
+                        TaskQueueStatus.PENDING.value,
+                        error,
+                        new_count,
+                        now + backoff,
+                        now,
+                        task_id,
+                    ),
                 )
             else:
                 conn.execute(
                     """UPDATE tasks
-                       SET status = 'failed', error = ?,
+                       SET status = ?, error = ?,
                            claimed_by = '', updated_at = ?
                        WHERE task_id = ?""",
-                    (error, now, task_id),
+                    (TaskQueueStatus.FAILED.value, error, now, task_id),
                 )
             conn.commit()
             return True
@@ -402,15 +422,16 @@ class TaskQueue:
     def queue_depth(
         self,
         *,
-        status: str = "pending",
+        status: str | TaskQueueStatus = TaskQueueStatus.PENDING,
         worker_id: str = "",
         project_root: str | None = None,
     ) -> dict[str, int]:
         """Return counts by priority bucket for quick diagnostics."""
+        status_value = status.value if isinstance(status, TaskQueueStatus) else status
         conn = _open()
         try:
             where = "WHERE status = ?"
-            params_q: list[Any] = [status]
+            params_q: list[Any] = [status_value]
             if worker_id:
                 where += " AND claimed_by = ?"
                 params_q.append(worker_id)
@@ -462,10 +483,10 @@ class TaskQueue:
             cursor = conn.execute(
                 """UPDATE tasks
                    SET claimed_by = '', claimed_at = 0, updated_at = ?
-                   WHERE status = 'pending'
+                   WHERE status = ?
                      AND claimed_by != ''
                      AND claimed_at < ?""",
-                (now, stale_threshold),
+                (now, TaskQueueStatus.PENDING.value, stale_threshold),
             )
             conn.commit()
             return cursor.rowcount

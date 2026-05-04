@@ -17,36 +17,37 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import os
 import re
-from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
-import logging
 
 from obscura.core.enums.lifecycle import HealthStatus as HealthStatus
+from obscura.core.models.lifecycle import HealthReport as HealthReport
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class HealthCheck:
-    """A single startup health check result."""
-
-    name: str
-    status: HealthStatus
-    message: str
+# Backwards-compatible alias for the previous dataclass name.
+HealthCheck = HealthReport
 
 
-def _check_vector_memory(vector_store: Any | None) -> HealthCheck | None:
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _check_vector_memory(vector_store: Any | None) -> HealthReport | None:
     """Check vector memory backend health."""
     requested = os.environ.get("OBSCURA_VECTOR_BACKEND", "qdrant").lower()
 
     if vector_store is None:
         if os.environ.get("OBSCURA_VECTOR_MEMORY", "").lower() == "off":
             return None  # Intentionally disabled, not a health issue
-        return HealthCheck(
+        return HealthReport(
             name="vector_memory",
             status=HealthStatus.UNAVAILABLE,
+            status_changed_at=_now(),
             message="Vector memory failed to initialize",
         )
 
@@ -56,9 +57,10 @@ def _check_vector_memory(vector_store: Any | None) -> HealthCheck | None:
 
     backend_class = type(backend).__name__
     if requested == "qdrant" and "SQLite" in backend_class:
-        return HealthCheck(
+        return HealthReport(
             name="vector_memory",
             status=HealthStatus.DEGRADED,
+            status_changed_at=_now(),
             message="Qdrant unavailable, using SQLite fallback",
         )
     return None  # Healthy — no need to report
@@ -66,7 +68,7 @@ def _check_vector_memory(vector_store: Any | None) -> HealthCheck | None:
 
 def _check_skipped_tools(
     skipped_tools: list[tuple[str, str]],
-) -> list[HealthCheck]:
+) -> list[HealthReport]:
     """Group skipped tools by root cause and return health checks."""
     if not skipped_tools:
         return []
@@ -83,7 +85,7 @@ def _check_skipped_tools(
         )
         groups.setdefault(provider, []).append(tool_name)
 
-    checks: list[HealthCheck] = []
+    checks: list[HealthReport] = []
     for provider, tools in sorted(groups.items()):
         # Try to find the missing module from the handler ref
         sample_ref = next(
@@ -99,9 +101,10 @@ def _check_skipped_tools(
         if reason:
             msg += f" (missing: {reason})"
         checks.append(
-            HealthCheck(
+            HealthReport(
                 name=f"tools:{provider}",
                 status=HealthStatus.DEGRADED,
+                status_changed_at=_now(),
                 message=msg,
             ),
         )
@@ -134,13 +137,13 @@ def collect_startup_health(
     *,
     vector_store: Any | None = None,
     skipped_tools: list[tuple[str, str]] | None = None,
-) -> list[HealthCheck]:
+) -> list[HealthReport]:
     """Collect startup health checks for optional dependencies.
 
     Returns only checks with degraded/unavailable status — an empty list
     means everything is healthy.
     """
-    checks: list[HealthCheck] = []
+    checks: list[HealthReport] = []
 
     vm_check = _check_vector_memory(vector_store)
     if vm_check is not None:
@@ -153,6 +156,7 @@ def collect_startup_health(
 
 __all__ = [
     "HealthCheck",
+    "HealthReport",
     "HealthStatus",
     "collect_startup_health",
 ]

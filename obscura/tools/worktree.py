@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -162,7 +163,7 @@ async def enter_worktree(name: str = "") -> str:
         original_cwd=original_cwd,
         owner="tool",
         pid=os.getpid(),
-        created_at=time.time(),
+        created_at=datetime.now(UTC),
     )
     worktree_registry.add(entry)
 

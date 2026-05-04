@@ -1,54 +1,62 @@
-"""Tool approval coordination for user-driven confirmation flows."""
+"""Tool approval coordination for user-driven confirmation flows.
+
+State is the :class:`ApprovalRecord` Pydantic model from
+``obscura.core.models.lifecycle``. Each pending approval is paired with
+an :class:`asyncio.Event` (kept in a side-table) so callers can ``await``
+on a decision without coupling the wait primitive into the persisted
+record shape.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
-import logging
 
 from obscura.core.enums.lifecycle import ApprovalStatus as ApprovalStatus
+from obscura.core.models.lifecycle import ApprovalRecord
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ToolApprovalRequest:
-    """Represents one pending tool confirmation request."""
-
-    approval_id: str
-    user_id: str
-    agent_id: str
-    tool_use_id: str
-    tool_name: str
-    tool_input: dict[str, Any]
-    status: ApprovalStatus = ApprovalStatus.PENDING
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    resolved_at: datetime | None = None
-    decision_reason: str | None = None
-    wait_event: asyncio.Event = field(default_factory=asyncio.Event)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "approval_id": self.approval_id,
-            "user_id": self.user_id,
-            "agent_id": self.agent_id,
-            "tool_use_id": self.tool_use_id,
-            "tool_name": self.tool_name,
-            "tool_input": self.tool_input,
-            "status": self.status.value,
-            "created_at": self.created_at.isoformat(),
-            "resolved_at": self.resolved_at.isoformat()
-            if self.resolved_at is not None
-            else None,
-            "decision_reason": self.decision_reason,
-        }
+# Re-export under the historical dataclass name so existing imports keep
+# resolving while consumers migrate. The runtime type is the Pydantic model.
+ToolApprovalRequest = ApprovalRecord
 
 
-_approvals_by_id: dict[str, ToolApprovalRequest] = {}
+_approvals_by_id: dict[str, ApprovalRecord] = {}
+_wait_events: dict[str, asyncio.Event] = {}
 _approvals_lock = asyncio.Lock()
+
+
+def _wire_dict(record: ApprovalRecord) -> dict[str, Any]:
+    """Serialize an approval to the public HTTP wire shape.
+
+    Distinct from ``record.to_row()`` because the route consumers expect
+    the historical key set (no ``status_changed_at`` / ``updated_at``
+    leakage) and ISO-string timestamps.
+    """
+    return {
+        "approval_id": record.id,
+        "user_id": record.user_id,
+        "agent_id": record.agent_id,
+        "tool_use_id": record.tool_use_id,
+        "tool_name": record.tool_name,
+        "tool_input": dict(record.tool_input),
+        "status": record.status.value,
+        "created_at": record.created_at.isoformat(),
+        "resolved_at": record.resolved_at.isoformat()
+        if record.resolved_at is not None
+        else None,
+        "decision_reason": record.decision_reason,
+    }
+
+
+# Attach the wire-format serializer onto the model so routes that call
+# ``entry.to_dict()`` keep working without import changes.
+ApprovalRecord.to_dict = _wire_dict  # type: ignore[attr-defined]
 
 
 async def create_tool_approval_request(
@@ -58,9 +66,14 @@ async def create_tool_approval_request(
     tool_use_id: str,
     tool_name: str,
     tool_input: dict[str, Any],
-) -> ToolApprovalRequest:
-    approval = ToolApprovalRequest(
-        approval_id=f"approval-{uuid.uuid4().hex[:10]}",
+) -> ApprovalRecord:
+    now = datetime.now(UTC)
+    approval = ApprovalRecord(
+        id=f"approval-{uuid.uuid4().hex[:10]}",
+        status=ApprovalStatus.PENDING,
+        status_changed_at=now,
+        created_at=now,
+        updated_at=now,
         user_id=user_id,
         agent_id=agent_id,
         tool_use_id=tool_use_id,
@@ -68,7 +81,8 @@ async def create_tool_approval_request(
         tool_input=dict(tool_input),
     )
     async with _approvals_lock:
-        _approvals_by_id[approval.approval_id] = approval
+        _approvals_by_id[approval.id] = approval
+        _wait_events[approval.id] = asyncio.Event()
     return approval
 
 
@@ -76,7 +90,7 @@ async def list_tool_approval_requests(
     *,
     user_id: str,
     status: ApprovalStatus | Literal["all"] | str = "all",
-) -> list[ToolApprovalRequest]:
+) -> list[ApprovalRecord]:
     async with _approvals_lock:
         values = [
             entry for entry in _approvals_by_id.values() if entry.user_id == user_id
@@ -93,17 +107,22 @@ async def resolve_tool_approval_request(
     user_id: str,
     approved: bool,
     reason: str | None = None,
-) -> ToolApprovalRequest | None:
+) -> ApprovalRecord | None:
     async with _approvals_lock:
         approval = _approvals_by_id.get(approval_id)
         if approval is None or approval.user_id != user_id:
             return None
         if approval.status != ApprovalStatus.PENDING:
             return approval
+        now = datetime.now(UTC)
         approval.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.DENIED
-        approval.resolved_at = datetime.now(UTC)
+        approval.status_changed_at = now
+        approval.updated_at = now
+        approval.resolved_at = now
         approval.decision_reason = reason
-        approval.wait_event.set()
+        event = _wait_events.get(approval_id)
+        if event is not None:
+            event.set()
         return approval
 
 
@@ -117,7 +136,10 @@ async def wait_for_tool_approval(
         approval = _approvals_by_id.get(approval_id)
         if approval is None or approval.user_id != user_id:
             return False
-        event = approval.wait_event
+        event = _wait_events.get(approval_id)
+        if event is None:
+            event = asyncio.Event()
+            _wait_events[approval_id] = event
 
     try:
         await asyncio.wait_for(event.wait(), timeout=timeout_seconds)
@@ -126,10 +148,15 @@ async def wait_for_tool_approval(
         async with _approvals_lock:
             current = _approvals_by_id.get(approval_id)
             if current is not None and current.status == ApprovalStatus.PENDING:
+                now = datetime.now(UTC)
                 current.status = ApprovalStatus.EXPIRED
-                current.resolved_at = datetime.now(UTC)
+                current.status_changed_at = now
+                current.updated_at = now
+                current.resolved_at = now
                 current.decision_reason = "approval timeout"
-                current.wait_event.set()
+                expired_event = _wait_events.get(approval_id)
+                if expired_event is not None:
+                    expired_event.set()
         return False
 
     async with _approvals_lock:
@@ -143,7 +170,7 @@ async def get_tool_approval_request(
     approval_id: str,
     *,
     user_id: str,
-) -> ToolApprovalRequest | None:
+) -> ApprovalRecord | None:
     async with _approvals_lock:
         approval = _approvals_by_id.get(approval_id)
         if approval is None or approval.user_id != user_id:
@@ -155,3 +182,4 @@ async def clear_tool_approvals() -> None:
     """Testing helper to clear in-memory approvals."""
     async with _approvals_lock:
         _approvals_by_id.clear()
+        _wait_events.clear()
