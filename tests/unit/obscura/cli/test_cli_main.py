@@ -321,7 +321,7 @@ class TestCliConfirm:
         async def _fake_confirm(_req: object) -> WidgetResult:
             return WidgetResult(action="allow")
 
-        monkeypatch.setattr("obscura.cli.widgets.confirm_tool", _fake_confirm)
+        monkeypatch.setattr("obscura.cli._tool_confirm.confirm_tool", _fake_confirm)
         result = await _cli_confirm(ctx, "write_file", {"path": "a.txt"})
         assert result is True
 
@@ -334,7 +334,7 @@ class TestCliConfirm:
         async def _fake_confirm(_req: object) -> WidgetResult:
             return WidgetResult(action="deny")
 
-        monkeypatch.setattr("obscura.cli.widgets.confirm_tool", _fake_confirm)
+        monkeypatch.setattr("obscura.cli._tool_confirm.confirm_tool", _fake_confirm)
         result = await _cli_confirm(ctx, "write_file", {"path": "a.txt"})
         assert result is False
 
@@ -347,7 +347,7 @@ class TestCliConfirm:
         async def _fake_confirm(_req: object) -> WidgetResult:
             return WidgetResult(action="always_allow")
 
-        monkeypatch.setattr("obscura.cli.widgets.confirm_tool", _fake_confirm)
+        monkeypatch.setattr("obscura.cli._tool_confirm.confirm_tool", _fake_confirm)
         result = await _cli_confirm(ctx, "edit_file", {"path": "b.py"})
         assert result is True
         assert "edit_file" in ctx.confirm_always
@@ -411,8 +411,8 @@ class TestTrackFileEvent:
         )
         _track_file_event(event.kind, ctx, event)
 
-        assert "tc_write_1" in ctx._pending_file_reads
-        path, before = ctx._pending_file_reads["tc_write_1"]
+        assert "tc_write_1" in ctx.pending_file_reads
+        path, before = ctx.pending_file_reads["tc_write_1"]
         assert path == str(test_file)
         assert before == "original content"
 
@@ -421,26 +421,26 @@ class TestTrackFileEvent:
         test_file = tmp_path / "test.txt"
 
         # Simulate the tool call phase
-        ctx._pending_file_reads["tc_write_1"] = (str(test_file), "original")
+        ctx.pending_file_reads["tc_write_1"] = (str(test_file), "original")
 
         # Now write new content and simulate result
         test_file.write_text("modified")
         result_event = _tool_result_event("ok", use_id="tc_write_1")
         _track_file_event(result_event.kind, ctx, result_event)
 
-        assert len(ctx._file_changes) == 1
-        assert ctx._file_changes[0]["path"] == str(test_file)
+        assert len(ctx.file_changes) == 1
+        assert ctx.file_changes[0]["path"] == str(test_file)
 
     def test_no_change_recorded_when_content_unchanged(self, tmp_path: Path) -> None:
         ctx = _make_ctx()
         test_file = tmp_path / "test.txt"
         test_file.write_text("same content")
 
-        ctx._pending_file_reads["tc_write_1"] = (str(test_file), "same content")
+        ctx.pending_file_reads["tc_write_1"] = (str(test_file), "same content")
         result_event = _tool_result_event("ok", use_id="tc_write_1")
         _track_file_event(result_event.kind, ctx, result_event)
 
-        assert len(ctx._file_changes) == 0
+        assert len(ctx.file_changes) == 0
 
     def test_handles_nonexistent_file_for_new_creation(self, tmp_path: Path) -> None:
         ctx = _make_ctx()
@@ -453,8 +453,8 @@ class TestTrackFileEvent:
         )
         _track_file_event(event.kind, ctx, event)
 
-        assert "tc_create_1" in ctx._pending_file_reads
-        _, before = ctx._pending_file_reads["tc_create_1"]
+        assert "tc_create_1" in ctx.pending_file_reads
+        _, before = ctx.pending_file_reads["tc_create_1"]
         assert before == ""  # empty before for new file
 
 
@@ -1221,18 +1221,18 @@ class TestREPLContext:
         assert ctx.confirm_enabled is False
         assert len(ctx.confirm_always) == 0
         assert len(ctx.message_history) == 0
-        assert len(ctx._file_changes) == 0
+        assert len(ctx.file_changes) == 0
 
     def test_add_file_change(self) -> None:
         ctx = _make_ctx()
         ctx.add_file_change("/path/to/file.py", "before", "after")
-        assert len(ctx._file_changes) == 1
-        change = ctx._file_changes[0]
+        assert len(ctx.file_changes) == 1
+        change = ctx.file_changes[0]
         assert change["path"] == "/path/to/file.py"
 
     def test_mode_manager_lazy_creation(self) -> None:
         ctx = _make_ctx()
-        assert ctx._mode_manager is None
+        assert ctx.mode_manager is None
         mm = ctx.get_mode_manager()
         assert mm is not None
         # Second call returns same instance
