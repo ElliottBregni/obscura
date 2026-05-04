@@ -22,11 +22,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from obscura.cli.app.modes import Plan, TUIMode
+from obscura.cli.app.modes import Plan
 from obscura.cli.commands import _FILE_WRITE_TOOLS  # pyright: ignore[reportPrivateUsage]
 from obscura.cli.render import render_plan
 from obscura.cli.widgets import ToolConfirmRequest, confirm_tool
 from obscura.core.commit_attribution import get_attribution_tracker
+from obscura.core.enums.ui import TUIMode
 from obscura.core.types import AgentEventKind
 from obscura.tools.system.file_state import record_file_access
 
