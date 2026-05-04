@@ -55,6 +55,12 @@ __all__ = [
 # V2-specific cache (stores list[ContentBlock] tasks; v1 uses ToolResultEnvelope)
 # ---------------------------------------------------------------------------
 
+# Speculative cache keys + entries are keyed on (tool_name, args) where
+# args is the heterogeneous JSON arg shape of arbitrary tools. The cache
+# is generic across every registered ToolSpec, so ``dict[str, Any]`` is
+# the legitimate shape here — per-tool typing happens inside each tool
+# handler, not at the cache layer.
+
 
 @dataclass
 class _Entry:

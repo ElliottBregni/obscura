@@ -84,6 +84,12 @@ class ParallelPlanValidationError(ValueError):
 # Data types
 # ---------------------------------------------------------------------------
 
+# ParallelPlanNode.args is the heterogeneous JSON arg shape of arbitrary
+# tools — the plan layer is generic across every registered ToolSpec, so
+# args is legitimately ``dict[str, Any]`` here. Likewise the parser walks
+# untrusted model JSON and narrows from ``object`` -> ``dict[str, Any]``
+# at the seam.
+
 
 def _empty_str_any_dict() -> dict[str, Any]:
     return {}
