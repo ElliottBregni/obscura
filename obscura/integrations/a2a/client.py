@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 import httpx
 
+from obscura.core.enums.protocol import A2ARole
 from obscura.integrations.a2a.types import (
     A2AError,
     A2AMessage,
@@ -180,7 +181,7 @@ class A2AClient:
 
         """
         message = A2AMessage(
-            role="user",
+            role=A2ARole.USER,
             messageId=f"msg-{uuid.uuid4().hex[:8]}",
             parts=[TextPart(text=text)],
         )
@@ -214,7 +215,7 @@ class A2AClient:
         http = self._ensure_connected()
 
         message = A2AMessage(
-            role="user",
+            role=A2ARole.USER,
             messageId=f"msg-{uuid.uuid4().hex[:8]}",
             parts=[TextPart(text=text)],
         )

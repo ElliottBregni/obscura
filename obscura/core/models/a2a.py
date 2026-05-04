@@ -158,8 +158,8 @@ class A2ATask(_MutableA2AModel):
     id: str
     contextId: str
     status: A2ATaskStatus
-    artifacts: list[Artifact] = Field(default_factory=list)
-    history: list[A2AMessage] = Field(default_factory=list)
+    artifacts: list[Artifact] = Field(default_factory=list[Artifact])
+    history: list[A2AMessage] = Field(default_factory=list[A2AMessage])
     metadata: Mapping[str, Any] | None = None
 
 

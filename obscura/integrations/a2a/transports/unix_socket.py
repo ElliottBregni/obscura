@@ -31,8 +31,8 @@ import json
 import logging
 import os
 import uuid
-from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from collections.abc import AsyncIterator, Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.integrations.a2a.types import (
     A2AError,
@@ -86,7 +86,12 @@ class UnixSocketServicer:
                     continue
 
                 method = request.get("method", "")
-                params = request.get("params", {})
+                raw_params: Any = request.get("params", {})
+                params: Mapping[str, Any] = (
+                    cast("Mapping[str, Any]", raw_params)
+                    if isinstance(raw_params, Mapping)
+                    else {}
+                )
 
                 try:
                     if method in ("SendMessage", "message/send"):
@@ -151,40 +156,50 @@ class UnixSocketServicer:
                 await writer.wait_closed()
             logger.debug("Unix socket connection closed: %s", peer)
 
-    async def _handle_send_message(self, params: dict[str, Any]) -> Any:
-        message = A2AMessage.model_validate(params.get("message", {}))
+    async def _handle_send_message(self, params: Mapping[str, Any]) -> Any:
+        raw: Any = params.get("message", {})
+        message_payload: Mapping[str, Any] = (
+            cast("Mapping[str, Any]", raw) if isinstance(raw, Mapping) else {}
+        )
+        message = A2AMessage.model_validate(message_payload)
         task = await self._service.message_send(
             message,
-            context_id=params.get("contextId"),
-            task_id=params.get("taskId"),
-            blocking=params.get("blocking", True),
+            context_id=_optional_str(params, "contextId"),
+            task_id=_optional_str(params, "taskId"),
+            blocking=bool(params.get("blocking", True)),
         )
         return json.loads(task.model_dump_json())
 
     async def _handle_stream_message(
         self,
-        params: dict[str, Any],
+        params: Mapping[str, Any],
     ) -> AsyncIterator[Any]:
-        message = A2AMessage.model_validate(params.get("message", {}))
+        raw: Any = params.get("message", {})
+        message_payload: Mapping[str, Any] = (
+            cast("Mapping[str, Any]", raw) if isinstance(raw, Mapping) else {}
+        )
+        message = A2AMessage.model_validate(message_payload)
         async for event in self._service.message_stream(
             message,
-            context_id=params.get("contextId"),
+            context_id=_optional_str(params, "contextId"),
         ):
             yield json.loads(event.model_dump_json())
 
-    async def _handle_get_task(self, params: dict[str, Any]) -> Any:
-        task_id = params.get("taskId", "")
+    async def _handle_get_task(self, params: Mapping[str, Any]) -> Any:
+        task_id = _optional_str(params, "taskId") or ""
         task = await self._service.tasks_get(task_id)
         if task is None:
             raise TaskNotFoundError(task_id)
         return json.loads(task.model_dump_json())
 
-    async def _handle_list_tasks(self, params: dict[str, Any]) -> Any:
+    async def _handle_list_tasks(self, params: Mapping[str, Any]) -> Any:
+        state_value: Any = params.get("state")
+        limit_raw: Any = params.get("limit", 20)
         tasks, cursor = await self._service.tasks_list(
-            context_id=params.get("contextId"),
-            state=TaskState(params["state"]) if "state" in params else None,
-            cursor=params.get("cursor"),
-            limit=params.get("limit", 20),
+            context_id=_optional_str(params, "contextId"),
+            state=TaskState(state_value) if isinstance(state_value, str) else None,
+            cursor=_optional_str(params, "cursor"),
+            limit=int(limit_raw or 20),
         )
         result: dict[str, Any] = {
             "tasks": [json.loads(t.model_dump_json()) for t in tasks],
@@ -193,8 +208,8 @@ class UnixSocketServicer:
             result["nextCursor"] = cursor
         return result
 
-    async def _handle_cancel_task(self, params: dict[str, Any]) -> Any:
-        task_id = params.get("taskId", "")
+    async def _handle_cancel_task(self, params: Mapping[str, Any]) -> Any:
+        task_id = _optional_str(params, "taskId") or ""
         task = await self._service.tasks_cancel(task_id)
         return json.loads(task.model_dump_json())
 
@@ -375,6 +390,13 @@ async def _write_json(writer: asyncio.StreamWriter, data: Any) -> None:
     """Write a JSON line to the stream."""
     writer.write(json.dumps(data, default=str).encode("utf-8") + b"\n")
     await writer.drain()
+
+
+def _optional_str(params: Mapping[str, Any], key: str) -> str | None:
+    value = params.get(key)
+    if value is None:
+        return None
+    return str(value)
 
 
 def _extract_text_from_result(result: dict[str, Any]) -> str:
