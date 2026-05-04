@@ -261,6 +261,140 @@ class TestToolAllowlist:
 
 class TestToolConfirmation:
     @pytest.mark.asyncio
+    async def test_safe_skip_bypasses_prompt_for_readonly_tool(self) -> None:
+        """Tools with side_effects=="none" skip the confirmation prompt
+        when registry is provided and skip_for_safe is True."""
+        invoked: list[str] = []
+        prompts: list[str] = []
+
+        def safe_tool(**_: Any) -> str:
+            invoked.append("yes")
+            return "ok"
+
+        def confirm(node: Any) -> bool:
+            prompts.append(node.tool_name)
+            return False  # Would deny if asked.
+
+        # Build registry with explicit side_effects="none" on the tool.
+        reg = ToolRegistry()
+        reg.register(
+            ToolSpec(
+                name="readonly",
+                description="readonly tool",
+                parameters={"type": "object", "additionalProperties": True, "properties": {}},
+                handler=safe_tool,
+                side_effects="none",
+            )
+        )
+
+        backend = _StubBackend(
+            [
+                _StubTurn(tool_uses=[{"id": "tu_1", "name": "readonly"}]),
+                _StubTurn(text="done"),
+            ]
+        )
+        loop = AgentLoopV2(
+            backend,
+            reg,
+            dispatch_middleware=[
+                tool_confirmation(confirm, registry=reg, skip_for_safe=True)
+            ],
+        )
+        _ = [e async for e in loop.run("test")]
+
+        # Tool ran (skip-safe bypassed prompt); confirm was never called.
+        assert invoked == ["yes"]
+        assert prompts == []
+
+    @pytest.mark.asyncio
+    async def test_safe_skip_disabled_prompts_for_readonly(self) -> None:
+        """skip_for_safe=False forces a prompt even for read-only tools."""
+        invoked: list[str] = []
+        prompts: list[str] = []
+
+        def safe_tool(**_: Any) -> str:
+            invoked.append("yes")
+            return "ok"
+
+        def confirm(node: Any) -> bool:
+            prompts.append(node.tool_name)
+            return False
+
+        reg = ToolRegistry()
+        reg.register(
+            ToolSpec(
+                name="readonly",
+                description="readonly tool",
+                parameters={"type": "object", "additionalProperties": True, "properties": {}},
+                handler=safe_tool,
+                side_effects="none",
+            )
+        )
+
+        backend = _StubBackend(
+            [
+                _StubTurn(tool_uses=[{"id": "tu_1", "name": "readonly"}]),
+                _StubTurn(text="done"),
+            ]
+        )
+        loop = AgentLoopV2(
+            backend,
+            reg,
+            dispatch_middleware=[
+                tool_confirmation(confirm, registry=reg, skip_for_safe=False)
+            ],
+        )
+        _ = [e async for e in loop.run("test")]
+
+        # Prompt fired and denied — handler did NOT run.
+        assert invoked == []
+        assert prompts == ["readonly"]
+
+    @pytest.mark.asyncio
+    async def test_side_effecting_tool_still_prompts_with_safe_skip(self) -> None:
+        """Tools without side_effects=="none" prompt even when skip_for_safe=True."""
+        invoked: list[str] = []
+        prompts: list[str] = []
+
+        def write(**_: Any) -> str:
+            invoked.append("ran")
+            return "ok"
+
+        def confirm(node: Any) -> bool:
+            prompts.append(node.tool_name)
+            return True  # Approve.
+
+        reg = ToolRegistry()
+        reg.register(
+            ToolSpec(
+                name="write_file",
+                description="writes",
+                parameters={"type": "object", "additionalProperties": True, "properties": {}},
+                handler=write,
+                side_effects="writes:fs",
+            )
+        )
+
+        backend = _StubBackend(
+            [
+                _StubTurn(tool_uses=[{"id": "tu_1", "name": "write_file"}]),
+                _StubTurn(text="done"),
+            ]
+        )
+        loop = AgentLoopV2(
+            backend,
+            reg,
+            dispatch_middleware=[
+                tool_confirmation(confirm, registry=reg, skip_for_safe=True)
+            ],
+        )
+        _ = [e async for e in loop.run("test")]
+
+        # Prompted (write_file is not safe), approved, then dispatched.
+        assert prompts == ["write_file"]
+        assert invoked == ["ran"]
+
+    @pytest.mark.asyncio
     async def test_rejection_blocks_handler(self) -> None:
         invoked: list[str] = []
 

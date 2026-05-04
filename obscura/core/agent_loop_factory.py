@@ -165,7 +165,21 @@ def _build_v2(
         dispatch_middleware.append(tool_allowlist(v1_kwargs["tool_allowlist"]))
 
     if "on_confirm" in v1_kwargs and v1_kwargs["on_confirm"] is not None:
-        dispatch_middleware.append(tool_confirmation(v1_kwargs["on_confirm"]))
+        # Pass the registry so the middleware can short-circuit prompts
+        # for read-only tools (v1 parity — side_effects=="none" tools
+        # dispatch silently). Set OBSCURA_V2_SAFE_SKIP_CONFIRM=0 to
+        # disable the short circuit and prompt for every tool.
+        skip_for_safe = (
+            os.environ.get("OBSCURA_V2_SAFE_SKIP_CONFIRM", "1").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
+        dispatch_middleware.append(
+            tool_confirmation(
+                v1_kwargs["on_confirm"],
+                registry=registry,
+                skip_for_safe=skip_for_safe,
+            )
+        )
 
     if "tool_output_overrides" in v1_kwargs or "tool_output_level" in v1_kwargs:
         dispatch_middleware.append(

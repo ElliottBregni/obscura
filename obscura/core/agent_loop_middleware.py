@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from obscura.core.dag import DAGNode
     from obscura.core.hooks import HookRegistry
+    from obscura.core.tools import ToolRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,7 @@ async def _safe_run_hook(hooks: HookRegistry, name: str, *args: Any) -> None:
 def tool_confirmation(
     on_confirm: Callable[[DAGNode], bool] | Callable[[DAGNode], Awaitable[bool]],
     *,
+    registry: ToolRegistry | None = None,
     skip_for_safe: bool = True,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Ask *on_confirm* before dispatching each tool. Reject if it returns False.
@@ -210,21 +212,33 @@ def tool_confirmation(
     Mirrors v1's ``AgentLoop(on_confirm=...)`` callback. *on_confirm* may
     be sync or async; if async, it's awaited.
 
-    When *skip_for_safe* (default), tools whose ``ToolSpec.side_effects``
-    is ``"none"`` skip the confirmation prompt — the v1 default for
-    read-only tools. To prompt for everything, pass ``skip_for_safe=False``.
+    When *registry* is provided AND *skip_for_safe* is True (both default),
+    tools whose ``ToolSpec.side_effects == "none"`` skip the confirmation
+    prompt entirely — matching v1's read-only-tools-pass-through behavior.
+    Without the registry the middleware can't read ``side_effects`` and
+    falls back to prompting for every node.
 
-    Note: ``side_effects`` is a property of the tool spec, not the node.
-    The middleware can't read it without registry access; we use a
-    heuristic on the node's tool name. For full v1 parity, pass a
-    custom check via ``on_confirm`` that consults the registry directly.
+    Pass ``skip_for_safe=False`` to prompt for every tool unconditionally.
     """
+
+    def _is_safe(tool_name: str) -> bool:
+        """True if the tool's side_effects is "none". False if unknown."""
+        if registry is None:
+            return False
+        spec = registry.get(tool_name)
+        if spec is None:
+            return False
+        return getattr(spec, "side_effects", "") == "none"
 
     def wrap(inner: Callable[..., Any]) -> Callable[..., Any]:
         async def wrapped(
             node: DAGNode,
             resolved: dict[str, Any],
         ) -> list[ContentBlock]:
+            # Safe-tool short circuit: skip prompt for known read-only tools.
+            if skip_for_safe and _is_safe(node.tool_name):
+                return await inner(node, resolved)
+
             decision = on_confirm(node)
             if hasattr(decision, "__await__"):
                 decision = await decision  # type: ignore[assignment]
@@ -241,10 +255,6 @@ def tool_confirmation(
                 ]
             return await inner(node, resolved)
 
-        # ``skip_for_safe`` is reserved for future use — when v2 surfaces
-        # ToolSpec to the middleware via ``resolved``, this can short-circuit
-        # safe tools without prompting. Today the prompt fires for every node.
-        _ = skip_for_safe  # mark used for static checkers
         return wrapped
 
     return wrap
