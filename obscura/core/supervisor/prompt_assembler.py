@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from obscura.core.supervisor.errors import DriftDetectedError, PromptAssemblyError
@@ -306,12 +307,12 @@ class PromptAssembler:
 # ---------------------------------------------------------------------------
 
 
-def format_tool_definitions(tools: list[dict[str, Any]]) -> str:
+def format_tool_definitions(tools: list[Mapping[str, Any]]) -> str:
     """Format tool definitions for prompt injection.
 
     Sorted by name for deterministic ordering.
     """
-    sorted_tools = sorted(tools, key=lambda t: t.get("name", ""))
+    sorted_tools = sorted(tools, key=lambda t: str(t.get("name", "")))
     parts: list[str] = []
     for tool in sorted_tools:
         name = tool.get("name", "unknown")
