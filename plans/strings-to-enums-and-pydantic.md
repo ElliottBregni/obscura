@@ -1,6 +1,6 @@
 # Refactor Plan — String Literals → StrEnum, Dict Args → Pydantic Models
 
-> **Status (Round 1+2 complete).** Foundation, Round 1 (~60 enum migrations into `core/enums/`), and Round 2 (Pydantic record/boundary/discriminated-union models in `core/models/`) all merged to main. ~120 backlog pyright errors are concentrated in the user's in-flight v1-loop removal (agent_loop_v2.py, kairos integration, providers); they are not refactor regressions. Round 3 (Phase 9 — delete back-compat shims, add ruff rules) is deferred until the v1 removal lands.
+> **Status (Rounds 1+2+3 complete).** Foundation, Round 1 (~60 enum migrations into `core/enums/`), Round 2 (Pydantic record/boundary/discriminated-union models in `core/models/`), and Round 3 (back-compat shim deletion across agent/auth/lifecycle/error/protocol/messaging/tools/storage/ui domains) all merged. Pyright errors stable at ~87, all in user-territory in-flight work (agent_loop_v2.py, eval/engine.py, etc.). The ANN401 ruff rule banning `dict[str, Any]` in `obscura/core/` is *not* yet wired in CI — there are 234 existing `dict[str, Any]` sites in core/ that would need migration first; the convention is documented here and enforced via code review until a future round migrates the existing call sites.
 
 **Goal.** Eliminate loose string literals (used as dict keys, in conditionals, or in `Literal[...]` annotations) by replacing them with `StrEnum`s, and replace untyped `dict[str, Any]` parameters with `pydantic.BaseModel` subclasses (composed via mixins). Pyright enforces it module by module.
 
