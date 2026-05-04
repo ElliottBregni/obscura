@@ -173,7 +173,13 @@ def test_export_goals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     goals_dir = tmp_path / "goals"
 
     monkeypatch.setattr("obscura.kairos.goals._GOALS_DIR", goals_dir)
-    # Isolate from any real kairos.db on disk so only GoalBoard goals are exported.
+    # Isolate from any real kairos.db on disk so only GoalBoard goals are
+    # exported. vault_sync imports resolve_obscura_home at load time, so we
+    # have to patch the local binding (not the source module) to redirect
+    # the kairos.db lookup at line 561.
+    monkeypatch.setattr(
+        "obscura.kairos.vault_sync.resolve_obscura_home", lambda cwd=None: tmp_path
+    )
     monkeypatch.setattr(
         "obscura.core.paths.resolve_obscura_home", lambda cwd=None: tmp_path
     )
