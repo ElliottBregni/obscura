@@ -9,7 +9,8 @@ from typing import Any
 import pytest
 
 from obscura.core.backend_retry import RetryingBackend
-from obscura.core.types import BackendCapabilities, ChunkKind, Message, StreamChunk
+from obscura.core.enums.agent import ChunkKind
+from obscura.core.types import BackendCapabilities, Message, StreamChunk
 
 
 class _ScriptedBackend:

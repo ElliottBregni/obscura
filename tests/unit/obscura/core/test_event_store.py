@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.event_store import (
     VALID_TRANSITIONS,
     SessionStatus,
     SQLiteEventStore,
 )
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.types import AgentEvent
 
 if TYPE_CHECKING:
     from pathlib import Path

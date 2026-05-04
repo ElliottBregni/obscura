@@ -33,7 +33,8 @@ from obscura.cli.commands import (
     cmd_secrets,
     cmd_whoami,
 )
-from obscura.core.types import AgentEvent, AgentEventKind
+from obscura.core.enums.agent import AgentEventKind
+from obscura.core.types import AgentEvent
 
 if TYPE_CHECKING:
     from pathlib import Path
