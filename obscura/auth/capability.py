@@ -21,7 +21,6 @@ Usage::
 
 from __future__ import annotations
 
-import enum
 import hashlib
 import hmac
 import json
@@ -31,19 +30,10 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.enums.auth import CapabilityTier
+
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
-
-# ---------------------------------------------------------------------------
-# Tier enumeration
-# ---------------------------------------------------------------------------
-
-
-class CapabilityTier(enum.Enum):
-    """The two tiers of capability access."""
-
-    PUBLIC = "public"  # Tier A: minimal tools, strict filtering
-    PRIVILEGED = "privileged"  # Tier B: full tools, debug, bypass safety
 
 
 # ---------------------------------------------------------------------------

@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from obscura.core.enums.agent import InvocationMode, PeerKind
 from obscura.integrations.a2a.client import A2AClient
 import logging
 
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 class AgentRef(BaseModel):
     """Reference to a peer agent."""
 
-    kind: Literal["local"] = "local"
+    kind: PeerKind = PeerKind.LOCAL
     runtime_id: str
     agent_id: str
     name: str
@@ -34,7 +35,7 @@ class AgentRef(BaseModel):
 class RemoteAgentRef(BaseModel):
     """Reference to a remote A2A peer endpoint/agent."""
 
-    kind: Literal["a2a_remote"] = "a2a_remote"
+    kind: PeerKind = PeerKind.A2A_REMOTE
     url: str
     name: str = ""
     status: str = "configured"
@@ -46,7 +47,7 @@ class RemoteAgentRef(BaseModel):
 class UnixSocketAgentRef(BaseModel):
     """Reference to an agent reachable via Unix domain socket."""
 
-    kind: Literal["unix_socket"] = "unix_socket"
+    kind: PeerKind = PeerKind.UNIX_SOCKET
     socket_path: str
     name: str = ""
     status: str = "configured"
@@ -83,7 +84,7 @@ class PeerInvocationEnvelope(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     caller_agent_id: str = ""
     target_agent_id: str = ""
-    mode: Literal["blocking", "streaming", "loop", "stream_loop"] = "blocking"
+    mode: InvocationMode = InvocationMode.BLOCKING
 
 
 class PeerRegistry:

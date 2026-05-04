@@ -35,11 +35,12 @@ import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel, Field
+
+from obscura.core.enums.agent import AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -96,17 +97,6 @@ def _default_mcp_config_path() -> str:
 
 def _empty_details_map() -> dict[str, Any]:
     return {}
-
-
-class AgentStatus(Enum):
-    """Agent lifecycle states."""
-
-    PENDING = auto()  # Created but not started
-    RUNNING = auto()  # Currently executing
-    WAITING = auto()  # Blocked on I/O or memory
-    COMPLETED = auto()  # Finished successfully
-    FAILED = auto()  # Error occurred
-    STOPPED = auto()  # Manually stopped
 
 
 @dataclass(frozen=True)

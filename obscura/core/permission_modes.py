@@ -21,19 +21,11 @@ Action-level policy:
 
 from __future__ import annotations
 
-import enum
 import re
 from dataclasses import dataclass
 from typing import Any
 
-
-class PermissionMode(enum.StrEnum):
-    """Named permission modes controlling tool execution gating."""
-
-    DEFAULT = "default"
-    PLAN = "plan"
-    ACCEPT_EDITS = "accept_edits"
-    BYPASS = "bypass"
+from obscura.core.enums.auth import PermissionMode
 
 
 # Tools allowed in PLAN mode (read-only operations).

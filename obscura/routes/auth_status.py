@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -20,6 +20,7 @@ from obscura.auth.cli_session import (
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
 from obscura.core.auth import AuthConfig, resolve_auth
+from obscura.core.enums.auth import AuthProvider
 from obscura.core.types import Backend
 import logging
 
@@ -90,7 +91,7 @@ async def providers_health(
 class ProviderSecretsSyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["github", "google"]
+    provider: AuthProvider
     provider_token: str | None = None
     provider_refresh_token: str | None = None
 
