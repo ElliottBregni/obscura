@@ -137,9 +137,7 @@ class Http:
         # HTTPMethod member. Tool handlers receive arguments parsed from
         # JSON Schema, so the value still arrives as a bare string.
         normalized_method = (
-            method
-            if isinstance(method, HTTPMethod)
-            else HTTPMethod(method.upper())
+            method if isinstance(method, HTTPMethod) else HTTPMethod(method.upper())
         )
         method_value = normalized_method.value
 

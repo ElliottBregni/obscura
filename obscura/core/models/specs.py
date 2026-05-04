@@ -19,7 +19,7 @@ spec file. Otherwise the configuration mirrors ``ObscuraModel``.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -308,13 +308,7 @@ class WorkspaceSpec(BaseModel):
 
 
 Spec = Annotated[
-    Union[
-        TemplateSpec,
-        AgentInstanceSpec,
-        PolicySpec,
-        PackSpec,
-        WorkspaceSpec,
-    ],
+    TemplateSpec | AgentInstanceSpec | PolicySpec | PackSpec | WorkspaceSpec,
     Field(discriminator="kind"),
 ]
 """Discriminated union over the five spec variants."""

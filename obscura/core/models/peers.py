@@ -13,7 +13,7 @@ serialized to JSON today (``"local"``, ``"a2a_remote"``, ``"unix_socket"``).
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -70,7 +70,7 @@ class UnixSocketAgentRef(BaseModel):
 
 
 AgentRefUnion = Annotated[
-    Union[LocalAgentRef, A2ARemoteAgentRef, UnixSocketAgentRef],
+    LocalAgentRef | A2ARemoteAgentRef | UnixSocketAgentRef,
     Field(discriminator="kind"),
 ]
 """Discriminated union over the three peer reference variants."""

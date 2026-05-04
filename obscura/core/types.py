@@ -189,7 +189,9 @@ def _build_content_block(
     if block_kind == ContentBlockKind.THINKING.value:
         return ThinkingBlock(text=text)
     if block_kind == ContentBlockKind.TOOL_USE.value:
-        merged_args: Mapping[str, Any] = args if args is not None else (tool_input or {})
+        merged_args: Mapping[str, Any] = (
+            args if args is not None else (tool_input or {})
+        )
         return ToolUseBlock(
             tool_use_id=tool_use_id,
             tool_name=tool_name,
@@ -224,9 +226,7 @@ class Message:
     @property
     def text(self) -> str:
         """Convenience: concatenate all text blocks."""
-        return "".join(
-            b.text for b in self.content if isinstance(b, TextBlock)
-        )
+        return "".join(b.text for b in self.content if isinstance(b, TextBlock))
 
 
 # ---------------------------------------------------------------------------

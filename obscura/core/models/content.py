@@ -16,7 +16,7 @@ same lowercase strings used today (``"text"``, ``"thinking"``,
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -74,7 +74,7 @@ class ToolResultBlock(ObscuraModel):
 
 
 ContentBlock = Annotated[
-    Union[TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock],
+    TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock,
     Field(discriminator="kind"),
 ]
 """Discriminated union over the four block variants."""
