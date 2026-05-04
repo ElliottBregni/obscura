@@ -27,19 +27,27 @@ from obscura.core.models._base import BoundaryModel
 
 
 class ToolResult(BoundaryModel):
-    """Structured tool output."""
+    """Structured tool output.
+
+    ``data`` is intentionally ``Any`` because tool results are heterogeneous
+    JSON: a file-read tool returns text, a JSON-query tool returns parsed
+    objects, an exec tool returns structured stdout/stderr/exit_code blocks.
+    The boundary here is precisely the seam where typed fields end and
+    plugin payloads begin — see ``ToolResultBuilder`` for the legacy chainable
+    construction path.
+    """
 
     ok: bool
     error: str | None = None
-    data: Any | None = None
+    data: Any | None = None  # noqa: ANN401  # wire format: tool-specific payload
     stdout: str | None = None
     stderr: str | None = None
     exit_code: int | None = None
     duration_ms: int | None = None
-    extra: Mapping[str, Any] = Field(default_factory=dict)
+    extra: Mapping[str, Any] = Field(default_factory=dict)  # noqa: ANN401  # wire format: plugin payload overflow
 
     @classmethod
-    def success(cls, data: Any | None = None, **fields: Any) -> Self:
+    def success(cls, data: Any | None = None, **fields: Any) -> Self:  # noqa: ANN401  # wire format: tool-specific payload
         """Build a successful result. Unknown kwargs land on ``extra``."""
         known: dict[str, Any] = {}
         extra: dict[str, Any] = {}
@@ -52,7 +60,7 @@ class ToolResult(BoundaryModel):
         return cls(ok=True, data=data, extra=extra, **known)
 
     @classmethod
-    def failure(cls, error: str, **fields: Any) -> Self:
+    def failure(cls, error: str, **fields: Any) -> Self:  # noqa: ANN401  # wire format: legacy kwargs surface
         """Build an error result. Unknown kwargs land on ``extra``."""
         known: dict[str, Any] = {}
         extra: dict[str, Any] = {}
@@ -92,22 +100,22 @@ class ToolResultBuilder:
         self._payload: dict[str, Any] = payload or {}
 
     @classmethod
-    def ok(cls, **fields: Any) -> ToolResultBuilder:
+    def ok(cls, **fields: Any) -> ToolResultBuilder:  # noqa: ANN401  # wire format: legacy kwargs surface
         return cls({"ok": True, **fields})
 
     @classmethod
-    def fail(cls, error: str, **fields: Any) -> ToolResultBuilder:
+    def fail(cls, error: str, **fields: Any) -> ToolResultBuilder:  # noqa: ANN401  # wire format: legacy kwargs surface
         return cls({"ok": False, "error": error, **fields})
 
-    def set(self, **fields: Any) -> ToolResultBuilder:
+    def set(self, **fields: Any) -> ToolResultBuilder:  # noqa: ANN401  # wire format: legacy kwargs surface
         self._payload.update(fields)
         return self
 
-    def context(self, **fields: Any) -> ToolResultBuilder:
+    def context(self, **fields: Any) -> ToolResultBuilder:  # noqa: ANN401  # wire format: legacy kwargs surface
         self._payload.update(fields)
         return self
 
-    def data(self, **fields: Any) -> ToolResultBuilder:
+    def data(self, **fields: Any) -> ToolResultBuilder:  # noqa: ANN401  # wire format: legacy kwargs surface
         self._payload.update(fields)
         return self
 

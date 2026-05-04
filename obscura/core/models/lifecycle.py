@@ -77,8 +77,10 @@ def _coerce_dt(value: object) -> datetime:
 
 
 def _row_get(
-    row: sqlite3.Row | Mapping[str, Any], key: str, default: Any = None
-) -> Any:
+    row: sqlite3.Row | Mapping[str, Any],
+    key: str,
+    default: Any = None,  # noqa: ANN401  # wire format: heterogeneous SQLite cell value
+) -> Any:  # noqa: ANN401  # wire format: heterogeneous SQLite cell value
     """Mapping-style ``.get`` that also works on ``sqlite3.Row``."""
     if isinstance(row, sqlite3.Row):
         # sqlite3.Row supports membership via __contains__ on keys() but not
