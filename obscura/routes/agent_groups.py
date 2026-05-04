@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit, get_runtime
@@ -25,17 +26,37 @@ router = APIRouter(prefix="/api/v1", tags=["agents"])
 _agent_groups: dict[str, dict[str, Any]] = {}
 
 
+class AgentGroupCreateRequest(BaseModel):
+    """Body for ``POST /agent-groups`` — typed boundary model."""
+
+    name: str = "unnamed-group"
+    agents: list[str] = Field(default_factory=list)
+
+
+class AgentGroupBroadcastRequest(BaseModel):
+    """Body for ``POST /agent-groups/{group_id}/broadcast``."""
+
+    message: str = ""
+    context: dict[str, Any] = Field(default_factory=dict[str, Any])
+
+
+class AgentSendMessageRequest(BaseModel):
+    """Body for ``POST /agents/{from_agent}/send/{to_agent}``."""
+
+    message: str = ""
+
+
 @router.post("/agent-groups")
 async def agent_group_create(
-    body: dict[str, Any],
+    body: AgentGroupCreateRequest,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create an agent group."""
     group_id = str(uuid.uuid4())
     group: dict[str, Any] = {
         "group_id": group_id,
-        "name": body.get("name", "unnamed-group"),
-        "agents": body.get("agents", []),
+        "name": body.name,
+        "agents": body.agents,
         "created_by": user.user_id,
         "created_at": datetime.now(UTC).isoformat(),
     }
@@ -99,7 +120,7 @@ async def agent_group_delete(
 @router.post("/agent-groups/{group_id}/broadcast")
 async def agent_group_broadcast(
     group_id: str,
-    body: dict[str, Any],
+    body: AgentGroupBroadcastRequest,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Broadcast a message to all agents in a group."""
@@ -109,8 +130,8 @@ async def agent_group_broadcast(
     if group is None:
         raise HTTPException(status_code=404, detail=f"Group {group_id} not found")
 
-    message: str = body.get("message", "")
-    context: dict[str, Any] = body.get("context", {})
+    message = body.message
+    context = body.context
 
     results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -145,7 +166,7 @@ async def agent_group_broadcast(
 async def agent_send_message(
     from_agent: str,
     to_agent: str,
-    body: dict[str, Any],
+    body: AgentSendMessageRequest,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Send a message from one agent to another."""
@@ -165,7 +186,7 @@ async def agent_send_message(
             detail=f"Target agent {to_agent} not found",
         )
 
-    message: str = body.get("message", "")
+    message = body.message
 
     await source.send_message(to_agent, message)
 

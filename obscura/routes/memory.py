@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit
@@ -23,6 +24,38 @@ router = APIRouter(prefix="/api/v1", tags=["memory"])
 
 # In-memory namespace config (lateral move from server.py)
 _memory_namespaces: dict[str, dict[str, Any]] = {}
+
+
+class MemoryNamespaceCreateRequest(BaseModel):
+    """Body for ``POST /memory/namespaces``."""
+
+    name: str | None = None
+    description: str = ""
+    ttl_days: int | None = None
+
+
+class MemoryOperationItem(BaseModel):
+    """One entry in a transaction operation list."""
+
+    op: str
+    namespace: str = "default"
+    key: str | None = None
+    value: Any = None
+
+
+class MemoryTransactionRequest(BaseModel):
+    """Body for ``POST /memory/transaction``."""
+
+    operations: list[MemoryOperationItem] = Field(
+        default_factory=list[MemoryOperationItem]
+    )
+
+
+class MemoryImportRequest(BaseModel):
+    """Body for ``POST /memory/import``."""
+
+    data: dict[str, dict[str, Any]] = Field(default_factory=dict[str, dict[str, Any]])
+
 
 # -- list / search / stats ------------------------------------------------
 
@@ -97,16 +130,16 @@ async def memory_namespace_list(
 
 @router.post("/memory/namespaces")
 async def memory_namespace_create(
-    body: dict[str, Any],
+    body: MemoryNamespaceCreateRequest,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Create a new memory namespace with configuration."""
-    namespace_id: str = body.get("name", str(uuid.uuid4()))
+    namespace_id = body.name or str(uuid.uuid4())
 
     namespace: dict[str, Any] = {
         "namespace_id": namespace_id,
-        "description": body.get("description", ""),
-        "ttl_days": body.get("ttl_days"),
+        "description": body.description,
+        "ttl_days": body.ttl_days,
         "created_by": user.user_id,
         "created_at": datetime.now(UTC).isoformat(),
     }
@@ -188,13 +221,13 @@ async def memory_namespace_stats(
 
 @router.post("/memory/transaction")
 async def memory_transaction(
-    body: dict[str, Any],
+    body: MemoryTransactionRequest,
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Execute multiple memory operations atomically."""
     store = MemoryStore.for_user(user)
 
-    operations: list[dict[str, Any]] = body.get("operations", [])
+    operations = body.operations
     if not operations:
         raise HTTPException(status_code=400, detail="No operations provided")
 
@@ -203,16 +236,16 @@ async def memory_transaction(
 
     for idx, op in enumerate(operations):
         try:
-            op_type: str | None = op.get("op")
-            ns: str = op.get("namespace", "default")
-            key: str | None = op.get("key")
+            op_type = op.op
+            ns = op.namespace
+            key = op.key
 
             if key is None:
                 errors.append({"idx": idx, "error": "Missing key"})
                 continue
 
             if op_type == "set":
-                value: Any = op.get("value")
+                value: Any = op.value
                 store.set(key, value, namespace=ns)
                 results.append({"idx": idx, "op": "set", "status": "ok"})
             elif op_type == "get":
@@ -275,14 +308,14 @@ async def memory_export(
 
 @router.post("/memory/import")
 async def memory_import(
-    body: dict[str, Any],
+    body: MemoryImportRequest,
     overwrite: bool = True,
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Import memory data from JSON."""
     store = MemoryStore.for_user(user)
 
-    import_data: dict[str, Any] = body.get("data", {})
+    import_data = body.data
     if not import_data:
         raise HTTPException(status_code=400, detail="No data provided")
 
