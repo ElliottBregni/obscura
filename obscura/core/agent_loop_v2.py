@@ -416,6 +416,16 @@ class AgentLoopV2:
                 # the rest of the function reads the same.)
                 messages = turn_ctx.messages
 
+            # Always emit TURN_START at the top of each turn so the
+            # renderer can start its "thinking" spinner / clear its
+            # frame buffer. Some backends (Claude SDK in particular)
+            # don't reliably emit ChunkKind.MESSAGE_START so we can't
+            # rely on chunk-level signaling alone.
+            yield AgentEvent(
+                kind=AgentEventKind.TURN_START,
+                turn=turn,
+            )
+
             # Stream the next assistant turn.
             text_buf: list[str] = []
             tool_calls: list[ToolCallInfo] = []
@@ -477,13 +487,10 @@ class AgentLoopV2:
                         raw=getattr(chunk, "raw", None),
                     )
                 elif kind == ChunkKind.MESSAGE_START:
-                    # Some renderers use this to start a new turn frame.
-                    # Forward as TURN_START so the modern renderer's
-                    # frame-buffer can clear / reset for the new turn.
-                    yield AgentEvent(
-                        kind=AgentEventKind.TURN_START,
-                        turn=turn,
-                    )
+                    # MESSAGE_START is informational here — we already fired
+                    # TURN_START at the top of the loop. Some backends emit
+                    # it; others don't. Either way, no extra event needed.
+                    pass
                 elif kind == ChunkKind.ERROR:
                     yield AgentEvent(
                         kind=AgentEventKind.ERROR,
