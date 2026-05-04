@@ -4,6 +4,12 @@ This package contains the foundational types, tools, configuration, and
 client that app developers import by default::
 
     from obscura.core import ObscuraClient, Message, Backend, tool
+
+Kairos (the autonomous goal runtime) is intentionally NOT re-exported here —
+it pulls heavy machinery and is properly accessed via ``obscura.core.kairos``
+(goal/plan engine) or ``obscura.kairos`` (autonomous daemon). The eager
+re-exports were removed in Stage A3 of the surface refactor; they were
+unused by any caller.
 """
 
 from __future__ import annotations
@@ -29,71 +35,29 @@ from obscura.core.types import (
     StreamChunk,
     ToolSpec,
 )
-from obscura.core.kairos import (
-    Kairos,
-    KairosConfig,
-    Goal,
-    GoalBudget,
-    GoalStatus,
-    Plan,
-    PlanStatus,
-    Task,
-    TaskStatus,
-    TaskResult,
-    Checkpoint,
-    CheckpointKind,
-    Intervention,
-    InterventionKind,
-    KairosEvent,
-    KairosEventKind,
-)
 
 __all__ = [
-    # Types
     "AgentContext",
     "AgentPhase",
-    # Auth
     "AuthConfig",
     "Backend",
     "BackendProtocol",
     "ChunkKind",
     "ContentBlock",
-    # Context
     "ContextLoader",
     "HookContext",
     "HookPoint",
     "Message",
-    # Config
     "ObscuraConfig",
-    # Handlers
     "RequestHandler",
     "Role",
     "SessionRef",
-    # Sessions
     "SessionStore",
     "SimpleHandler",
     "StreamChunk",
     "TokenRefresher",
-    # Tools
     "ToolRegistry",
     "ToolSpec",
     "resolve_auth",
     "tool",
-    # Kairos — autonomous goal runtime
-    "Checkpoint",
-    "CheckpointKind",
-    "Goal",
-    "GoalBudget",
-    "GoalStatus",
-    "Intervention",
-    "InterventionKind",
-    "Kairos",
-    "KairosConfig",
-    "KairosEvent",
-    "KairosEventKind",
-    "Plan",
-    "PlanStatus",
-    "Task",
-    "TaskResult",
-    "TaskStatus",
 ]
