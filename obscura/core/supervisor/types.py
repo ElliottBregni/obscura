@@ -2,11 +2,17 @@
 
 Defines supervisor states, events, configuration, and run context.
 All types are frozen dataclasses for immutability guarantees.
+
+Free-form ``metadata`` and event ``payload`` fields are typed as
+:class:`collections.abc.Mapping` so consumers cannot mutate the persisted
+shape in place; the canonical writes happen through the supervisor
+itself.
 """
 
 from __future__ import annotations
 
 import enum
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -143,7 +149,7 @@ def _empty_tuple() -> tuple[str, ...]:
     return ()
 
 
-def _empty_dict() -> dict[str, Any]:
+def _empty_dict() -> Mapping[str, Any]:
     return {}
 
 
@@ -161,7 +167,7 @@ class RunContext:
     tool_names: tuple[str, ...] = field(default_factory=_empty_tuple)
     memory_item_ids: tuple[str, ...] = field(default_factory=_empty_tuple)
     started_at: datetime = field(default_factory=datetime.now)
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +182,7 @@ class SupervisorEvent:
     kind: SupervisorEventKind
     run_id: str = ""
     session_id: str = ""
-    payload: dict[str, Any] = field(default_factory=_empty_dict)
+    payload: Mapping[str, Any] = field(default_factory=_empty_dict)
     timestamp: datetime = field(default_factory=datetime.now)
 
 
@@ -283,4 +289,4 @@ class SessionHeartbeat:
     turn_number: int = 0
     elapsed_ms: int = 0
     timestamp: datetime = field(default_factory=datetime.now)
-    metadata: dict[str, Any] = field(default_factory=_empty_dict)
+    metadata: Mapping[str, Any] = field(default_factory=_empty_dict)

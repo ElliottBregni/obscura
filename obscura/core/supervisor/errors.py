@@ -6,6 +6,7 @@ for the supervisor to decide retry vs fail.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from obscura.core.enums.error import ErrorCategory
@@ -32,12 +33,12 @@ class SupervisorError(Exception):
         category: ErrorCategory = ErrorCategory.SUPERVISOR_STATE_VIOLATION,
         *,
         retryable: bool = False,
-        context: dict[str, Any] | None = None,
+        context: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.category = category
         self.retryable = retryable
-        self.context = context or {}
+        self.context: Mapping[str, Any] = dict(context) if context else {}
 
 
 class StateTransitionError(SupervisorError):
