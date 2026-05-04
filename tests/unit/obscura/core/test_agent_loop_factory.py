@@ -158,8 +158,8 @@ class TestV1KwargTranslation:
                 hooks=_Hooks(),
                 tool_output_overrides={"a": "silent"},
             )
-            # Five v1 features → five middleware entries.
-            assert len(loop._dispatch_middleware) == 5  # type: ignore[attr-defined]
+            # Five v1 features + predictive_cache (default-on) → six middleware entries.
+            assert len(loop._dispatch_middleware) == 6  # type: ignore[attr-defined]
 
     def test_compaction_pre_turn_when_context_budget_set(self) -> None:
         with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v2"}):

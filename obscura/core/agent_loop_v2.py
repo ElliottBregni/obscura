@@ -111,13 +111,15 @@ logger = logging.getLogger(__name__)
 # Known ToolContext fields the host_callbacks dict can populate directly.
 # Anything else in host_callbacks lands in ToolContext.extras for tool
 # code that reads custom keys.
-_TOOL_CTX_KNOWN_FIELDS: frozenset[str] = frozenset({
-    "ask_user_callback",
-    "user_interact_callback",
-    "permission_mode_callback",
-    "plan_approval_callback",
-    "mcp_discovery_report",
-})
+_TOOL_CTX_KNOWN_FIELDS: frozenset[str] = frozenset(
+    {
+        "ask_user_callback",
+        "user_interact_callback",
+        "permission_mode_callback",
+        "plan_approval_callback",
+        "mcp_discovery_report",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +240,8 @@ class AgentLoopV2:
         pre_turn: Callable[[TurnContext], Awaitable[None]] | None = None,
         post_turn: Callable[[TurnContext, TurnResult], Awaitable[None]] | None = None,
         host_callbacks: dict[str, Any] | None = None,
+        text_delta_observers: list[Callable[[str], Awaitable[None]]] | None = None,
+        on_turn_start: Callable[[int, ToolContext], Awaitable[None]] | None = None,
     ) -> None:
         self._backend = backend
         self._registry = registry
@@ -252,6 +256,19 @@ class AgentLoopV2:
         # Empty dict means no host callbacks; tools fall back to whatever
         # legacy module-level state they support (UI.set_*_callback etc).
         self._host_callbacks: dict[str, Any] = dict(host_callbacks or {})
+        # Text-delta observers fire for each TEXT_DELTA chunk. The
+        # predictive cache uses this to start speculative dispatches as
+        # the model streams text. Observers are awaited inline — keep
+        # them lightweight (or use create_task internally for fire-and-forget).
+        self._text_delta_observers: list[Callable[[str], Awaitable[None]]] = list(
+            text_delta_observers or []
+        )
+        # Called once per turn at the top, after the per-turn ToolContext
+        # is built. Predictive cache uses this to register its observer
+        # with the right ToolContext bound (so speculative dispatches
+        # see host_callbacks/registry/etc.). Lightweight — runs sync
+        # path inline.
+        self._on_turn_start = on_turn_start
 
         # Per-turn dedup keyed by SDK tool_use_id. LOAD-BEARING for
         # correctness — see the extended note on
@@ -307,6 +324,21 @@ class AgentLoopV2:
             # retry; that's a migration TODO).
             self._seen_calls.clear()
 
+            # Build the per-turn ToolContext early — text-delta observers
+            # and the dispatch chain both need it. Reused for every node
+            # in this turn (registry/history/session_id are turn-invariant).
+            turn_tool_ctx = self._build_tool_context(
+                messages=messages, session_id=session_id
+            )
+
+            # on_turn_start callback — predictive cache uses this to
+            # rebind its observer with the per-turn ToolContext.
+            if self._on_turn_start is not None:
+                try:
+                    await self._on_turn_start(turn, turn_tool_ctx)
+                except Exception:
+                    logger.exception("on_turn_start raised — swallowing")
+
             # pre_turn hook — may mutate messages (e.g. compaction trims
             # older turns) or set stop_after_turn to True (e.g. arbiter
             # kill).
@@ -342,6 +374,15 @@ class AgentLoopV2:
                         turn=turn,
                         text=chunk.text,
                     )
+                    # Fire text-delta observers (predictive cache et al.).
+                    # Observers are awaited but should be lightweight — they
+                    # typically schedule fire-and-forget tasks rather than
+                    # block on real work.
+                    for obs in self._text_delta_observers:
+                        try:
+                            await obs(chunk.text)
+                        except Exception:
+                            logger.exception("text_delta_observer raised — swallowing")
                 elif kind == ChunkKind.TOOL_USE_START:
                     partial_names[chunk.tool_use_id] = chunk.tool_name
                     partial_inputs[chunk.tool_use_id] = []
@@ -419,12 +460,11 @@ class AgentLoopV2:
             # declared deps (or the merge produced sibling+plan nodes).
             envelopes_by_id: dict[str, _ToolEnvelopeV2] = {}
 
-            # Per-turn ToolContext bound around every tool dispatch so
-            # tools that read current_tool_context() see host_callbacks,
-            # the live history, session_id, and the registry. v1 parity.
-            tool_ctx = self._build_tool_context(
-                messages=messages, session_id=session_id
-            )
+            # Per-turn ToolContext (built earlier at turn start) is
+            # bound around every tool dispatch so tools that read
+            # current_tool_context() see host_callbacks, the live
+            # history, session_id, and the registry. v1 parity.
+            tool_ctx = turn_tool_ctx
 
             async def _core_executor(
                 node: DAGNode, _resolved: dict[str, Any]

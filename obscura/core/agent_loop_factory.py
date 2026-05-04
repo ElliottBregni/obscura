@@ -71,8 +71,15 @@ _V2_SUPPORTED_V1_KWARGS: frozenset[str] = frozenset(
         "agent_name",
         "model_name",
         "context_budget",
+        "host_callbacks",
     }
 )
+
+
+def _flag_enabled(env_name: str, default: str = "1") -> bool:
+    """Read an OBSCURA_V2_* env var. Default is ON; set =0/false/no/off to disable."""
+    raw = os.environ.get(env_name, default).strip().lower()
+    return raw not in {"0", "false", "no", "off", ""}
 
 
 def is_v2_enabled() -> bool:
@@ -169,10 +176,7 @@ def _build_v2(
         # for read-only tools (v1 parity — side_effects=="none" tools
         # dispatch silently). Set OBSCURA_V2_SAFE_SKIP_CONFIRM=0 to
         # disable the short circuit and prompt for every tool.
-        skip_for_safe = (
-            os.environ.get("OBSCURA_V2_SAFE_SKIP_CONFIRM", "1").strip().lower()
-            not in {"0", "false", "no", "off"}
-        )
+        skip_for_safe = _flag_enabled("OBSCURA_V2_SAFE_SKIP_CONFIRM")
         dispatch_middleware.append(
             tool_confirmation(
                 v1_kwargs["on_confirm"],
@@ -191,6 +195,51 @@ def _build_v2(
 
     if "hooks" in v1_kwargs and v1_kwargs["hooks"] is not None:
         dispatch_middleware.append(hook_middleware(v1_kwargs["hooks"]))
+
+    # ── Predictive cache (OBSCURA_V2_PREDICTIVE_CACHE, default ON) ─────────
+    # Speculatively dispatches read-only tool calls based on assistant
+    # text deltas; on the actual tool_use the dispatch hits the cache.
+    text_observers: list[Any] = []
+    on_turn_start: Any = None
+    if _flag_enabled("OBSCURA_V2_PREDICTIVE_CACHE"):
+        from obscura.core.agent_loop_predictive import (
+            V2PredictiveCache,
+            make_predictive_observer,
+            predictive_cache_middleware,
+        )
+        from obscura.runtime.predictive_tools import ToolPredictor
+
+        pred_cache = V2PredictiveCache()
+        pred_specs = {spec.name: spec for spec in registry.all()}
+        predictor = ToolPredictor(tool_registry=pred_specs)
+        dispatch_middleware.append(predictive_cache_middleware(pred_cache))
+
+        # Stable observer object that closes over a mutable holder for
+        # the current turn's ToolContext. on_turn_start updates the
+        # holder; the observer reads the latest value on each delta.
+        # This avoids the "mutate list passed to v2 constructor" foot-gun.
+        ctx_holder: dict[str, Any] = {"ctx": None}
+
+        async def _predictive_observer(delta: str) -> None:
+            ctx = ctx_holder.get("ctx")
+            if ctx is None:
+                return
+            obs = make_predictive_observer(
+                predictor=predictor,
+                cache=pred_cache,
+                registry=registry,
+                tool_ctx=ctx,
+            )
+            await obs(delta)
+
+        text_observers.append(_predictive_observer)
+
+        async def _start_predictive_turn(_turn: int, ctx: Any) -> None:
+            predictor.reset()
+            pred_cache.clear()
+            ctx_holder["ctx"] = ctx
+
+        on_turn_start = _start_predictive_turn
 
     # ── Build the pre_turn / post_turn hooks ───────────────────────────────
     pre_turn = None
@@ -232,6 +281,9 @@ def _build_v2(
         dispatch_middleware=dispatch_middleware or None,
         pre_turn=pre_turn,
         post_turn=post_turn,
+        host_callbacks=v1_kwargs.get("host_callbacks") or None,
+        text_delta_observers=text_observers or None,
+        on_turn_start=on_turn_start,
     )
 
 
