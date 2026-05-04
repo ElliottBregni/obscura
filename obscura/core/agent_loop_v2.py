@@ -126,6 +126,18 @@ class AgentLoopV2Config:
     per_capability_concurrency: dict[str, int] = field(default_factory=dict)
     parallel_plan_tool_name: str = "parallel_plan"
 
+    # When the model mixes a parallel_plan tool_use with regular tool_use
+    # blocks in one turn, the v2 default merges them into a single DAG:
+    # the plan's declared dependencies are honored, sibling tool_uses run
+    # with NO declared edges (in parallel with plan no-dep nodes).
+    #
+    # Set this flag to True to inject edges from every sibling to every
+    # plan terminal node — guaranteeing siblings observe plan results
+    # before they run, at the cost of removing intra-turn parallelism
+    # between siblings and plan nodes. Use this for deployments where
+    # mixed turns are rare and the safer ordering is worth the latency.
+    siblings_wait_for_plan: bool = False
+
 
 # ---------------------------------------------------------------------------
 # AgentLoopV2
@@ -286,9 +298,11 @@ class AgentLoopV2:
                 )
                 return
 
-            # Build the turn DAG. parallel_plan calls expand into the DAG
-            # natively; everything else becomes a no-edge node.
-            dag = self._build_dag(tool_calls)
+            # Build the merged turn DAG. parallel_plan calls expand into
+            # their declared sub-DAG; non-plan calls become no-edge sibling
+            # nodes; both classes coexist in one TurnDAG.
+            dag_ctx = self._build_dag(tool_calls)
+            dag = dag_ctx.dag
 
             # Emit a TOOL_CALL event per node (in submission order) before
             # dispatch — callers logging or rendering UI need this.
@@ -298,12 +312,14 @@ class AgentLoopV2:
                     turn=turn,
                     tool_name=node.tool_name,
                     tool_input=node.tool_input,
-                    tool_use_id=node.tool_use_id,
+                    # Use the originating SDK tool_use_id (siblings = self;
+                    # plan-children = parent plan) so consumers can correlate
+                    # node-level events back to the assistant turn.
+                    tool_use_id=dag_ctx.node_origins[node.id],
                 )
 
             # Execute via the scheduler. Mode: parallel iff any node has
-            # declared deps (or there are >1 nodes — caller-determined cap
-            # still serializes if max_concurrency=1).
+            # declared deps (or the merge produced sibling+plan nodes).
             envelopes_by_id: dict[str, _ToolEnvelopeV2] = {}
 
             async def _node_executor(
@@ -348,37 +364,25 @@ class AgentLoopV2:
                         is_cancelled=result.is_cancelled,
                     )
                     envelopes_by_id[result.node_id] = env
+                origin_tu_id = dag_ctx.node_origins.get(
+                    result.node_id, result.tool_use_id
+                )
                 yield AgentEvent(
                     kind=AgentEventKind.TOOL_RESULT,
                     turn=turn,
                     tool_name=dag.get(result.node_id).tool_name
                     if result.node_id in dag
                     else "",
-                    tool_use_id=result.tool_use_id,
+                    tool_use_id=origin_tu_id,
                     tool_result=_envelope_to_text(env),
                 )
 
-            # Build user turn from envelopes in SUBMISSION order. The SDK
-            # contract requires every tool_use to have a matching tool_result
-            # in the next user message (cancelled nodes get an is_error
-            # envelope above).
-            user_blocks: list[ContentBlock] = []
-            for node in sorted(dag, key=lambda n: n.submission_index):
-                env = envelopes_by_id.get(node.id)
-                if env is None:
-                    env = _ToolEnvelopeV2(
-                        tool_use_id=node.tool_use_id,
-                        content=[ContentBlock(kind="text", text="(no result)")],
-                        is_error=True,
-                    )
-                user_blocks.append(
-                    ContentBlock(
-                        kind="tool_result",
-                        tool_use_id=env.tool_use_id,
-                        text=_envelope_to_text(env),
-                        is_error=env.is_error,
-                    )
-                )
+            # Build user turn — ONE tool_result per SDK tool_use_id (the
+            # SDK contract). Plan-expanded nodes aggregate into the parent
+            # plan's tool_result; sibling nodes get their own.
+            user_blocks = self._aggregate_results_to_user_blocks(
+                dag_ctx, envelopes_by_id
+            )
             messages.append(Message(role=Role.USER, content=user_blocks))
 
         # max_turns exceeded.
@@ -390,51 +394,244 @@ class AgentLoopV2:
 
     # -- Helpers ---------------------------------------------------------------
 
-    def _build_dag(self, tool_calls: list[ToolCallInfo]) -> TurnDAG:
-        """Build a TurnDAG from this turn's tool calls.
+    def _build_dag(self, tool_calls: list[ToolCallInfo]) -> _TurnDAGContext:
+        """Build a merged TurnDAG from this turn's tool calls (Option B).
 
-        If exactly one ``parallel_plan`` call is present, expand it into the
-        DAG. Otherwise build a no-edge DAG (each call is an isolated node)
-        — matches v1 batch behavior.
+        For each tool_call:
 
-        Mixed cases (parallel_plan + other calls in the same turn) are not
-        supported in v2 yet; we treat the mix as no-edge and log a warning,
-        falling back to the safer of the two semantics.
+        - ``parallel_plan`` calls are expanded into their declared DAG nodes.
+          Each expanded node carries an empty SDK ``tool_use_id`` (it has
+          no SDK identity — only the parent plan call does). Plan node ids
+          come from the model's plan; we namespace by prefixing with the
+          plan's tool_use_id to avoid collisions across multiple plans in
+          the same turn.
+        - Non-plan tool_uses become single no-edge sibling nodes.
+
+        All nodes go into one merged :class:`TurnDAG`. Plan-internal
+        dependencies are honored. Sibling nodes have no declared edges by
+        default — they run in parallel with plan no-dep nodes. Set
+        ``AgentLoopV2Config.siblings_wait_for_plan`` to inject edges from
+        every sibling to every plan terminal node.
+
+        Returns a context bundle so the caller can build per-SDK-tool_use
+        result envelopes (each plan call → ONE aggregated tool_result;
+        each sibling → its own tool_result).
+
+        If a ``parallel_plan`` call has invalid input, that single call
+        falls back to a sibling node (its handler will echo the input).
+        Other plans in the same turn keep their expansions.
         """
-        plan_calls = [
-            tc for tc in tool_calls if tc.name == self._config.parallel_plan_tool_name
-        ]
-        if len(plan_calls) == 1 and len(tool_calls) == 1:
-            try:
-                parsed = parse_parallel_plan_input(plan_calls[0].input)
-            except ParallelPlanValidationError as exc:
-                logger.warning(
-                    "parallel_plan input invalid (%s); falling back to no-edge", exc
+        all_nodes: list[DAGNode] = []
+        # node.id (in the merged DAG) -> originating SDK tool_use_id.
+        # Plan-expanded nodes map back to the parent plan's SDK id; siblings
+        # map to themselves. Used during result building to aggregate.
+        node_origins: dict[str, str] = {}
+        # Ordered list of SDK tool_use_ids we owe a tool_result envelope for.
+        sdk_tool_use_ids: list[str] = []
+        # Plan-id -> set of node.ids that are terminals of that plan's
+        # internal sub-DAG. Used by siblings_wait_for_plan.
+        plan_terminals: list[str] = []
+
+        submission_idx = 0
+        for tc in tool_calls:
+            sdk_tool_use_ids.append(tc.tool_use_id)
+
+            if tc.name == self._config.parallel_plan_tool_name:
+                expanded = self._expand_plan_or_fallback(
+                    tc, submission_idx_offset=submission_idx
                 )
-                return self._no_edge_dag(tool_calls)
-            return build_turn_dag_from_parallel_plan(parsed)
+                if expanded is None:
+                    # Fall back: treat invalid plan as a sibling node.
+                    sibling = DAGNode(
+                        id=tc.tool_use_id,
+                        tool_name=tc.name,
+                        tool_input=dict(tc.input),
+                        depends_on=(),
+                        submission_index=submission_idx,
+                        tool_use_id=tc.tool_use_id,
+                    )
+                    all_nodes.append(sibling)
+                    node_origins[sibling.id] = tc.tool_use_id
+                    submission_idx += 1
+                    continue
 
-        if plan_calls:
-            logger.warning(
-                "agent_loop_v2: parallel_plan mixed with other tool_use blocks — "
-                "treating as no-edge DAG (mixed mode is not supported yet)"
-            )
-        return self._no_edge_dag(tool_calls)
+                # Successful expansion. Namespace plan node ids by prefixing
+                # with the plan's SDK tool_use_id so multiple plans in the
+                # same turn can't collide. Re-thread depends_on through the
+                # same prefix.
+                prefix = (
+                    f"{tc.tool_use_id}:" if tc.tool_use_id else f"plan{submission_idx}:"
+                )
+                # Compute terminals BEFORE renaming so we can rename them too.
+                internal_ids = {n.id for n in expanded}
+                referenced = {dep for n in expanded for dep in n.depends_on}
+                terminals_unprefixed = internal_ids - referenced
 
-    @staticmethod
-    def _no_edge_dag(tool_calls: list[ToolCallInfo]) -> TurnDAG:
-        nodes = tuple(
-            DAGNode(
-                id=tc.tool_use_id,
-                tool_name=tc.name,
-                tool_input=dict(tc.input),
-                depends_on=(),
-                submission_index=i,
-                tool_use_id=tc.tool_use_id,
-            )
-            for i, tc in enumerate(tool_calls)
+                for n in expanded:
+                    new_id = f"{prefix}{n.id}"
+                    new_deps = tuple(f"{prefix}{d}" for d in n.depends_on)
+                    renamed = DAGNode(
+                        id=new_id,
+                        tool_name=n.tool_name,
+                        tool_input=dict(n.tool_input),
+                        depends_on=new_deps,
+                        submission_index=n.submission_index,
+                        tool_use_id="",  # synthesized — no SDK identity
+                    )
+                    all_nodes.append(renamed)
+                    node_origins[new_id] = tc.tool_use_id
+                    submission_idx += 1
+                plan_terminals.extend(f"{prefix}{tid}" for tid in terminals_unprefixed)
+            else:
+                sibling = DAGNode(
+                    id=tc.tool_use_id,
+                    tool_name=tc.name,
+                    tool_input=dict(tc.input),
+                    depends_on=(),
+                    submission_index=submission_idx,
+                    tool_use_id=tc.tool_use_id,
+                )
+                all_nodes.append(sibling)
+                node_origins[sibling.id] = tc.tool_use_id
+                submission_idx += 1
+
+        # If siblings_wait_for_plan and we have any plan terminals, rewrite
+        # sibling nodes to depend on every terminal. Sibling = node whose
+        # origin is its own id (no plan expansion produced it).
+        if self._config.siblings_wait_for_plan and plan_terminals:
+            terminal_tuple = tuple(plan_terminals)
+            rebuilt: list[DAGNode] = []
+            for n in all_nodes:
+                origin = node_origins[n.id]
+                # A node is a sibling iff its node.id equals its origin
+                # (i.e., it wasn't synthesized from a parallel_plan).
+                is_sibling = n.id == origin
+                if is_sibling and not n.depends_on:
+                    rebuilt.append(
+                        DAGNode(
+                            id=n.id,
+                            tool_name=n.tool_name,
+                            tool_input=n.tool_input,
+                            depends_on=terminal_tuple,
+                            submission_index=n.submission_index,
+                            tool_use_id=n.tool_use_id,
+                        )
+                    )
+                else:
+                    rebuilt.append(n)
+            all_nodes = rebuilt
+
+        dag = TurnDAG(nodes=tuple(all_nodes))
+        return _TurnDAGContext(
+            dag=dag,
+            node_origins=node_origins,
+            sdk_tool_use_ids=tuple(sdk_tool_use_ids),
         )
-        return TurnDAG(nodes=nodes)
+
+    def _expand_plan_or_fallback(
+        self,
+        tc: ToolCallInfo,
+        *,
+        submission_idx_offset: int,
+    ) -> tuple[DAGNode, ...] | None:
+        """Try to parse + expand a parallel_plan call. Return None on failure
+        so the caller can fall back to treating it as a sibling node."""
+        try:
+            parsed = parse_parallel_plan_input(tc.input)
+        except ParallelPlanValidationError as exc:
+            logger.warning(
+                "parallel_plan input invalid (%s); falling back to sibling node",
+                exc,
+            )
+            return None
+        plan_dag = build_turn_dag_from_parallel_plan(
+            parsed, submission_index_offset=submission_idx_offset
+        )
+        return tuple(plan_dag.nodes_in_topological_order())
+
+    def _aggregate_results_to_user_blocks(
+        self,
+        dag_ctx: _TurnDAGContext,
+        envelopes_by_id: dict[str, _ToolEnvelopeV2],
+    ) -> list[ContentBlock]:
+        """Build the next user turn's content blocks — exactly one
+        tool_result per SDK tool_use_id, in submission order.
+
+        Plan-expanded nodes (whose origin maps to the plan's SDK tool_use_id)
+        are aggregated into a single tool_result block keyed by that id.
+        Each plan node's per-node result is included in the aggregation
+        prefixed with its node id and tool name, so the model can correlate.
+
+        Sibling nodes (origin == self) emit their own tool_result block
+        directly.
+        """
+        # Group nodes by originating SDK tool_use_id, preserving submission order.
+        nodes_by_origin: dict[str, list[DAGNode]] = {}
+        for node in sorted(dag_ctx.dag, key=lambda n: n.submission_index):
+            origin = dag_ctx.node_origins[node.id]
+            nodes_by_origin.setdefault(origin, []).append(node)
+
+        blocks: list[ContentBlock] = []
+        for sdk_tu_id in dag_ctx.sdk_tool_use_ids:
+            nodes = nodes_by_origin.get(sdk_tu_id, [])
+            if not nodes:
+                # No node landed for this tool_use — synthesize a missing-result
+                # error so the SDK contract isn't violated.
+                blocks.append(
+                    ContentBlock(
+                        kind="tool_result",
+                        tool_use_id=sdk_tu_id,
+                        text="(no result)",
+                        is_error=True,
+                    )
+                )
+                continue
+
+            if len(nodes) == 1:
+                # Sibling or single-node plan — pass through.
+                env = envelopes_by_id.get(nodes[0].id)
+                if env is None:
+                    blocks.append(
+                        ContentBlock(
+                            kind="tool_result",
+                            tool_use_id=sdk_tu_id,
+                            text="(no result)",
+                            is_error=True,
+                        )
+                    )
+                else:
+                    blocks.append(
+                        ContentBlock(
+                            kind="tool_result",
+                            tool_use_id=sdk_tu_id,
+                            text=_envelope_to_text(env),
+                            is_error=env.is_error,
+                        )
+                    )
+                continue
+
+            # Multi-node plan — aggregate into one tool_result block.
+            parts: list[str] = []
+            any_error = False
+            for n in nodes:
+                env = envelopes_by_id.get(n.id)
+                if env is None:
+                    parts.append(f"[{n.id}] (no result)")
+                    any_error = True
+                    continue
+                if env.is_error:
+                    any_error = True
+                parts.append(f"[{n.id} {n.tool_name}] {_envelope_to_text(env)}")
+            blocks.append(
+                ContentBlock(
+                    kind="tool_result",
+                    tool_use_id=sdk_tu_id,
+                    text="\n".join(parts),
+                    is_error=any_error,
+                )
+            )
+
+        return blocks
 
     async def _dispatch_node(self, node: DAGNode) -> _ToolEnvelopeV2:
         """Look up the tool, invoke it, wrap the result in a v2 envelope.
@@ -504,6 +701,24 @@ class _ToolEnvelopeV2:
     is_error: bool = False
     is_cancelled: bool = False
     latency_ms: int = 0
+
+
+@dataclass(frozen=True)
+class _TurnDAGContext:
+    """Bundle returned by :meth:`AgentLoopV2._build_dag`.
+
+    Carries the merged DAG plus the side-tables the executor needs to
+    correlate node results back to SDK tool_uses for the next user turn.
+    """
+
+    dag: TurnDAG
+    # node.id -> originating SDK tool_use_id. Plan-expanded nodes map to
+    # the parent plan's SDK id; sibling nodes map to themselves.
+    node_origins: dict[str, str]
+    # Original SDK tool_use_ids in the order the model emitted them. The
+    # next user turn must contain exactly one tool_result per id, in
+    # this order, with the matching ids — SDK contract.
+    sdk_tool_use_ids: tuple[str, ...]
 
 
 def _envelope_to_text(env: _ToolEnvelopeV2) -> str:
