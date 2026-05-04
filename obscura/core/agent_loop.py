@@ -550,8 +550,13 @@ class TurnMetrics:
 # ---------------------------------------------------------------------------
 
 
-class ErrorCategory(enum.Enum):
-    """Classification of errors for retry / fallback decisions."""
+class ErrorCategory(enum.StrEnum):
+    """Classification of errors for retry / fallback decisions.
+
+    Backward-compat shim. The unified registry lives at
+    `obscura.core.enums.error.ErrorCategory`; values here are byte-identical
+    so wire format and identity-within-this-enum checks keep working.
+    """
 
     TRANSIENT = "transient"
     MODEL_ERROR = "model_error"

@@ -5,8 +5,13 @@ from __future__ import annotations
 import enum
 
 
-class ErrorCategory(enum.Enum):
-    """Broad category for Kairos errors (for metrics/alerting)."""
+class ErrorCategory(enum.StrEnum):
+    """Broad category for Kairos errors (for metrics/alerting).
+
+    Backward-compat shim. The unified registry lives at
+    `obscura.core.enums.error.ErrorCategory`; values here are byte-identical
+    so wire format and identity-within-this-enum checks keep working.
+    """
 
     GOAL = "goal"
     PLAN = "plan"

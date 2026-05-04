@@ -10,8 +10,14 @@ import enum
 from typing import Any
 
 
-class ErrorCategory(enum.Enum):
-    """Broad error categories for supervisor decision-making."""
+class ErrorCategory(enum.StrEnum):
+    """Broad error categories for supervisor decision-making.
+
+    Backward-compat shim. The unified registry lives at
+    `obscura.core.enums.error.ErrorCategory`; values here are byte-identical
+    so wire format (persisted in `events.db` via `e.category.value`) and
+    identity-within-this-enum checks keep working.
+    """
 
     TOOL_TRANSIENT = "tool_transient"
     TOOL_PERMANENT = "tool_permanent"
