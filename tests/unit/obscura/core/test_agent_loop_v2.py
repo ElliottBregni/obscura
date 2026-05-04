@@ -234,6 +234,44 @@ class TestMultipleToolCallsNoEdges:
         assert result_ids == ["tu_1", "tu_2", "tu_3"]
         assert order == ["a", "b", "c"]
 
+    @pytest.mark.asyncio
+    async def test_empty_tool_use_ids_do_not_collide(self) -> None:
+        """Regression: a backend that emits multiple tool_calls with no
+        tool_use_id used to crash DAG validation with "Duplicate node id: ''".
+        Synthesized sibling ids prevent that collision while preserving the
+        empty SDK identity on the node itself.
+        """
+        order: list[str] = []
+
+        def make_handler(label: str):
+            def _h(**_kwargs: Any) -> str:
+                order.append(label)
+                return label
+
+            return _h
+
+        backend = _StubBackend(
+            [
+                _StubTurn(
+                    tool_uses=[
+                        {"id": "", "name": "a"},
+                        {"id": "", "name": "b"},
+                    ]
+                ),
+                _StubTurn(text="ok"),
+            ]
+        )
+        registry = _make_registry(
+            {"a": make_handler("a"), "b": make_handler("b")}
+        )
+        loop = AgentLoopV2(backend, registry)
+        events = [e async for e in loop.run("multi")]
+
+        by_kind = _events_by_kind(events)
+        # Both tools ran (no DAGValidationError on construction).
+        assert order == ["a", "b"]
+        assert len(by_kind[AgentEventKind.TOOL_CALL]) == 2
+
 
 class TestParallelPlanExpansion:
     @pytest.mark.asyncio

@@ -776,6 +776,19 @@ class AgentLoopV2:
         for tc in tool_calls:
             sdk_tool_use_ids.append(tc.tool_use_id)
 
+            # A backend that hands us a tool_call with no tool_use_id would
+            # otherwise crash DAG validation when two such calls share the
+            # same turn (both nodes would have id=""). Synthesize a unique
+            # node id while keeping tool_use_id="" on the node so downstream
+            # SDK-identity logic still sees the original (empty) value.
+            sibling_id = tc.tool_use_id or f"_sibling_{submission_idx}"
+            if not tc.tool_use_id:
+                logger.warning(
+                    "agent_loop_v2: tool_call %r missing tool_use_id; using synthesized id %r",
+                    tc.name,
+                    sibling_id,
+                )
+
             if tc.name == self._config.parallel_plan_tool_name:
                 expanded = self._expand_plan_or_fallback(
                     tc, submission_idx_offset=submission_idx
@@ -783,7 +796,7 @@ class AgentLoopV2:
                 if expanded is None:
                     # Fall back: treat invalid plan as a sibling node.
                     sibling = DAGNode(
-                        id=tc.tool_use_id,
+                        id=sibling_id,
                         tool_name=tc.name,
                         tool_input=dict(tc.input),
                         depends_on=(),
@@ -824,7 +837,7 @@ class AgentLoopV2:
                 plan_terminals.extend(f"{prefix}{tid}" for tid in terminals_unprefixed)
             else:
                 sibling = DAGNode(
-                    id=tc.tool_use_id,
+                    id=sibling_id,
                     tool_name=tc.name,
                     tool_input=dict(tc.input),
                     depends_on=(),
