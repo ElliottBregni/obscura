@@ -11,6 +11,23 @@ from starlette.testclient import TestClient
 from obscura.core.config import ObscuraConfig
 
 
+@pytest.fixture(autouse=True)
+def _enable_test_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register the test API key with the auth layer.
+
+    APIKeyAuthMiddleware loads keys from ``OBSCURA_API_KEYS`` at module
+    import via :func:`obscura.auth.rbac._load_api_keys`. Without this the
+    hashed-key lookup in ``user_from_api_key`` returns None, so every
+    request 401s before the webhook routes ever see it.
+    """
+    monkeypatch.setenv(
+        "OBSCURA_API_KEYS", "test-api-key:test-user:admin,agent:write"
+    )
+    from obscura.auth import rbac
+
+    rbac._load_api_keys()
+
+
 @pytest.fixture
 def app() -> Any:
     config = ObscuraConfig(otel_enabled=False)
