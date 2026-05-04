@@ -123,6 +123,10 @@ _TOOL_CTX_KNOWN_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _empty_str_int_dict() -> dict[str, int]:
+    return {}
+
+
 # Kwargs callers historically passed to ``loop.run()`` that are loop-level
 # concerns, NOT backend params. Stripped before forwarding kwargs to
 # ``backend.stream()`` so the backend doesn't receive callbacks / event
@@ -217,8 +221,10 @@ class AgentLoopV2Config:
 
     max_turns: int = 10
     max_concurrency: int = 8
-    per_tool_concurrency: dict[str, int] = field(default_factory=dict)
-    per_capability_concurrency: dict[str, int] = field(default_factory=dict)
+    per_tool_concurrency: dict[str, int] = field(default_factory=_empty_str_int_dict)
+    per_capability_concurrency: dict[str, int] = field(
+        default_factory=_empty_str_int_dict
+    )
     parallel_plan_tool_name: str = "parallel_plan"
 
     # When the model mixes a parallel_plan tool_use with regular tool_use
@@ -507,14 +513,15 @@ class AgentLoopV2:
                     tool_use_id = chunk.tool_use_id
                     name = partial_names.get(tool_use_id, chunk.tool_name)
                     raw = "".join(partial_inputs.get(tool_use_id, []))
-                    try:
-                        parsed_input = json.loads(raw) if raw else {}
-                    except json.JSONDecodeError:
-                        logger.warning(
-                            "agent_loop_v2: malformed tool_use input for %s — using empty dict",
-                            name,
-                        )
-                        parsed_input = {}
+                    parsed_input: dict[str, Any] = {}
+                    if raw:
+                        try:
+                            parsed_input = json.loads(raw)
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                "agent_loop_v2: malformed tool_use input for %s — using empty dict",
+                                name,
+                            )
                     tool_calls.append(
                         ToolCallInfo(
                             tool_use_id=tool_use_id,
@@ -874,7 +881,7 @@ class AgentLoopV2:
                     rebuilt.append(n)
             all_nodes = rebuilt
 
-        dag = TurnDAG(nodes=tuple(all_nodes))
+        dag = TurnDAG(nodes=list(all_nodes))
         return _TurnDAGContext(
             dag=dag,
             node_origins=node_origins,
