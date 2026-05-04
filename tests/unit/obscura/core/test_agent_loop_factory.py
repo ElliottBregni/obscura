@@ -53,8 +53,6 @@ class TestIsV2Enabled:
         self, value: str, caplog: pytest.LogCaptureFixture
     ) -> None:
         # Reset the dedup so the warning fires per call in the test.
-        from obscura.core.agent_loop_factory import _warned_v1_optout  # noqa: F401
-
         import obscura.core.agent_loop_factory as factory_mod
 
         factory_mod._warned_v1_optout = False
