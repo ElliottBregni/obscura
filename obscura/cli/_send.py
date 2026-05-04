@@ -34,11 +34,11 @@ from obscura.cli.widgets import detect_question_choices, present_detected_choice
 from obscura.core.compaction import should_auto_compact
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
 from obscura.core.session_utils import generate_session_title
 from obscura.core.types import (
     EFFORT_THINKING_BUDGETS,
-    AgentEventKind,
     EffortLevel,
     ToolCallInfo,
 )

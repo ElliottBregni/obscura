@@ -11,6 +11,7 @@ import re
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.agent_loop_factory import make_agent_loop
+from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
@@ -23,13 +24,9 @@ from obscura.core.models.content import (
 )
 from obscura.core.types import (
     AgentEvent,
-    Backend,
     BackendCapabilities,
-    ChunkKind,
-    HookPoint,
     Message,
     NativeHandle,
-    Role,
     SessionRef,
     StreamChunk,
     ToolChoice,

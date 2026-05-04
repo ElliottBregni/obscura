@@ -35,10 +35,10 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
+from obscura.core.enums.agent import HookPoint
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     HookContext,
-    HookPoint,
     Message,
     SessionRef,
     StreamChunk,

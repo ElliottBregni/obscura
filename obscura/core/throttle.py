@@ -43,11 +43,11 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     from obscura.core.auth import AuthConfig
+    from obscura.core.enums.agent import HookPoint
     from obscura.core.tools import ToolRegistry
     from obscura.core.types import (
         BackendCapabilities,
         BackendProtocol,
-        HookPoint,
         Message,
         NativeHandle,
         SessionRef,

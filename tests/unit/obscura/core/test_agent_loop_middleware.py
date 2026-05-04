@@ -21,11 +21,10 @@ from obscura.core.agent_loop_middleware import (
     tool_output_level,
 )
 from obscura.core.agent_loop_v2 import AgentLoopV2
+from obscura.core.enums.agent import AgentEventKind, ChunkKind
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    AgentEventKind,
     BackendCapabilities,
-    ChunkKind,
     Message,
     StreamChunk,
     ToolSpec,

@@ -20,6 +20,7 @@ from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.auth import AuthConfig, resolve_auth
 from obscura.core.circuit_breaker import CircuitBreakerRegistry, CircuitOpenError
 from obscura.core.context import load_session_messages
+from obscura.core.enums.agent import Backend, HookPoint, Role
 from obscura.core.enums.protocol import MCPTransport
 from obscura.core.llm_cache import LLMCache
 from obscura.core.paths import resolve_obscura_home
@@ -29,15 +30,12 @@ from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     AgentEvent,
-    Backend,
     BackendCapabilities,
     BackendProtocol,
     ConfirmationCapable,
     ContentBlock,
-    HookPoint,
     Message,
     NativeHandle,
-    Role,
     SessionRef,
     StreamChunk,
     ToolCallInfo,

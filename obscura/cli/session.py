@@ -92,6 +92,7 @@ from obscura.core.compaction import should_auto_compact
 from obscura.core.context import load_obscura_memory
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
+from obscura.core.enums.agent import AgentEventKind, Backend
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.paths import resolve_obscura_global_home, resolve_obscura_home
@@ -110,8 +111,6 @@ from obscura.core.tool_router import ToolRouter
 from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import (
     EFFORT_THINKING_BUDGETS,
-    AgentEventKind,
-    Backend,
     EffortLevel,
     SessionRef,
     ToolCallInfo,

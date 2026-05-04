@@ -17,17 +17,14 @@ import sys
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
+from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.sessions import SessionStore
 from obscura.core.models.content import TextBlock, ThinkingBlock, ToolUseBlock
 from obscura.core.types import (
-    Backend,
     BackendCapabilities,
-    ChunkKind,
     HookContext,
-    HookPoint,
     Message,
     NativeHandle,
-    Role,
     SessionRef,
     StreamChunk,
     StreamMetadata,
@@ -616,21 +613,13 @@ class CodexBackend(BackendToolHostMixin):
         )
 
         if thread_id:
-            resume = getattr(client, "thread_resume", None) or getattr(
-                client,
-                "resume_thread",
-                None,
-            )
+            resume = getattr(client, "resume_thread", None)
             if resume is not None:
                 return await self._maybe_await(resume(thread_id, **start_kwargs))
 
-        start = getattr(client, "thread_start", None) or getattr(
-            client,
-            "start_thread",
-            None,
-        )
+        start = getattr(client, "start_thread", None)
         if start is None:
-            msg = "Codex SDK client has no thread_start/start_thread method"
+            msg = "Codex SDK client has no start_thread method"
             raise RuntimeError(msg)
         thread = await self._maybe_await(start(**start_kwargs))
         tid = getattr(thread, "id", "") or ""
@@ -639,7 +628,7 @@ class CodexBackend(BackendToolHostMixin):
         return thread
 
     def _build_thread_start_kwargs(self) -> dict[str, Any]:
-        """Assemble kwargs for ``AsyncCodex.thread_start``."""
+        """Assemble kwargs for ``Codex.start_thread``."""
         kwargs: dict[str, Any] = {}
         if self._model:
             kwargs["model"] = self._model

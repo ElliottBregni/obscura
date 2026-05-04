@@ -16,11 +16,11 @@ from typing import Any
 import pytest
 
 from obscura.core.agent_loop_v2 import AgentLoopV2
+from obscura.core.enums.agent import ChunkKind
 from obscura.core.tool_context import current_tool_context
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
     BackendCapabilities,
-    ChunkKind,
     Message,
     StreamChunk,
     ToolSpec,

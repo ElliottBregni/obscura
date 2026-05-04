@@ -82,6 +82,7 @@ from obscura.core.dag import (
     Scheduler,
     TurnDAG,
 )
+from obscura.core.enums.agent import AgentEventKind, ChunkKind, Role
 from obscura.core.parallel_plan import (
     ParallelPlanValidationError,
     build_turn_dag_from_parallel_plan,
@@ -90,12 +91,9 @@ from obscura.core.parallel_plan import (
 from obscura.core.tool_context import ToolContext, bind_tool_context
 from obscura.core.types import (
     AgentEvent,
-    AgentEventKind,
     BackendProtocol,
-    ChunkKind,
     ContentBlock,
     Message,
-    Role,
     ToolCallInfo,
     ToolSpec,
 )
@@ -501,11 +499,26 @@ class AgentLoopV2:
                     partial_names[chunk.tool_use_id] = chunk.tool_name
                     partial_inputs[chunk.tool_use_id] = []
                 elif kind == ChunkKind.TOOL_USE_DELTA:
-                    if chunk.tool_use_id in partial_inputs:
-                        partial_inputs[chunk.tool_use_id].append(chunk.tool_input_delta)
+                    # Some backend bridges (Copilot SDK, older Claude paths)
+                    # only put tool_use_id on the START event. Fall back to
+                    # the single in-flight call when the chunk doesn't carry
+                    # one — Claude/Copilot stream blocks sequentially, never
+                    # interleaved, so "the in-flight one" is unambiguous.
+                    delta_tu_id = chunk.tool_use_id
+                    if not delta_tu_id and len(partial_inputs) == 1:
+                        delta_tu_id = next(iter(partial_inputs))
+                    if delta_tu_id in partial_inputs:
+                        partial_inputs[delta_tu_id].append(chunk.tool_input_delta)
                 elif kind == ChunkKind.TOOL_USE_END:
                     tool_use_id = chunk.tool_use_id
-                    name = partial_names.get(tool_use_id, chunk.tool_name)
+                    # Same fallback as DELTA: missing id on END means we
+                    # attribute it to the single in-flight call. If the END
+                    # arrives with no id and several calls in flight, give
+                    # up gracefully — name lookup falls through to whatever
+                    # the chunk itself carried.
+                    if not tool_use_id and len(partial_names) == 1:
+                        tool_use_id = next(iter(partial_names))
+                    name = partial_names.get(tool_use_id, "") or chunk.tool_name
                     raw = "".join(partial_inputs.get(tool_use_id, []))
                     try:
                         parsed_input = json.loads(raw) if raw else {}
@@ -515,6 +528,20 @@ class AgentLoopV2:
                             name,
                         )
                         parsed_input = {}
+                    # Drop the partial-tracking entries so the next pair of
+                    # START/DELTA/END is a clean slate. Otherwise a malformed
+                    # END leaves stale partial_names that the fallback lookup
+                    # would attribute to subsequent calls incorrectly.
+                    partial_names.pop(tool_use_id, None)
+                    partial_inputs.pop(tool_use_id, None)
+                    if not name:
+                        logger.warning(
+                            "agent_loop_v2: TOOL_USE_END with empty tool_name — "
+                            "tool_use_id=%r, partial_names=%r. Skipping.",
+                            tool_use_id,
+                            partial_names,
+                        )
+                        continue
                     tool_calls.append(
                         ToolCallInfo(
                             tool_use_id=tool_use_id,

@@ -28,18 +28,20 @@ from obscura.core.tool_context import (
     bind_tool_context,
     current_tool_context,
 )
+from obscura.core.enums.agent import (
+    AgentPhase,
+    Backend,
+    ChunkKind,
+    HookPoint,
+    Role,
+)
 from obscura.core.tools import ToolRegistry, tool
 from obscura.core.types import (
     AgentContext,
-    AgentPhase,
-    Backend,
     BackendProtocol,
-    ChunkKind,
     ContentBlock,
     HookContext,
-    HookPoint,
     Message,
-    Role,
     SessionRef,
     StreamChunk,
     ToolSpec,

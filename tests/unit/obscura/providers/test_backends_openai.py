@@ -11,14 +11,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from obscura.core.auth import AuthConfig
+from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    Backend,
-    ChunkKind,
     HookContext,
-    HookPoint,
     Message,
-    Role,
     SessionRef,
     StreamChunk,
     ToolSpec,

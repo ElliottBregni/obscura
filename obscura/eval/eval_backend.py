@@ -18,16 +18,13 @@ import shutil
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    Backend,
     BackendCapabilities,
-    ChunkKind,
     ContentBlock,
-    HookPoint,
     Message,
     NativeHandle,
-    Role,
     SessionRef,
     StreamChunk,
     StreamMetadata,

@@ -27,12 +27,11 @@ from typing import Any
 import pytest
 
 from obscura.core.agent_loop_v2 import AgentLoopV2, AgentLoopV2Config
+from obscura.core.enums.agent import AgentEventKind, ChunkKind
 from obscura.core.parallel_plan import make_parallel_plan_tool_spec
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    AgentEventKind,
     BackendCapabilities,
-    ChunkKind,
     Message,
     StreamChunk,
     ToolSpec,

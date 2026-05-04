@@ -16,6 +16,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.agent_loop_factory import make_agent_loop
+from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.sessions import SessionStore
 from obscura.core.tools import ToolRegistry
 from obscura.core.models.content import (
@@ -25,14 +26,10 @@ from obscura.core.models.content import (
 )
 from obscura.core.types import (
     AgentEvent,
-    Backend,
     BackendCapabilities,
-    ChunkKind,
     HookContext,
-    HookPoint,
     Message,
     NativeHandle,
-    Role,
     SessionRef,
     StreamChunk,
     StreamMetadata,

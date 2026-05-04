@@ -96,6 +96,7 @@ from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compiler.compiled import ToolRoutingConfig
 from obscura.core.context import load_obscura_memory
 from obscura.core.deep_log import dlog
+from obscura.core.enums.agent import AgentEventKind, Backend
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.event_store import SQLiteEventStore
 from obscura.core.hooks import HookRegistry
@@ -116,8 +117,6 @@ from obscura.core.system_prompts import (
 from obscura.core.tool_router import ToolRouter
 from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import (
-    AgentEventKind,
-    Backend,
     SessionRef,
     ToolChoice,
     ToolRouterCapable,

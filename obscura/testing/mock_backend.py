@@ -25,16 +25,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, override
 
+from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.tools import ToolRegistry
 from obscura.core.types import (
-    Backend,
     BackendCapabilities,
     BackendProtocol,
-    ChunkKind,
-    HookPoint,
     Message,
     NativeHandle,
-    Role,
     SessionRef,
     StreamChunk,
     ToolSpec,

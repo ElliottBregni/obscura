@@ -10,9 +10,8 @@ from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
 
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
+from obscura.core.enums.agent import Backend, ExecutionMode
 from obscura.core.types import (
-    Backend,
-    ExecutionMode,
     ProviderNativeRequest,
     SessionRef,
     UnifiedRequest,
