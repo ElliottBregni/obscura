@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import enum
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -62,6 +61,7 @@ from obscura.agent.interaction import (
     InteractionBus,
     UserResponse,
 )
+from obscura.core.enums.agent import APERMode
 from obscura.core.types import AgentContext, AgentEventKind, AgentPhase, HookPoint
 
 if TYPE_CHECKING:
@@ -73,24 +73,6 @@ __all__ = ["APERLoopAgent", "APERMode"]
 logger = logging.getLogger(__name__)
 
 HookCallback = Callable[[AgentContext], Awaitable[Any] | Any]
-
-
-# ---------------------------------------------------------------------------
-# APER mode enum
-# ---------------------------------------------------------------------------
-
-
-class APERMode(enum.Enum):
-    """Controls when the full APER cycle is used.
-
-    ``ALWAYS``   -- 4 phases every time (current behaviour).
-    ``AUTO``     -- complexity heuristic decides per-input.
-    ``DISABLED`` -- skip APER, run execute phase only (simple loop).
-    """
-
-    ALWAYS = "always"
-    AUTO = "auto"
-    DISABLED = "disabled"
 
 
 # ---------------------------------------------------------------------------

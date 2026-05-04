@@ -123,8 +123,9 @@ class ObscuraClient:
         # permission_mode_callback, plan_approval_callback.
         host_callbacks: dict[str, Any] | None = None,
     ) -> None:
-        if isinstance(backend, str):
-            backend = Backend(backend)
+        # ``Backend`` is now a ``StrEnum`` so ``Backend(...)`` accepts both
+        # bare wire strings and existing members idempotently.
+        backend = Backend(backend)
         self._backend_type = backend
         self._user = user
         self._tool_policy = (

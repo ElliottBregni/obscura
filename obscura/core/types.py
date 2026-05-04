@@ -3,6 +3,10 @@
 Provides the normalized message format, streaming chunk type, tool specification,
 session references, hook definitions, and the BackendProtocol that each backend
 must implement.
+
+Agent enums (`Backend`, `Role`, `ChunkKind`, `AgentPhase`, `HookPoint`,
+`AgentEventKind`, `ExecutionMode`) live in `obscura.core.enums.agent` and are
+re-exported from here for one release cycle so existing imports keep working.
 """
 
 from __future__ import annotations
@@ -17,8 +21,55 @@ from typing import (
     runtime_checkable,
 )
 
+from obscura.core.enums.agent import (
+    AgentEventKind,
+    AgentPhase,
+    Backend,
+    ChunkKind,
+    ExecutionMode,
+    HookPoint,
+    Role,
+)
+
 if TYPE_CHECKING:
     from obscura.core.tools import ToolRegistry
+
+
+__all__ = [
+    "AgentContext",
+    "AgentEvent",
+    "AgentEventKind",
+    "AgentHookConfig",
+    "AgentPhase",
+    "Backend",
+    "BackendCapabilities",
+    "BackendProtocol",
+    "ChunkKind",
+    "ConfirmationCapable",
+    "ContentBlock",
+    "EFFORT_THINKING_BUDGETS",
+    "EffortLevel",
+    "ExecutionMode",
+    "HookContext",
+    "HookPoint",
+    "Message",
+    "NativeHandle",
+    "ProviderNativeRequest",
+    "Role",
+    "SessionRef",
+    "StreamChunk",
+    "StreamMetadata",
+    "ToolCallContext",
+    "ToolCallEnvelope",
+    "ToolCallInfo",
+    "ToolChoice",
+    "ToolErrorType",
+    "ToolExecutionError",
+    "ToolResultEnvelope",
+    "ToolRouterCapable",
+    "ToolSpec",
+    "UnifiedRequest",
+]
 
 
 def _empty_str_any_dict() -> dict[str, Any]:
@@ -30,35 +81,8 @@ def _empty_any_list() -> list[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Backend enum
-# ---------------------------------------------------------------------------
-
-
-class Backend(enum.Enum):
-    """Supported LLM backends."""
-
-    COPILOT = "copilot"
-    CLAUDE = "claude"
-    LOCALLLM = "localllm"
-    OPENAI = "openai"
-    CODEX = "codex"
-    MOONSHOT = "moonshot"
-
-
-# ---------------------------------------------------------------------------
 # Execution mode and provider-native requests
 # ---------------------------------------------------------------------------
-
-
-class ExecutionMode(enum.Enum):
-    """How a request should be executed.
-
-    ``UNIFIED`` uses Obscura's normalized contract and event model.
-    ``NATIVE`` preserves provider semantics and metadata as-is.
-    """
-
-    UNIFIED = "unified"
-    NATIVE = "native"
 
 
 @dataclass(frozen=True)
@@ -92,15 +116,6 @@ class UnifiedRequest:
 # ---------------------------------------------------------------------------
 # Message types
 # ---------------------------------------------------------------------------
-
-
-class Role(enum.Enum):
-    """Normalized message roles."""
-
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
-    TOOL_RESULT = "tool_result"
 
 
 @dataclass(frozen=True)
@@ -143,25 +158,6 @@ class Message:
 # ---------------------------------------------------------------------------
 # Streaming types
 # ---------------------------------------------------------------------------
-
-
-class ChunkKind(enum.Enum):
-    """Normalized streaming event kinds.
-
-    All backends must emit the full lifecycle:
-    MESSAGE_START → TEXT_DELTA / THINKING_DELTA / TOOL_USE_START →
-    TOOL_USE_DELTA → TOOL_USE_END → TOOL_RESULT → DONE (with metadata).
-    """
-
-    MESSAGE_START = "message_start"
-    TEXT_DELTA = "text_delta"
-    THINKING_DELTA = "thinking_delta"
-    TOOL_USE_START = "tool_use_start"
-    TOOL_USE_DELTA = "tool_use_delta"
-    TOOL_USE_END = "tool_use_end"
-    TOOL_RESULT = "tool_result"
-    DONE = "done"
-    ERROR = "error"
 
 
 @dataclass(frozen=True)
@@ -332,24 +328,6 @@ class NativeHandle:
 # ---------------------------------------------------------------------------
 
 
-class HookPoint(enum.Enum):
-    """Lifecycle hook points common to both backends."""
-
-    PRE_TOOL_USE = "pre_tool_use"
-    POST_TOOL_USE = "post_tool_use"
-    USER_PROMPT_SUBMITTED = "user_prompt_submitted"
-    STOP = "stop"
-    # Agent-loop hooks (APER) — symmetric PRE/POST for every phase
-    PRE_ANALYZE = "pre_analyze"
-    POST_ANALYZE = "post_analyze"
-    PRE_PLAN = "pre_plan"
-    POST_PLAN = "post_plan"
-    PRE_EXECUTE = "pre_execute"
-    POST_EXECUTE = "post_execute"
-    PRE_RESPOND = "pre_respond"
-    POST_RESPOND = "post_respond"
-
-
 @dataclass(frozen=True)
 class HookContext:
     """Context passed to hook callbacks."""
@@ -365,15 +343,6 @@ class HookContext:
 # ---------------------------------------------------------------------------
 # Agent types (APER loop)
 # ---------------------------------------------------------------------------
-
-
-class AgentPhase(enum.Enum):
-    """Phases in the Analyze → Plan → Execute → Respond agent loop."""
-
-    ANALYZE = "analyze"
-    PLAN = "plan"
-    EXECUTE = "execute"
-    RESPOND = "respond"
 
 
 @dataclass
@@ -465,36 +434,6 @@ EFFORT_THINKING_BUDGETS: dict[EffortLevel, int] = {
 # ---------------------------------------------------------------------------
 # Agent loop event types
 # ---------------------------------------------------------------------------
-
-
-class AgentEventKind(enum.Enum):
-    """Events yielded by the agent loop."""
-
-    TEXT_DELTA = "text_delta"
-    THINKING_DELTA = "thinking_delta"
-    TOOL_CALL = "tool_call"
-    TOOL_RESULT = "tool_result"
-    CONFIRMATION_REQUEST = "confirmation_request"
-    TURN_COMPLETE = "turn_complete"
-    TURN_START = "turn_start"
-    AGENT_DONE = "agent_done"
-    STOP_CHECK = "stop_check"  # Fired when model wants to stop — hooks can prevent it
-    ERROR = "error"
-    SESSION_PAUSED = "session_paused"
-    USER_INPUT = "user_input"
-    CONTEXT_COMPACT = "context_compact"
-    AGENT_START = "agent_start"
-    AGENT_STOP = "agent_stop"
-    PREFLIGHT_PASS = "preflight_pass"
-    PREFLIGHT_FAIL = "preflight_fail"
-    TOOL_CALL_FAILURE = "tool_call_failure"
-    SUBAGENT_START = "subagent_start"
-    TASK_COMPLETED = "task_completed"
-    PLAN_APPROVAL_REQUEST = "plan_approval_request"
-    CORRECTION_INJECTED = "correction_injected"
-    """Fired when output_quality detected a hallucinated narration that
-    contradicted a recent successful tool call, and the agent loop
-    injected a corrective message into the next turn."""
 
 
 @dataclass
