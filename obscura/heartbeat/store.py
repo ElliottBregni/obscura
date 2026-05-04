@@ -13,7 +13,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, override
 
-from obscura.heartbeat.types import HealthRecord, HealthStatus, Heartbeat
+from obscura.core.enums.lifecycle import AgentHealthStatus
+from obscura.heartbeat.types import HealthRecord, Heartbeat
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -53,7 +54,7 @@ class HeartbeatStore(ABC):
         """List all health records."""
 
     @abstractmethod
-    async def update_computed_status(self, agent_id: str, status: HealthStatus) -> None:
+    async def update_computed_status(self, agent_id: str, status: AgentHealthStatus) -> None:
         """Update the computed health status for an agent."""
 
     @abstractmethod
@@ -151,7 +152,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         return list(self._records.values())
 
     @override
-    async def update_computed_status(self, agent_id: str, status: HealthStatus) -> None:
+    async def update_computed_status(self, agent_id: str, status: AgentHealthStatus) -> None:
         """Update the computed health status for an agent."""
         if agent_id in self._records:
             self._records[agent_id].computed_status = status
@@ -179,7 +180,7 @@ class InMemoryHeartbeatStore(HeartbeatStore):
         return [
             record
             for record in self._records.values()
-            if record.computed_status != HealthStatus.HEALTHY
+            if record.computed_status != AgentHealthStatus.HEALTHY
         ]
 
     # Internal helpers used by persistence layer / tests
@@ -236,7 +237,7 @@ class FileHeartbeatStore(HeartbeatStore):
                         last_updated=datetime.fromisoformat(
                             record_data["last_updated"],
                         ),
-                        computed_status=HealthStatus(
+                        computed_status=AgentHealthStatus(
                             record_data.get("computed_status", "unknown"),
                         ),
                         alert_count=record_data.get("alert_count", 0),
@@ -310,7 +311,7 @@ class FileHeartbeatStore(HeartbeatStore):
         return await self._memory_store.list_records()
 
     @override
-    async def update_computed_status(self, agent_id: str, status: HealthStatus) -> None:
+    async def update_computed_status(self, agent_id: str, status: AgentHealthStatus) -> None:
         await self._memory_store.update_computed_status(agent_id, status)
         await self._persist_to_disk()
 

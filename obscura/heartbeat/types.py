@@ -1,6 +1,6 @@
 """obscura.heartbeat.types — Core types for the heartbeat monitoring system.
 
-Defines HealthStatus, Heartbeat, HealthCheck and related data structures
+Defines AgentHealthStatus, Heartbeat, HealthCheck and related data structures
 used by the heartbeat monitoring infrastructure.
 """
 
@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.enums.lifecycle import AgentHealthStatus as HealthStatus
+from obscura.core.enums.lifecycle import AgentHealthStatus
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,7 +53,7 @@ class Heartbeat:
 
     agent_id: str
     timestamp: datetime
-    status: HealthStatus
+    status: AgentHealthStatus
     metrics: SystemMetrics = field(default_factory=SystemMetrics)
     message: str | None = None
     ttl: int = 30  # seconds
@@ -79,7 +79,7 @@ class Heartbeat:
         return cls(
             agent_id=data["agent_id"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
-            status=HealthStatus(data["status"]),
+            status=AgentHealthStatus(data["status"]),
             metrics=SystemMetrics.from_dict(data.get("metrics", {})),
             message=data.get("message"),
             ttl=data.get("ttl", 30),
@@ -94,7 +94,7 @@ class HealthCheck:
 
     Attributes:
         name: Unique identifier for this check
-        check_fn: Function that returns HealthStatus
+        check_fn: Function that returns AgentHealthStatus
         interval: How often to run this check (seconds)
         timeout: Maximum time to wait for check (seconds)
         description: Human-readable description
@@ -102,7 +102,7 @@ class HealthCheck:
     """
 
     name: str
-    check_fn: Callable[[], HealthStatus] = field(compare=False)
+    check_fn: Callable[[], AgentHealthStatus] = field(compare=False)
     interval: int = 30
     timeout: int = 10
     description: str = ""
@@ -117,7 +117,7 @@ class HealthRecord:
 
     agent_id: str
     last_heartbeat: Heartbeat | None = None
-    computed_status: HealthStatus = HealthStatus.UNKNOWN
+    computed_status: AgentHealthStatus = AgentHealthStatus.UNKNOWN
     expected_interval: int = 30  # seconds between heartbeats
     missed_count: int = 0
     registered_at: datetime = field(default_factory=datetime.now)
@@ -157,8 +157,8 @@ class Alert:
 
     alert_id: str
     agent_id: str
-    severity: HealthStatus
-    status: HealthStatus
+    severity: AgentHealthStatus
+    status: AgentHealthStatus
     message: str
     timestamp: datetime
     acknowledged: bool = False
@@ -187,13 +187,15 @@ class HealthStatusTransition:
 
     def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
-        self.transitions: list[tuple[datetime, HealthStatus, HealthStatus]] = []
-        self.current_status = HealthStatus.UNKNOWN
+        self.transitions: list[
+            tuple[datetime, AgentHealthStatus, AgentHealthStatus]
+        ] = []
+        self.current_status = AgentHealthStatus.UNKNOWN
 
     def record_transition(
         self,
-        from_status: HealthStatus,
-        to_status: HealthStatus,
+        from_status: AgentHealthStatus,
+        to_status: AgentHealthStatus,
     ) -> bool:
         """Record a status transition if it's actually a change."""
         if from_status != to_status:

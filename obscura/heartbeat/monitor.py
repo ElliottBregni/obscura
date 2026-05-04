@@ -13,11 +13,11 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from obscura.core.enums.lifecycle import AgentHealthStatus
 from obscura.heartbeat.alerts import AlertManager, get_default_alert_manager
 from obscura.heartbeat.store import HeartbeatStore, get_default_store
 from obscura.heartbeat.types import (
     HealthRecord,
-    HealthStatus,
     HealthStatusTransition,
     Heartbeat,
 )
@@ -79,7 +79,9 @@ class HeartbeatMonitor:
         self._running = False
         self._monitor_task: asyncio.Task[None] | None = None
         self._transitions: dict[str, HealthStatusTransition] = {}
-        self._callbacks: list[Callable[[str, HealthStatus, HealthStatus], None]] = []
+        self._callbacks: list[
+            Callable[[str, AgentHealthStatus, AgentHealthStatus], None]
+        ] = []
 
         # Track last check time for each agent
         self._last_check: dict[str, datetime] = {}
@@ -165,7 +167,7 @@ class HeartbeatMonitor:
         self,
         agent_id: str,
         record: HealthRecord,
-    ) -> HealthStatus:
+    ) -> AgentHealthStatus:
         """Compute the health status for an agent based on heartbeat timing.
 
         Status determination:
@@ -177,7 +179,7 @@ class HeartbeatMonitor:
         last_heartbeat = record.last_heartbeat
 
         if not last_heartbeat:
-            return HealthStatus.UNKNOWN
+            return AgentHealthStatus.UNKNOWN
 
         now = datetime.now()
         elapsed = (now - last_heartbeat.timestamp).total_seconds()
@@ -188,17 +190,17 @@ class HeartbeatMonitor:
         critical_time = expected_interval * self._critical_threshold
 
         if elapsed >= critical_time:
-            return HealthStatus.CRITICAL
+            return AgentHealthStatus.CRITICAL
         if elapsed >= warning_time:
-            return HealthStatus.WARNING
+            return AgentHealthStatus.WARNING
         # Use reported status if heartbeat is timely
         return last_heartbeat.status
 
     async def _handle_status_change(
         self,
         agent_id: str,
-        old_status: HealthStatus,
-        new_status: HealthStatus,
+        old_status: AgentHealthStatus,
+        new_status: AgentHealthStatus,
     ) -> None:
         """Handle a health status change."""
         logger.info(
@@ -239,17 +241,17 @@ class HeartbeatMonitor:
     def _generate_alert_message(
         self,
         agent_id: str,
-        old_status: HealthStatus,
-        new_status: HealthStatus,
+        old_status: AgentHealthStatus,
+        new_status: AgentHealthStatus,
         record: HealthRecord,
     ) -> str:
         """Generate an alert message for a status change."""
-        if new_status == HealthStatus.CRITICAL:
+        if new_status == AgentHealthStatus.CRITICAL:
             missed = record.missed_count
             return f"Agent {agent_id} is CRITICAL - {missed} heartbeats missed"
-        if new_status == HealthStatus.WARNING:
+        if new_status == AgentHealthStatus.WARNING:
             return f"Agent {agent_id} is WARNING - heartbeats delayed"
-        if new_status == HealthStatus.HEALTHY:
+        if new_status == AgentHealthStatus.HEALTHY:
             return f"Agent {agent_id} recovered to HEALTHY"
         return f"Agent {agent_id} status: {new_status.value}"
 
@@ -304,14 +306,14 @@ class HeartbeatMonitor:
 
         logger.debug(f"Recorded heartbeat from agent {agent_id}")
 
-    async def get_agent_health(self, agent_id: str) -> HealthStatus:
+    async def get_agent_health(self, agent_id: str) -> AgentHealthStatus:
         """Get the current health status of an agent.
 
         Returns UNKNOWN if agent is not registered.
         """
         record = await self._store.get_record(agent_id)
         if not record:
-            return HealthStatus.UNKNOWN
+            return AgentHealthStatus.UNKNOWN
 
         return await self._compute_health(agent_id, record)
 
@@ -361,7 +363,7 @@ class HeartbeatMonitor:
 
     def on_status_change(
         self,
-        callback: Callable[[str, HealthStatus, HealthStatus], None],
+        callback: Callable[[str, AgentHealthStatus, AgentHealthStatus], None],
     ) -> None:
         """Register a callback for status changes.
 
@@ -371,7 +373,7 @@ class HeartbeatMonitor:
 
     def remove_callback(
         self,
-        callback: Callable[[str, HealthStatus, HealthStatus], None],
+        callback: Callable[[str, AgentHealthStatus, AgentHealthStatus], None],
     ) -> bool:
         """Remove a status change callback."""
         if callback in self._callbacks:

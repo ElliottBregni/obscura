@@ -3,7 +3,7 @@
 This module provides:
 - HeartbeatMonitor: Service that tracks agent health
 - AgentHeartbeatClient: Client for agents to send heartbeats
-- HealthStatus, Heartbeat: Core types
+- AgentHealthStatus, Heartbeat: Core types
 - AlertManager: Alert management with webhook support
 - HeartbeatStore: Storage backends for heartbeat data
 
@@ -55,7 +55,6 @@ from obscura.heartbeat.types import (
     Alert,
     HealthCheck,
     HealthRecord,
-    HealthStatus,
     HealthStatusTransition,
     Heartbeat,
     SystemMetrics,
@@ -73,7 +72,6 @@ __all__ = [
     "HealthCheck",
     "HealthRecord",
     # Types
-    "HealthStatus",
     "HealthStatusTransition",
     "Heartbeat",
     "HeartbeatClientConfig",

@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from pydantic import BaseModel
 
-from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
+from obscura.core.enums.lifecycle import AgentHealthStatus
+from obscura.heartbeat.types import Heartbeat, SystemMetrics
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -98,8 +99,8 @@ class AgentHeartbeatClient:
         self._last_heartbeat_time: float | None = None
         self._consecutive_failures: int = 0
         self._connected: bool = False
-        self._status_callbacks: list[Callable[[HealthStatus], None]] = []
-        self._current_status: HealthStatus = HealthStatus.UNKNOWN
+        self._status_callbacks: list[Callable[[AgentHealthStatus], None]] = []
+        self._current_status: AgentHealthStatus = AgentHealthStatus.UNKNOWN
 
         # psutil availability
         self._psutil_available = False
@@ -289,11 +290,11 @@ class AgentHeartbeatClient:
 
         # Determine status based on connection state
         if self._consecutive_failures == 0:
-            status = HealthStatus.HEALTHY
+            status = AgentHealthStatus.HEALTHY
         elif self._consecutive_failures < 3:
-            status = HealthStatus.WARNING
+            status = AgentHealthStatus.WARNING
         else:
-            status = HealthStatus.CRITICAL
+            status = AgentHealthStatus.CRITICAL
 
         # Build message
         message = None
@@ -342,11 +343,15 @@ class AgentHeartbeatClient:
 
         return metrics
 
-    def on_status_change(self, callback: Callable[[HealthStatus], None]) -> None:
+    def on_status_change(
+        self, callback: Callable[[AgentHealthStatus], None]
+    ) -> None:
         """Register a callback for status changes."""
         self._status_callbacks.append(callback)
 
-    def remove_callback(self, callback: Callable[[HealthStatus], None]) -> bool:
+    def remove_callback(
+        self, callback: Callable[[AgentHealthStatus], None]
+    ) -> bool:
         """Remove a status change callback."""
         if callback in self._status_callbacks:
             self._status_callbacks.remove(callback)
@@ -355,7 +360,7 @@ class AgentHeartbeatClient:
 
     async def send_status_update(
         self,
-        status: HealthStatus,
+        status: AgentHealthStatus,
         message: str | None = None,
     ) -> bool:
         """Send an immediate status update (not waiting for next heartbeat).
@@ -394,13 +399,13 @@ class AgentHeartbeatClient:
             logger.warning(f"Failed to send status update: {e}")
             return False
 
-    async def check_health(self) -> HealthStatus:
+    async def check_health(self) -> AgentHealthStatus:
         """Check the health of the heartbeat service.
 
         Returns the last known status.
         """
         if not self._http_client:
-            return HealthStatus.UNKNOWN
+            return AgentHealthStatus.UNKNOWN
 
         url = f"{self.config.monitor_url}/api/v1/heartbeat/{self.config.agent_id}"
 
@@ -409,11 +414,11 @@ class AgentHeartbeatClient:
             if response.status_code == 200:
                 data = response.json()
                 status_str = data.get("status", "unknown")
-                return HealthStatus(status_str)
+                return AgentHealthStatus(status_str)
         except Exception as e:
             logger.debug(f"Health check failed: {e}")
 
-        return HealthStatus.UNKNOWN
+        return AgentHealthStatus.UNKNOWN
 
     def get_stats(self) -> dict[str, Any]:
         """Get client statistics."""
