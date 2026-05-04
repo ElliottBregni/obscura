@@ -46,6 +46,47 @@ if TYPE_CHECKING:
     from obscura.core.tool_router import RoutingResult
 
 # ---------------------------------------------------------------------------
+# Copilot model defaults
+# ---------------------------------------------------------------------------
+
+# Default model when none is specified. The legacy ``gpt-5-mini`` was
+# deprecated in the Copilot CLI runtime; ``gpt-5.4-mini`` is its current
+# counterpart.
+_DEFAULT_COPILOT_MODEL = "gpt-5.4-mini"
+
+# Static fallback used when the live SDK query is unavailable. Kept aligned
+# with the Copilot CLI runtime model list — refresh when the runtime adds
+# or removes models. Display names use the ID; ``list_models()`` queries the
+# SDK for live metadata when possible.
+_FALLBACK_COPILOT_MODELS: tuple[tuple[str, bool], ...] = (
+    ("gpt-5.5", True),
+    ("gpt-5.4", True),
+    ("gpt-5.4-mini", True),
+    ("gpt-5.3-codex", False),
+    ("gpt-5.2", True),
+    ("gpt-5.2-codex", False),
+    ("claude-sonnet-4.5", True),
+    ("claude-opus-4.5", True),
+)
+
+
+def _normalize_copilot_model(model: str | None) -> str | None:
+    """Normalize a user-supplied model ID to the canonical Copilot form.
+
+    The Copilot CLI rejects display-style names like ``"GPT-5.3-Codex"``.
+    Canonical IDs are lowercase (``gpt-5.3-codex``).
+    """
+    if model is None:
+        return None
+    stripped = model.strip()
+    if not stripped:
+        return None
+    if stripped.startswith(("gpt", "claude", "o3", "o4", "GPT", "Claude")):
+        return stripped.lower()
+    return stripped
+
+
+# ---------------------------------------------------------------------------
 # Priority-aware tool truncation
 # ---------------------------------------------------------------------------
 
@@ -117,7 +158,7 @@ class CopilotBackend(BackendToolHostMixin):
         tool_policy: ToolPolicy | None = None,
     ) -> None:
         self._auth = auth
-        self._model = model or "gpt-5-mini"
+        self._model = _normalize_copilot_model(model) or _DEFAULT_COPILOT_MODEL
         self._system_prompt = system_prompt
         self._mcp_servers = mcp_servers or []
         self._streaming = streaming
@@ -232,9 +273,16 @@ class CopilotBackend(BackendToolHostMixin):
 
         await register_external_mcp_tools(self, self._mcp_servers)
 
-        client_config: SubprocessConfig | None = None
-        if self._auth.github_token:
-            client_config = SubprocessConfig(github_token=self._auth.github_token)
+        # ``--allow-all-tools`` is required by Copilot CLI 1.0.40+ in
+        # non-interactive (``--headless``) mode. Without it, the runtime
+        # short-circuits to ``user-not-available`` and rejects every tool
+        # call with "Permission denied and could not request permission
+        # from user" — the SDK's permission callback is never invoked.
+        cli_args = ["--allow-all-tools"]
+        client_config = SubprocessConfig(
+            cli_args=cli_args,
+            github_token=self._auth.github_token or None,
+        )
 
         self._client = CopilotClient(client_config)
         await self._client.start()
@@ -497,14 +545,20 @@ class CopilotBackend(BackendToolHostMixin):
         """Return the tool registry for agent loop use."""
         return self._tool_registry
 
-    def _build_tool_listing(self) -> str:
-        """Build a human-readable tool listing for the system prompt."""
+    def _build_tool_listing(self, tools: list[ToolSpec] | None = None) -> str:
+        """Build a human-readable tool listing for the system prompt.
+
+        ``tools`` should be the same filtered+routed list that is passed to
+        the SDK as ``config["tools"]``. Defaults to ``self._tools`` for
+        callers that don't have access to the routed list.
+        """
+        listed_tools = self._tools if tools is None else tools
         lines = ["## Available Tools", ""]
         lines.append(
             "You have the following tools. Use these EXACT names when calling tools:",
         )
         lines.append("")
-        for spec in self._tools:
+        for spec in listed_tools:
             desc = (spec.description or "").split("\n")[0][:120]
             cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
             lines.append(f"- `{self._sanitize_tool_name(spec.name)}`{cap_tag}: {desc}")
@@ -513,7 +567,7 @@ class CopilotBackend(BackendToolHostMixin):
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
-            cap_section = build_capability_map_section(self._tools)
+            cap_section = build_capability_map_section(listed_tools)
             if cap_section:
                 lines.append("")
                 lines.append(cap_section)
@@ -560,28 +614,51 @@ class CopilotBackend(BackendToolHostMixin):
     # -- Provider Registry (model discovery) ---------------------------------
 
     async def list_models(self) -> list[RegistryModelInfo]:
-        """List models available from Copilot (hybrid approach)."""
-        # Use fallback only for now TODO: Verify we can pull model info from.. somewhere
+        """List models available from Copilot.
+
+        Queries the live SDK (which talks to the Copilot CLI runtime) when a
+        client is available; falls back to a curated static list otherwise.
+        """
+        if self._client is not None:
+            try:
+                sdk_models = await self._client.list_models()
+            except Exception:
+                self._log.debug("copilot list_models: SDK call failed", exc_info=True)
+            else:
+                return [
+                    RegistryModelInfo(
+                        id=m.id,
+                        name=m.name,
+                        provider="copilot",
+                        supports_tools=True,
+                        supports_vision=bool(
+                            getattr(getattr(m, "capabilities", None), "supports", None)
+                            and m.capabilities.supports.vision
+                        ),
+                    )
+                    for m in sdk_models
+                ]
         return self._get_fallback_models()
 
     def get_default_model(self) -> str:
         """Return the default model for this provider."""
-        return "gpt-5-mini"
+        return _DEFAULT_COPILOT_MODEL
 
     def validate_model(self, model_id: str) -> bool:
         """Check if a model ID is valid for Copilot."""
         return True  # Copilot validates internally
 
     def _get_fallback_models(self) -> list[RegistryModelInfo]:
-        """Fallback list when copilot_models package unavailable."""
+        """Static fallback list used when the live SDK query is unavailable."""
         return [
             RegistryModelInfo(
-                id="gpt-5-mini",
-                name="gpt-5-mini",
+                id=mid,
+                name=mid,
                 provider="copilot",
                 supports_tools=True,
-                supports_vision=True,
-            ),
+                supports_vision=vision,
+            )
+            for mid, vision in _FALLBACK_COPILOT_MODELS
         ]
 
     def _ensure_client(self) -> None:
@@ -673,8 +750,15 @@ class CopilotBackend(BackendToolHostMixin):
             request: PermissionRequest,
             _context: dict[str, str],
         ) -> PermissionRequestResult:
+            # NOTE: must be ``"approve-once"`` (the only single-call approval
+            # kind in PermissionRequestResultKind). The literal ``"approved"``
+            # is *not* a valid value — passing it raises ValueError inside
+            # the SDK's enum cast, which the SDK's except-block silently
+            # rewrites to USER_NOT_AVAILABLE on the wire, causing every tool
+            # call to fail with "Permission denied and could not request
+            # permission from user".
             return PermissionRequestResult(
-                kind=cast("PermissionRequestResultKind", "approved")
+                kind=cast("PermissionRequestResultKind", "approve-once")
             )
 
         config["on_permission_request"] = _approve_all
@@ -685,18 +769,7 @@ class CopilotBackend(BackendToolHostMixin):
 
         if self._model:
             config["model"] = self._model
-        prompt = self._system_prompt or ""
-        if self._tools:
-            prompt = (
-                f"{prompt}\n\n{self._build_tool_listing()}"
-                if prompt
-                else self._build_tool_listing()
-            )
-        if prompt:
-            config["system_message"] = {
-                "mode": "append",
-                "content": prompt,
-            }
+        base_prompt = self._system_prompt or ""
         if self._streaming:
             config["streaming"] = True
         if self._mcp_servers:
@@ -706,13 +779,17 @@ class CopilotBackend(BackendToolHostMixin):
                 name = srv.get("name", f"mcp-{len(mcp_dict)}")
                 mcp_dict[name] = {k: v for k, v in srv.items() if k != "name"}
             config["mcp_servers"] = mcp_dict
+
+        prompt = base_prompt
         if self._tools:
             # Filter tools first via policy
             filtered = self._tool_policy.filter_tools(self._tools)
 
             # Apply eval-driven tool routing if a router is configured.
+            # Routes against the base system prompt (without the tool listing)
+            # to avoid the listing influencing its own selection.
             if self._tool_router is not None:
-                result: RoutingResult = self._tool_router.select(prompt, filtered)
+                result: RoutingResult = self._tool_router.select(base_prompt, filtered)
                 filtered = result.tools
                 if result.dropped_count > 0:
                     _log.info(
@@ -735,6 +812,12 @@ class CopilotBackend(BackendToolHostMixin):
                 )
                 filtered = _priority_truncate(filtered, _MAX_COPILOT_TOOLS)
 
+            # Build the system-prompt tool listing from the SAME list that
+            # gets sent to the SDK, so the model is never told about tools
+            # it cannot actually call.
+            listing = self._build_tool_listing(filtered)
+            prompt = f"{base_prompt}\n\n{listing}" if base_prompt else listing
+
             _log.debug(
                 "Building session with %d tools (system prompt %d chars)",
                 len(filtered),
@@ -747,6 +830,12 @@ class CopilotBackend(BackendToolHostMixin):
                 config["available_tools"] = [
                     self._sanitize_tool_name(t.name) for t in filtered
                 ]
+
+        if prompt:
+            config["system_message"] = {
+                "mode": "append",
+                "content": prompt,
+            }
 
         # Apply hook mappings
         hooks = self.build_hooks_config()
