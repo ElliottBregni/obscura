@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.arbiter.notify import fire_task_complete
 from obscura.core.background_tasks import get_background_task_manager
+from obscura.core.enums.lifecycle import TaskQueueStatus
+from obscura.core.models.lifecycle import TaskRecord
 from obscura.core.task_queue import TaskQueue, _open  # noqa: PLC2701  # pyright: ignore[reportPrivateUsage]
 from obscura.core.tools import tool
 from obscura.kairos.goals import GoalBoard
@@ -203,8 +205,8 @@ async def task_get(task_id: str) -> str:
 async def task_list(status: str = "", goal_id: str = "") -> str:
     db = _get_db()
     try:
-        where_clauses = ["status != 'deleted'"]
-        params: list[Any] = []
+        where_clauses = ["status != ?"]
+        params: list[Any] = [TaskQueueStatus.DELETED.value]
         if status:
             where_clauses.append("status = ?")
             params.append(status)
@@ -283,12 +285,12 @@ async def task_update(
         if row is None:
             return _json_error("task_not_found", task_id=task_id)
 
-        current = _row_to_dict(row)
+        current = TaskRecord.from_row(row)
         updated_fields: list[str] = []
         now = time.time()
 
-        if status and status != current["status"]:
-            if status == "deleted":
+        if status and status != current.status.value:
+            if status == TaskQueueStatus.DELETED.value:
                 db.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
                 db.commit()
                 return json.dumps({"ok": True, "task_id": task_id, "deleted": True})
@@ -298,7 +300,7 @@ async def task_update(
             )
             updated_fields.append("status")
 
-        if subject and subject != current["subject"]:
+        if subject and subject != current.subject:
             db.execute(
                 "UPDATE tasks SET subject = ?, updated_at = ? WHERE task_id = ?",
                 (subject, now, task_id),
@@ -348,7 +350,7 @@ async def task_update(
             updated_fields.append("error")
 
         if add_blocks:
-            blocks = current["blocks"]
+            blocks = list(current.blocks)
             blocks.extend(b for b in add_blocks if b not in blocks)
             db.execute(
                 "UPDATE tasks SET blocks = ?, updated_at = ? WHERE task_id = ?",
@@ -357,7 +359,7 @@ async def task_update(
             updated_fields.append("blocks")
 
         if add_blocked_by:
-            blocked_by = current["blocked_by"]
+            blocked_by = list(current.blocked_by)
             blocked_by.extend(b for b in add_blocked_by if b not in blocked_by)
             db.execute(
                 "UPDATE tasks SET blocked_by = ?, updated_at = ? WHERE task_id = ?",
@@ -366,7 +368,7 @@ async def task_update(
             updated_fields.append("blocked_by")
 
         if metadata:
-            merged = current["metadata"]
+            merged = dict(current.metadata)
             merged.update(metadata)
             db.execute(
                 "UPDATE tasks SET metadata = ?, updated_at = ? WHERE task_id = ?",
@@ -379,7 +381,7 @@ async def task_update(
         db.close()
 
     # Auto-sync goal progress when a task is marked completed via task_update.
-    if status == "completed" and "status" in updated_fields:
+    if status == TaskQueueStatus.COMPLETED.value and "status" in updated_fields:
         _sync_goal_progress(task_id)
 
     return json.dumps(
