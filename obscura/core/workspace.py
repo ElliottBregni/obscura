@@ -22,6 +22,7 @@ import os
 import shutil
 import stat
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -370,12 +371,12 @@ def ensure_workspace(cwd: Path | None = None) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
+def _deep_merge(base: dict[str, Any], override: Mapping[str, Any]) -> None:
     """Recursively merge *override* into *base* (mutates *base*)."""
     for key, value in override.items():
         existing = base.get(key)
-        if isinstance(existing, dict) and isinstance(value, dict):
-            _deep_merge(cast(dict[str, Any], existing), cast(dict[str, Any], value))
+        if isinstance(existing, dict) and isinstance(value, Mapping):
+            _deep_merge(cast(dict[str, Any], existing), cast(Mapping[str, Any], value))
         else:
             base[key] = value
 

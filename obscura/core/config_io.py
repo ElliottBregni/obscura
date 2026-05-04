@@ -3,6 +3,16 @@
 Provides helpers to load config files in TOML (preferred) or YAML (deprecated),
 and to write TOML files.  All other modules should use these helpers instead of
 importing ``tomllib`` or ``yaml`` directly for config loading.
+
+The functions in this module return ``dict[str, Any]`` deliberately:
+they are the *parser tier* and do not know which schema applies to the
+file being read.  Callers should immediately validate the loaded dict
+against the appropriate ``BoundaryModel`` from
+``obscura.core.models`` (``WorkspaceConfig``, ``AgentConfig``,
+``MCPServerSpec``, ``PluginManifest``, ``ExternalMigrationMarker`` …)
+so unknown keys are tolerated for forward-compat and shape errors fail
+fast at the seam.  See ``obscura/core/workspace.py::load_workspace_config``
+for the canonical call pattern.
 """
 
 from __future__ import annotations
