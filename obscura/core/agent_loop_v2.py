@@ -522,6 +522,45 @@ class AgentLoopV2:
                             input=parsed_input,
                         )
                     )
+                elif kind == ChunkKind.TASK_STARTED:
+                    yield AgentEvent(
+                        kind=AgentEventKind.TASK_STARTED,
+                        turn=turn,
+                        text=chunk.text,
+                        tool_use_id=chunk.tool_use_id,
+                        raw=getattr(chunk, "raw", None),
+                    )
+                elif kind == ChunkKind.TASK_PROGRESS:
+                    yield AgentEvent(
+                        kind=AgentEventKind.TASK_PROGRESS,
+                        turn=turn,
+                        text=chunk.text,
+                        tool_name=chunk.tool_name,
+                        tool_use_id=chunk.tool_use_id,
+                        raw=getattr(chunk, "raw", None),
+                    )
+                elif kind == ChunkKind.TASK_NOTIFICATION:
+                    yield AgentEvent(
+                        kind=AgentEventKind.TASK_NOTIFICATION,
+                        turn=turn,
+                        text=chunk.text,
+                        tool_use_id=chunk.tool_use_id,
+                        raw=getattr(chunk, "raw", None),
+                    )
+                elif kind == ChunkKind.RATE_LIMIT:
+                    yield AgentEvent(
+                        kind=AgentEventKind.RATE_LIMIT_WARNING,
+                        turn=turn,
+                        text=chunk.text,
+                        raw=getattr(chunk, "raw", None),
+                    )
+                elif kind == ChunkKind.MIRROR_ERROR:
+                    yield AgentEvent(
+                        kind=AgentEventKind.MIRROR_ERROR,
+                        turn=turn,
+                        text=chunk.text,
+                        raw=getattr(chunk, "raw", None),
+                    )
                 # ChunkKind.DONE / TOOL_RESULT (echoes from backend): ignore.
                 # We compute our own DONE/TOOL_RESULT from local state.
 

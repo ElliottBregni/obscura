@@ -297,7 +297,55 @@ class ClaudeIteratorAdapter:
         if type_name == "AssistantMessage":
             return self._adapt_content_blocks(item)
 
-        # SystemMessage → skip (internal)
+        # SystemMessage subclasses (TaskStartedMessage / TaskProgressMessage /
+        # TaskNotificationMessage / MirrorErrorMessage) — surface as
+        # structured chunks so the renderer can render a consistent system
+        # notice instead of dropping them. Match by class name to avoid a
+        # hard import dep on the SDK class hierarchy (which evolves between
+        # releases).
+        if type_name == "TaskStartedMessage":
+            return [
+                StreamChunk(
+                    kind=ChunkKind.TASK_STARTED,
+                    text=getattr(item, "description", "") or "",
+                    tool_use_id=getattr(item, "task_id", "") or "",
+                    raw=item,
+                    native_event=item,
+                ),
+            ]
+        if type_name == "TaskProgressMessage":
+            return [
+                StreamChunk(
+                    kind=ChunkKind.TASK_PROGRESS,
+                    text=getattr(item, "description", "") or "",
+                    tool_name=getattr(item, "last_tool_name", "") or "",
+                    tool_use_id=getattr(item, "task_id", "") or "",
+                    raw=item,
+                    native_event=item,
+                ),
+            ]
+        if type_name == "TaskNotificationMessage":
+            return [
+                StreamChunk(
+                    kind=ChunkKind.TASK_NOTIFICATION,
+                    text=getattr(item, "summary", "") or "",
+                    tool_use_id=getattr(item, "task_id", "") or "",
+                    raw=item,
+                    native_event=item,
+                ),
+            ]
+        if type_name == "MirrorErrorMessage":
+            return [
+                StreamChunk(
+                    kind=ChunkKind.MIRROR_ERROR,
+                    text=getattr(item, "error", "") or "",
+                    raw=item,
+                    native_event=item,
+                ),
+            ]
+
+        # SystemMessage (base class) → skip (internal). Subclasses handled
+        # above; this only catches plain SystemMessage instances.
         if type_name == "SystemMessage":
             return []
 
@@ -310,9 +358,10 @@ class ClaudeIteratorAdapter:
         # dumping repr() into the chat.
         if type_name == "RateLimitEvent":
             info = getattr(item, "rate_limit_info", None)
+            status = getattr(info, "status", None)
             logger.info(
                 "claude rate-limit: status=%s type=%s utilization=%s resets_at=%s",
-                getattr(info, "status", None),
+                status,
                 getattr(info, "rate_limit_type", None),
                 getattr(info, "utilization", None),
                 getattr(info, "resets_at", None),
@@ -320,6 +369,7 @@ class ClaudeIteratorAdapter:
             return [
                 StreamChunk(
                     kind=ChunkKind.RATE_LIMIT,
+                    text=str(status) if status else "",
                     raw=item,
                     native_event=item,
                 ),

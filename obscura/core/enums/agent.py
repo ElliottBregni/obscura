@@ -86,6 +86,14 @@ class ChunkKind(StrEnum):
 
     RATE_LIMIT = "rate_limit"
 
+    TASK_STARTED = "task_started"
+
+    TASK_PROGRESS = "task_progress"
+
+    TASK_NOTIFICATION = "task_notification"
+
+    MIRROR_ERROR = "mirror_error"
+
 
 class HookPoint(StrEnum):
     """Lifecycle hook points common to both backends."""
@@ -170,6 +178,16 @@ class AgentEventKind(StrEnum):
     PLAN_APPROVAL_REQUEST = "plan_approval_request"
 
     CORRECTION_INJECTED = "correction_injected"
+
+    TASK_STARTED = "task_started"
+
+    TASK_PROGRESS = "task_progress"
+
+    TASK_NOTIFICATION = "task_notification"
+
+    RATE_LIMIT_WARNING = "rate_limit_warning"
+
+    MIRROR_ERROR = "mirror_error"
 
 
 class APERMode(StrEnum):
