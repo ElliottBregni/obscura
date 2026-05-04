@@ -11,6 +11,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.lifecycle import KairosTaskStatus
 from obscura.core.kairos.errors import (
     BudgetExceededError,
@@ -28,6 +29,17 @@ if TYPE_CHECKING:
     from obscura.core.kairos.goal_store import GoalStore
 
 logger = logging.getLogger(__name__)
+
+
+# Event kinds whose .text payload should accumulate into the task's output.
+# Only TEXT_DELTA — THINKING_DELTA is internal reasoning, not user-visible
+# output, and TOOL_CALL/TOOL_RESULT carry structured data, not assistant text.
+_TEXT_KINDS = frozenset({AgentEventKind.TEXT_DELTA})
+
+# Event kinds that mark the end of a turn for budget accounting. AGENT_DONE
+# fires once at the very end of the run and would over-count by one if
+# included; TURN_COMPLETE is the canonical per-turn boundary.
+_TURN_END_KINDS = frozenset({AgentEventKind.TURN_COMPLETE})
 
 
 class TaskRunner:
@@ -136,24 +148,10 @@ class TaskRunner:
                     session_id=f"kairos-{task.goal_id}-{task.task_id}",
                     max_turns=10,
                 ):
-                    event_kind = getattr(event, "kind", None)
-                    # Collect text output
-                    if event_kind is not None:
-                        kind_name = (
-                            event_kind.value
-                            if hasattr(event_kind, "value")
-                            else str(event_kind)
-                        )
-                        if "text" in kind_name.lower() or "delta" in kind_name.lower():
-                            text = getattr(event, "text", "")
-                            if text:
-                                output_chunks.append(text)
-                        if (
-                            "done" in kind_name.lower()
-                            or "complete" in kind_name.lower()
-                        ):
-                            turns_used += 1
-                    # Track usage
+                    if event.kind in _TEXT_KINDS and event.text:
+                        output_chunks.append(event.text)
+                    if event.kind in _TURN_END_KINDS:
+                        turns_used += 1
                     usage_data = getattr(event, "usage", None)
                     if usage_data:
                         tokens_used += getattr(usage_data, "total_tokens", 0)
