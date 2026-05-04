@@ -204,7 +204,7 @@ def tool_denylist(
 def hook_middleware(
     hooks: HookRegistry,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Fire ``pre_tool_use`` and ``post_tool_use`` hooks around dispatch.
+    """Fire pre/post tool-use hooks around dispatch.
 
     Mirrors v1's per-tool hook firing in ``_execute_single_tool``. Hooks
     that raise are logged and **swallowed** — a hook bug shouldn't break
@@ -216,9 +216,9 @@ def hook_middleware(
             node: DAGNode,
             resolved: dict[str, Any],
         ) -> list[ContentBlock]:
-            await _safe_run_hook(hooks, "pre_tool_use", node)
+            await _safe_run_hook(hooks, "before", node)
             result = await inner(node, resolved)
-            await _safe_run_hook(hooks, "post_tool_use", node, result)
+            await _safe_run_hook(hooks, "after", node)
             return result
 
         return wrapped
@@ -226,18 +226,33 @@ def hook_middleware(
     return wrap
 
 
-async def _safe_run_hook(hooks: HookRegistry, name: str, *args: Any) -> None:
-    """Invoke a hook by name, swallowing exceptions."""
-    runner = getattr(hooks, "run", None) or getattr(hooks, "fire", None)
-    if runner is None:
-        return
+async def _safe_run_hook(
+    hooks: HookRegistry, phase: str, node: DAGNode
+) -> None:
+    """Build a TOOL_CALL AgentEvent for *node* and dispatch it through the
+    registry's before/after pipeline. Per-hook exceptions are already
+    logged inside ``HookRegistry``; the outer try only catches registry-
+    level failures so a misconfigured registry can't break the loop.
+    """
+    from obscura.core.enums.agent import AgentEventKind
+    from obscura.core.types import AgentEvent
+
+    event = AgentEvent(
+        kind=AgentEventKind.TOOL_CALL,
+        tool_name=node.tool_name,
+        tool_input=node.tool_input,
+        tool_use_id=node.tool_use_id,
+    )
     try:
-        result = runner(name, *args)
-        if hasattr(result, "__await__"):
-            await result
+        if phase == "before":
+            await hooks.run_before(event)
+        else:
+            await hooks.run_after(event)
     except Exception:
         logger.exception(
-            "hook %r raised — swallowing (hooks must not break loop)", name
+            "%s hook dispatch failed for tool %r — swallowing",
+            phase,
+            node.tool_name,
         )
 
 
