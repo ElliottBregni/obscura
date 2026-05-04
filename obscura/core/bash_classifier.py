@@ -146,6 +146,5 @@ class BashClassifier:
 __all__ = [
     "BashClassification",
     "BashClassifier",
-    "BashRisk",
     "Classification",
 ]
