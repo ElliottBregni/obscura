@@ -23,8 +23,8 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from obscura.core.enums.lifecycle import HealthStatus as HealthStatus
-from obscura.core.models.lifecycle import HealthReport as HealthReport
+from obscura.core.enums.lifecycle import HealthStatus
+from obscura.core.models.lifecycle import HealthReport
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +157,5 @@ def collect_startup_health(
 __all__ = [
     "HealthCheck",
     "HealthReport",
-    "HealthStatus",
     "collect_startup_health",
 ]

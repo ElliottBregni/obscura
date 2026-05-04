@@ -9,8 +9,9 @@ import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from obscura.core.event_store import EventRecord, SessionRecord, SessionStatus
 from obscura.core.enums.agent import AgentEventKind
+from obscura.core.enums.lifecycle import SessionStatus
+from obscura.core.event_store import EventRecord, SessionRecord
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING, Any, override
 import httpx
 
 from obscura.agent.interaction import AttentionPriority
-from obscura.heartbeat.types import Alert, HealthRecord, HealthStatus
+from obscura.core.enums.lifecycle import AgentHealthStatus
+from obscura.heartbeat.types import Alert, HealthRecord
 from obscura.notifications.native import NativeNotifier
 
 if TYPE_CHECKING:
@@ -40,7 +41,7 @@ class AlertRule:
 
     name: str
     condition: Callable[..., Any] = field(compare=False)
-    severity: HealthStatus = HealthStatus.WARNING
+    severity: AgentHealthStatus = AgentHealthStatus.WARNING
     cooldown: int = 300  # 5 minutes
     channels: list[str] = field(default_factory=lambda: ["default"])
 
@@ -199,8 +200,8 @@ class SlackAlertChannel(AlertChannel):
         """Send alert to Slack webhook."""
         # Format message based on severity
         color = {
-            HealthStatus.WARNING: "warning",  # yellow
-            HealthStatus.CRITICAL: "danger",  # red
+            AgentHealthStatus.WARNING: "warning",  # yellow
+            AgentHealthStatus.CRITICAL: "danger",  # red
         }.get(alert.severity, "#808080")
 
         attachment: dict[str, Any] = {
@@ -265,7 +266,7 @@ class SlackAlertChannel(AlertChannel):
 class NativeNotificationChannel(AlertChannel):
     """Alert channel that fires macOS native notifications.
 
-    Maps :class:`HealthStatus` severity to :class:`AttentionPriority`
+    Maps :class:`AgentHealthStatus` severity to :class:`AttentionPriority`
     so that critical alerts become modal popups and warnings become
     banner notifications.
     """
@@ -278,10 +279,10 @@ class NativeNotificationChannel(AlertChannel):
     @override
     async def send(self, alert: Alert) -> bool:
         """Send a native macOS notification for the alert."""
-        priority_map: dict[HealthStatus, AttentionPriority] = {
-            HealthStatus.CRITICAL: AttentionPriority.CRITICAL,
-            HealthStatus.WARNING: AttentionPriority.HIGH,
-            HealthStatus.HEALTHY: AttentionPriority.NORMAL,
+        priority_map: dict[AgentHealthStatus, AttentionPriority] = {
+            AgentHealthStatus.CRITICAL: AttentionPriority.CRITICAL,
+            AgentHealthStatus.WARNING: AttentionPriority.HIGH,
+            AgentHealthStatus.HEALTHY: AttentionPriority.NORMAL,
         }
         priority = priority_map.get(alert.severity, AttentionPriority.NORMAL)
 
@@ -358,8 +359,8 @@ class AlertManager:
     def create_alert(
         self,
         agent_id: str,
-        severity: HealthStatus,
-        status: HealthStatus,
+        severity: AgentHealthStatus,
+        status: AgentHealthStatus,
         message: str,
     ) -> Alert:
         """Create a new alert."""
@@ -422,8 +423,8 @@ class AlertManager:
 
         # Always send to default channel if no rules matched but status is bad
         if not triggered and record.computed_status in (
-            HealthStatus.WARNING,
-            HealthStatus.CRITICAL,
+            AgentHealthStatus.WARNING,
+            AgentHealthStatus.CRITICAL,
         ):
             alert_message = (
                 message or f"Agent {agent_id} is {record.computed_status.value}"

@@ -2,29 +2,13 @@
 
 from __future__ import annotations
 
-import enum
-
-
-class ErrorCategory(enum.StrEnum):
-    """Broad category for Kairos errors (for metrics/alerting).
-
-    Backward-compat shim. The unified registry lives at
-    `obscura.core.enums.error.ErrorCategory`; values here are byte-identical
-    so wire format and identity-within-this-enum checks keep working.
-    """
-
-    GOAL = "goal"
-    PLAN = "plan"
-    TASK = "task"
-    INTERVENTION = "intervention"
-    BUDGET = "budget"
-    RUNTIME = "runtime"
+from obscura.core.enums.error import ErrorCategory
 
 
 class KairosError(Exception):
     """Base class for all Kairos errors."""
 
-    category: ErrorCategory = ErrorCategory.RUNTIME
+    category: ErrorCategory = ErrorCategory.KAIROS_RUNTIME
 
     def __init__(self, message: str, goal_id: str = "", task_id: str = "") -> None:
         super().__init__(message)
@@ -40,13 +24,13 @@ class KairosError(Exception):
 class GoalNotFoundError(KairosError):
     """Goal ID does not exist in the store."""
 
-    category = ErrorCategory.GOAL
+    category = ErrorCategory.KAIROS_GOAL
 
 
 class GoalStateError(KairosError):
     """Invalid goal state transition attempted."""
 
-    category = ErrorCategory.GOAL
+    category = ErrorCategory.KAIROS_GOAL
 
     def __init__(
         self, message: str, from_state: str = "", to_state: str = "", **kwargs: str
@@ -59,7 +43,7 @@ class GoalStateError(KairosError):
 class GoalAlreadyActiveError(KairosError):
     """Goal is already running — cannot start a second instance."""
 
-    category = ErrorCategory.GOAL
+    category = ErrorCategory.KAIROS_GOAL
 
 
 # ---------------------------------------------------------------------------
@@ -70,19 +54,19 @@ class GoalAlreadyActiveError(KairosError):
 class PlanningError(KairosError):
     """Failed to decompose a goal into a plan."""
 
-    category = ErrorCategory.PLAN
+    category = ErrorCategory.KAIROS_PLAN
 
 
 class PlanRevisionLimitError(KairosError):
     """Maximum plan revisions exceeded."""
 
-    category = ErrorCategory.PLAN
+    category = ErrorCategory.KAIROS_PLAN
 
 
 class EmptyPlanError(KairosError):
     """Planner returned zero tasks."""
 
-    category = ErrorCategory.PLAN
+    category = ErrorCategory.KAIROS_PLAN
 
 
 # ---------------------------------------------------------------------------
@@ -93,13 +77,13 @@ class EmptyPlanError(KairosError):
 class TaskNotFoundError(KairosError):
     """Task ID does not exist."""
 
-    category = ErrorCategory.TASK
+    category = ErrorCategory.KAIROS_TASK
 
 
 class TaskExecutionError(KairosError):
     """Task failed during execution."""
 
-    category = ErrorCategory.TASK
+    category = ErrorCategory.KAIROS_TASK
 
     def __init__(self, message: str, retryable: bool = True, **kwargs: str) -> None:
         super().__init__(message, **kwargs)
@@ -109,13 +93,13 @@ class TaskExecutionError(KairosError):
 class TaskRetryLimitError(KairosError):
     """Task exceeded its retry limit."""
 
-    category = ErrorCategory.TASK
+    category = ErrorCategory.KAIROS_TASK
 
 
 class TaskDependencyError(KairosError):
     """A task dependency failed, blocking execution."""
 
-    category = ErrorCategory.TASK
+    category = ErrorCategory.KAIROS_TASK
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +110,7 @@ class TaskDependencyError(KairosError):
 class InterventionRequiredError(KairosError):
     """Execution cannot proceed — human input required."""
 
-    category = ErrorCategory.INTERVENTION
+    category = ErrorCategory.KAIROS_INTERVENTION
 
     def __init__(
         self,
@@ -141,7 +125,7 @@ class InterventionRequiredError(KairosError):
 class InterventionNotFoundError(KairosError):
     """Intervention ID does not exist."""
 
-    category = ErrorCategory.INTERVENTION
+    category = ErrorCategory.KAIROS_INTERVENTION
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +136,7 @@ class InterventionNotFoundError(KairosError):
 class BudgetExceededError(KairosError):
     """Goal execution exceeded its budget."""
 
-    category = ErrorCategory.BUDGET
+    category = ErrorCategory.KAIROS_BUDGET
 
     def __init__(self, message: str, dimension: str = "", **kwargs: str) -> None:
         super().__init__(message, **kwargs)
@@ -167,10 +151,10 @@ class BudgetExceededError(KairosError):
 class KairosRuntimeError(KairosError):
     """Internal Kairos runtime error."""
 
-    category = ErrorCategory.RUNTIME
+    category = ErrorCategory.KAIROS_RUNTIME
 
 
 class CheckpointError(KairosError):
     """Failed to create or restore a checkpoint."""
 
-    category = ErrorCategory.RUNTIME
+    category = ErrorCategory.KAIROS_RUNTIME

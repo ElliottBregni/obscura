@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from obscura.core.enums.lifecycle import WorktreeStatus as WorktreeStatus
+from obscura.core.enums.lifecycle import WorktreeStatus
 from obscura.core.models.lifecycle import WorktreeEntry as WorktreeEntry
 
 logger = logging.getLogger(__name__)
@@ -230,7 +230,6 @@ def cleanup_orphan_dirs() -> int:
 
 __all__ = [
     "WorktreeEntry",
-    "WorktreeStatus",
     "add",
     "cleanup_orphan_dirs",
     "get",

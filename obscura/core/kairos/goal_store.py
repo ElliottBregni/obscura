@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from obscura.core.enums.lifecycle import GoalStatus, KairosTaskStatus, PlanStatus
 from obscura.core.kairos.errors import GoalNotFoundError, TaskNotFoundError
 from obscura.core.kairos.schema import init_kairos_schema
 from obscura.core.kairos.types import (
@@ -22,15 +23,12 @@ from obscura.core.kairos.types import (
     CheckpointKind,
     Goal,
     GoalBudget,
-    GoalStatus,
     Intervention,
     InterventionKind,
     KairosEvent,
     Plan,
-    PlanStatus,
     Task,
     TaskResult,
-    TaskStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -332,7 +330,7 @@ class GoalStore:
     def update_task_status(
         self,
         task_id: str,
-        status: TaskStatus,
+        status: KairosTaskStatus,
         *,
         retry_count: int | None = None,
         started_at: datetime | None = None,
@@ -415,7 +413,7 @@ class GoalStore:
             model=model,
             max_retries=max_retries,
             retry_count=retry_count,
-            status=TaskStatus(status_str),
+            status=KairosTaskStatus(status_str),
             metadata=json.loads(metadata_json),
             created_at=datetime.fromisoformat(created_at_str),
             started_at=_dt(started_at_str),

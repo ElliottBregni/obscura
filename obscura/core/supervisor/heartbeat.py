@@ -26,11 +26,11 @@ from obscura.core.supervisor.db_backend import (
     SQLiteSupervisorBackend,
     translate_sql,
 )
+from obscura.core.enums.lifecycle import SupervisorState
 from obscura.core.supervisor.types import (
     SessionHeartbeat,
     SupervisorEvent,
     SupervisorEventKind,
-    SupervisorState,
 )
 
 logger = logging.getLogger(__name__)

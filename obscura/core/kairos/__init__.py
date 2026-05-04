@@ -39,7 +39,6 @@ from obscura.core.kairos.errors import (
     BudgetExceededError,
     CheckpointError,
     EmptyPlanError,
-    ErrorCategory,
     GoalAlreadyActiveError,
     GoalNotFoundError,
     GoalStateError,
@@ -64,24 +63,20 @@ from obscura.core.kairos.schema import (
 )
 from obscura.core.kairos.task_runner import TaskRunner
 from obscura.core.kairos.types import (
-    VALID_GOAL_TRANSITIONS,
     BudgetUsage,
     Checkpoint,
     CheckpointKind,
     Goal,
     GoalBudget,
     GoalRunContext,
-    GoalStatus,
     Intervention,
     InterventionKind,
     KairosConfig,
     KairosEvent,
     KairosEventKind,
     Plan,
-    PlanStatus,
     Task,
     TaskResult,
-    TaskStatus,
 )
 
 __all__ = [
@@ -94,12 +89,9 @@ __all__ = [
     "BudgetUsage",
     # Domain types
     "Goal",
-    "GoalStatus",
     "GoalRunContext",
     "Plan",
-    "PlanStatus",
     "Task",
-    "TaskStatus",
     "TaskResult",
     "Checkpoint",
     "CheckpointKind",
@@ -108,8 +100,6 @@ __all__ = [
     # Events
     "KairosEvent",
     "KairosEventKind",
-    # State machine
-    "VALID_GOAL_TRANSITIONS",
     # Components (for advanced use)
     "GoalStore",
     "PlanEngine",
@@ -122,7 +112,6 @@ __all__ = [
     "BudgetExceededError",
     "CheckpointError",
     "EmptyPlanError",
-    "ErrorCategory",
     "GoalAlreadyActiveError",
     "GoalNotFoundError",
     "GoalStateError",

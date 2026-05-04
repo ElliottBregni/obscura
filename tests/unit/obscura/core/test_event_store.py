@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from obscura.core.enums.agent import AgentEventKind
+from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.event_store import (
     VALID_TRANSITIONS,
-    SessionStatus,
     SQLiteEventStore,
 )
 from obscura.core.types import AgentEvent

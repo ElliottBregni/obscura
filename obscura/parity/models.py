@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from obscura.core.enums.lifecycle import FeatureStatus as FeatureStatus
 from obscura.core.enums.agent import Backend
+from obscura.core.enums.lifecycle import FeatureStatus
 
 
 @dataclass(frozen=True)

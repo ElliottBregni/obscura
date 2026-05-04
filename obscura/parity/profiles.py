@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from obscura.core.enums.agent import Backend
-from obscura.parity.models import BackendParityProfile, FeatureStatus, FeatureSupport
+from obscura.core.enums.lifecycle import FeatureStatus
+from obscura.parity.models import BackendParityProfile, FeatureSupport
 
 PROFILES: tuple[BackendParityProfile, ...] = (
     BackendParityProfile(

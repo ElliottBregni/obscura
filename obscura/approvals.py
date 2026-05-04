@@ -15,7 +15,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from obscura.core.enums.lifecycle import ApprovalStatus as ApprovalStatus
+from obscura.core.enums.lifecycle import ApprovalStatus
 from obscura.core.models.lifecycle import ApprovalRecord
 
 logger = logging.getLogger(__name__)

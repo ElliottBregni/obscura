@@ -6,7 +6,8 @@ source of truth for session state.
 
 Usage::
 
-    from obscura.core.event_store import SQLiteEventStore, SessionStatus
+    from obscura.core.enums.lifecycle import SessionStatus
+    from obscura.core.event_store import SQLiteEventStore
 
     store = SQLiteEventStore("/tmp/events.db")
     await store.create_session("sess-1", agent="oncall", backend="claude", model="claude-sonnet-4-5-20250929")
@@ -28,9 +29,7 @@ from typing import Any, Protocol, runtime_checkable
 from obscura.core.enums.lifecycle import (
     SESSION_VALID_TRANSITIONS as VALID_TRANSITIONS,
 )
-from obscura.core.enums.lifecycle import (
-    SessionStatus as SessionStatus,
-)
+from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.models.lifecycle import SessionRecord as SessionRecord
 from obscura.core.session_utils import list_active_sessions
 from obscura.core.enums.agent import AgentEventKind

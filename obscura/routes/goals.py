@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field
 
 from obscura.auth.models import AuthenticatedUser
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
+from obscura.core.enums.lifecycle import GoalStatus
 from obscura.core.kairos import (
     Goal,
     GoalBudget,
     GoalNotFoundError,
-    GoalStatus,
     GoalStore,
 )
 from obscura.core.paths import resolve_obscura_home

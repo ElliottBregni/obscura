@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from obscura.core.enums.lifecycle import FeatureStatus
 from obscura.parity.features import feature_map
 from obscura.parity.models import (
     BackendConformance,
     BackendParityProfile,
     BackendParityScore,
-    FeatureStatus,
     ParityReport,
 )
 

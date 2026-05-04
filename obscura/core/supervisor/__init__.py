@@ -45,7 +45,6 @@ from obscura.core.supervisor.agent_templates import (
 )
 from obscura.core.supervisor.errors import (
     DriftDetectedError,
-    ErrorCategory,
     LockAcquisitionError,
     LockExpiredError,
     MemoryCommitError,
@@ -87,7 +86,6 @@ from obscura.core.supervisor.tool_snapshot import (
     ToolSnapshotStore,
 )
 from obscura.core.supervisor.types import (
-    VALID_SUPERVISOR_TRANSITIONS,
     LockInfo,
     MemoryCandidate,
     MemoryCommitResult,
@@ -99,19 +97,16 @@ from obscura.core.supervisor.types import (
     SupervisorEvent,
     SupervisorEventKind,
     SupervisorHookPoint,
-    SupervisorState,
 )
 
 __all__ = [
     "REQUIRED_TABLES",
     "SECTION_ORDER",
-    "VALID_SUPERVISOR_TRANSITIONS",
     # Agent templates
     "AgentTemplate",
     "AgentTemplateStore",
     "AgentVersion",
     "DriftDetectedError",
-    "ErrorCategory",
     # Tools
     "FrozenToolEntry",
     "FrozenToolRegistry",
@@ -156,7 +151,6 @@ __all__ = [
     "SupervisorEvent",
     "SupervisorEventKind",
     "SupervisorHookPoint",
-    "SupervisorState",
     "ToolExecutionError",
     "ToolSnapshotStore",
     "compute_memory_score",

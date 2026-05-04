@@ -342,6 +342,8 @@ class ClaudeBackend(BackendToolHostMixin):
 
     async def send(self, prompt: str, **kwargs: Any) -> Message:
         """Send a prompt and wait for the full response."""
+        from claude_agent_sdk.types import ResultMessage
+
         self._ensure_client()
         tracer = _get_backend_tracer()
         with tracer.start_as_current_span("claude.send") as span:
@@ -356,8 +358,7 @@ class ClaudeBackend(BackendToolHostMixin):
             messages: list[Any] = []
             async for msg in self._client.receive_response():
                 messages.append(msg)
-                # Track session ID from ResultMessage
-                if type(msg).__name__ == "ResultMessage" and hasattr(msg, "session_id"):
+                if isinstance(msg, ResultMessage):
                     self._last_session_id = msg.session_id
 
             return self._to_message(messages)
@@ -386,6 +387,8 @@ class ClaudeBackend(BackendToolHostMixin):
 
     async def create_session(self, **kwargs: Any) -> SessionRef:
         """Create a new session (starts a fresh query context)."""
+        from claude_agent_sdk.types import ResultMessage
+
         self._ensure_client()
 
         # Claude sessions are implicit — each query sequence is a session.
@@ -393,7 +396,7 @@ class ClaudeBackend(BackendToolHostMixin):
         # For explicit session management, we can use resume= option.
         await self._client.query(kwargs.get("prompt", ""))
         async for msg in self._client.receive_response():
-            if type(msg).__name__ == "ResultMessage" and hasattr(msg, "session_id"):
+            if isinstance(msg, ResultMessage):
                 self._last_session_id = msg.session_id
 
         if self._last_session_id:

@@ -18,9 +18,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from obscura.auth.rbac import AGENT_READ_ROLES, require_any_role
+from obscura.core.enums.lifecycle import AgentHealthStatus
 from obscura.deps import audit, authenticate_websocket
 from obscura.heartbeat import get_default_monitor
-from obscura.heartbeat.types import HealthStatus, Heartbeat, SystemMetrics
+from obscura.heartbeat.types import Heartbeat, SystemMetrics
 
 from obscura.auth.models import AuthenticatedUser
 import logging
@@ -72,7 +73,7 @@ async def heartbeat_receive(
             timestamp=datetime.fromisoformat(
                 body.timestamp or datetime.now(UTC).isoformat(),
             ),
-            status=HealthStatus(body.status),
+            status=AgentHealthStatus(body.status),
             metrics=SystemMetrics(**body.metrics),
             message=body.message,
             ttl=body.ttl,

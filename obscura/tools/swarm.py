@@ -34,7 +34,7 @@ from obscura.agent.definitions import (
     resolve_all_definitions,
 )
 from obscura.core.config_io import load_merged_agents
-from obscura.core.event_store import SessionStatus
+from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.paths import resolve_all_obscura_homes
 from obscura.core.types import ToolSpec
 from obscura.manifest.models import (
