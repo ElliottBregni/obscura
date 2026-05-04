@@ -45,6 +45,23 @@ _LAZY: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "SimpleHandler": ("obscura.core.handlers", "SimpleHandler", ()),
     # --- Agent base class ---
     "BaseAgent": ("obscura.agent.agent", "BaseAgent", ()),
+    # --- Agent loops ---
+    # AgentLoopV2 is the canonical loop. AgentLoop (v1) is deprecated;
+    # callers should use ``make_agent_loop`` which returns the right type
+    # based on OBSCURA_AGENT_LOOP (default v2). See
+    # :mod:`obscura.core.agent_loop_factory` for the migration story.
+    "AgentLoopV2": ("obscura.core.agent_loop_v2", "AgentLoopV2", ()),
+    "AgentLoopV2Config": ("obscura.core.agent_loop_v2", "AgentLoopV2Config", ()),
+    "make_agent_loop": (
+        "obscura.core.agent_loop_factory",
+        "make_agent_loop",
+        (),
+    ),
+    "is_v2_enabled": ("obscura.core.agent_loop_factory", "is_v2_enabled", ()),
+    # AgentLoop (v1) intentionally kept lazy-exposed during the
+    # deprecation soak — callers that touch it eagerly via this surface
+    # see the DeprecationWarning at construction time.
+    "AgentLoop": ("obscura.core.agent_loop", "AgentLoop", ()),
     # --- OpenClaw bridge (pulls httpx) ---
     "OpenClawBridge": ("obscura.openclaw_bridge", "OpenClawBridge", ()),
     "OpenClawBridgeConfig": ("obscura.openclaw_bridge", "OpenClawBridgeConfig", ()),

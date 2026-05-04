@@ -155,6 +155,9 @@ def test_known_names_matches_registry() -> None:
     from obscura.lazy import known_names
 
     expected = {
+        "AgentLoop",
+        "AgentLoopV2",
+        "AgentLoopV2Config",
         "AuthConfig",
         "BackendRoutingPolicy",
         "BaseAgent",
@@ -171,6 +174,8 @@ def test_known_names_matches_registry() -> None:
         "SimpleHandler",
         "SpawnAgentRequest",
         "WorkflowRunRequest",
+        "is_v2_enabled",
+        "make_agent_loop",
     }
     assert expected.issubset(set(known_names())), (
         f"missing lazy names: {expected - set(known_names())}"

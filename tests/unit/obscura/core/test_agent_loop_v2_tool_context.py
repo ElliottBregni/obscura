@@ -35,7 +35,9 @@ class _StubTurn:
 
 class _StubBackend:
     name = "stub"
-    capabilities = BackendCapabilities(supports_streaming=True, supports_tool_calls=True)
+    capabilities = BackendCapabilities(
+        supports_streaming=True, supports_tool_calls=True
+    )
 
     def __init__(self, script: list[_StubTurn]) -> None:
         self.script = list(script)

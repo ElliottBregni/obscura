@@ -75,6 +75,7 @@ async def test_append_history_lock_actually_serializes() -> None:
 
     # Hold the lock externally; the append should block on it.
     async with ctx.history_lock:
+
         async def try_append() -> None:
             await ctx.append_history("blocked")
 

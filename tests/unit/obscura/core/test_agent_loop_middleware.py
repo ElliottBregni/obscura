@@ -281,7 +281,11 @@ class TestToolConfirmation:
             ToolSpec(
                 name="readonly",
                 description="readonly tool",
-                parameters={"type": "object", "additionalProperties": True, "properties": {}},
+                parameters={
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {},
+                },
                 handler=safe_tool,
                 side_effects="none",
             )
@@ -325,7 +329,11 @@ class TestToolConfirmation:
             ToolSpec(
                 name="readonly",
                 description="readonly tool",
-                parameters={"type": "object", "additionalProperties": True, "properties": {}},
+                parameters={
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {},
+                },
                 handler=safe_tool,
                 side_effects="none",
             )
@@ -369,7 +377,11 @@ class TestToolConfirmation:
             ToolSpec(
                 name="write_file",
                 description="writes",
-                parameters={"type": "object", "additionalProperties": True, "properties": {}},
+                parameters={
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {},
+                },
                 handler=write,
                 side_effects="writes:fs",
             )

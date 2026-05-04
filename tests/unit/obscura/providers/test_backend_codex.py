@@ -68,7 +68,7 @@ class TestCodexBackend:
     @pytest.mark.asyncio
     async def test_sessions(self) -> None:
         backend = CodexBackend(_auth())
-        backend._import_sdk_class = lambda: (_FakeCodex, "json")  # type: ignore[method-assign]
+        backend._import_sdk_class = lambda: _FakeCodex  # type: ignore[method-assign]
         await backend.start()
         ref = await backend.create_session()
         assert ref.backend is Backend.CODEX
@@ -183,7 +183,7 @@ class TestBuildSdkClientForwardsMcpServers:
                 {"name": "obscura-browser", "url": "http://127.0.0.1:8765/mcp"},
             ],
         )
-        backend._import_sdk_class = lambda: (_FakeCodexWithConfig, "json")  # type: ignore[method-assign]
+        backend._import_sdk_class = lambda: _FakeCodexWithConfig  # type: ignore[method-assign]
         # Install the SDK-symbol cache so _build_sdk_client picks up our stub.
         backend._sdk_syms = {"AppServerConfig": _FakeConfig}
 
@@ -213,7 +213,7 @@ class TestBuildSdkClientForwardsMcpServers:
                 return None
 
         backend = CodexBackend(_auth())  # no mcp_servers
-        backend._import_sdk_class = lambda: (_FakeCodexWithConfig, "json")  # type: ignore[method-assign]
+        backend._import_sdk_class = lambda: _FakeCodexWithConfig  # type: ignore[method-assign]
         backend._sdk_syms = {"AppServerConfig": _FakeConfig}
 
         await backend.start()

@@ -47,6 +47,7 @@ import logging
 import os
 import time
 import uuid
+import warnings
 from collections.abc import Coroutine
 import dataclasses
 from dataclasses import dataclass
@@ -667,6 +668,37 @@ class AgentLoop:
         tool_output_overrides: dict[str, str] | None = None,
         host_callbacks: dict[str, Any] | None = None,
     ) -> None:
+        # v1 deprecation. v2 (AgentLoopV2) is the default loop and reaches
+        # full feature parity through the make_agent_loop factory. Set
+        # OBSCURA_AGENT_LOOP=v1 to keep using v1 explicitly while the
+        # deprecation soaks. Removal is planned after eval-validated
+        # parity confirms no regressions across real workloads.
+        #
+        # Suppress the warning when AgentLoop is being instantiated by
+        # the factory's v1 fallback path — the warning would already
+        # have fired (or would have been suppressed by the operator
+        # explicitly opting in to v1 via env). Detect by frame
+        # inspection: if our caller is in obscura.core.agent_loop_factory,
+        # skip. This keeps the noise focused on direct callers that
+        # should migrate.
+        _suppress = False
+        try:
+            caller = inspect.stack()[1]
+            if "agent_loop_factory" in caller.filename:
+                _suppress = True
+        except Exception:
+            pass
+        if not _suppress:
+            warnings.warn(
+                "obscura.core.agent_loop.AgentLoop (v1) is deprecated. "
+                "Use obscura.core.agent_loop_factory.make_agent_loop for "
+                "a v2-backed loop with full feature parity, or set "
+                "OBSCURA_AGENT_LOOP=v1 to keep v1 explicitly. v1 will be "
+                "removed after eval-validation soak.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._backend = backend
         self._tools = tool_registry
         self._max_turns = max_turns

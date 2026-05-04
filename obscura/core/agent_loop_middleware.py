@@ -175,9 +175,7 @@ def tool_denylist(
             resolved: dict[str, Any],
         ) -> list[ContentBlock]:
             if node.tool_name in denied_set:
-                logger.info(
-                    "tool_denylist: denied %s (in denylist)", node.tool_name
-                )
+                logger.info("tool_denylist: denied %s (in denylist)", node.tool_name)
                 return [
                     ContentBlock(
                         kind="text",

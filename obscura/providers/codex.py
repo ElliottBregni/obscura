@@ -274,7 +274,6 @@ class CodexBackend(BackendToolHostMixin):
         self._started = False
 
         self._sdk_client: Any = None
-        self._sdk_module_name = ""
         # SDK symbols cached at start() so we don't re-import on every turn.
         self._sdk_syms: dict[str, Any] = {}
 
@@ -321,7 +320,7 @@ class CodexBackend(BackendToolHostMixin):
             client=self._sdk_client,
             session=self._active_session,
             meta={
-                "provider": self._sdk_module_name or _SDK_MODULE,
+                "provider": _SDK_MODULE,
                 "model": self._model,
             },
         )
@@ -342,8 +341,7 @@ class CodexBackend(BackendToolHostMixin):
     async def start(self) -> None:
         await register_external_mcp_tools(self, self._mcp_servers)
 
-        sdk_cls, module_name = self._import_sdk_class()
-        self._sdk_module_name = module_name
+        sdk_cls = self._import_sdk_class()
         self._sdk_client = await self._build_sdk_client(sdk_cls)
         self._started = True
 
@@ -988,7 +986,7 @@ class CodexBackend(BackendToolHostMixin):
 
     # -- SDK bootstrapping ---------------------------------------------------
 
-    def _import_sdk_class(self) -> tuple[type[Any], str]:
+    def _import_sdk_class(self) -> type[Any]:
         """Import ``codex_app_server`` and cache the symbols we use."""
         try:
             mod = importlib.import_module(_SDK_MODULE)
@@ -996,17 +994,19 @@ class CodexBackend(BackendToolHostMixin):
             py_exe = sys.executable
             msg = (
                 "Official OpenAI Codex SDK not found. Install with: "
-                f"`{py_exe} -m pip install openai-codex-app-server-sdk`. "
+                f"`{py_exe} -m pip install "
+                "openai-codex-app-server-sdk @ git+https://github.com/openai/codex.git#subdirectory=sdk/python`. "
                 "See https://developers.openai.com/codex/sdk for details. "
                 f"Import error: {exc}"
             )
             raise RuntimeError(msg) from exc
 
-        sdk_cls = getattr(mod, "AsyncCodex", None) or getattr(mod, "Codex", None)
+        sdk_cls = getattr(mod, "AsyncCodex", None)
         if not inspect.isclass(sdk_cls):
             msg = (
-                f"{_SDK_MODULE} is installed but exposes no AsyncCodex/Codex class. "
-                "Expected openai-codex-app-server-sdk >= 0.2.0."
+                f"{_SDK_MODULE} is installed but exposes no AsyncCodex class. "
+                "Reinstall the official SDK from "
+                "https://github.com/openai/codex (sdk/python)."
             )
             raise RuntimeError(msg)
 
@@ -1023,7 +1023,7 @@ class CodexBackend(BackendToolHostMixin):
 
         _relax_strict_response_models(mod)
 
-        return sdk_cls, _SDK_MODULE
+        return sdk_cls
 
     async def _build_sdk_client(self, sdk_cls: type[Any]) -> Any:
         """Construct and initialize the SDK client."""
