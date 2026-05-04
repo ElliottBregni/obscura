@@ -143,6 +143,11 @@ class ApprovalRecord(
     resolved_at: datetime | None = None
     decision_reason: str | None = None
 
+    @property
+    def approval_id(self) -> str:
+        """Legacy alias for the historical dataclass field name."""
+        return self.id
+
     @classmethod
     def from_row(cls, row: sqlite3.Row | Mapping[str, Any]) -> Self:
         status_raw = _row_get(row, "status", ApprovalStatus.PENDING.value)
