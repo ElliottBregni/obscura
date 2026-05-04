@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from obscura.core.enums.protocol import MCPTransport
+
 # ---------------------------------------------------------------------------
 # Sub-schemas
 # ---------------------------------------------------------------------------
@@ -57,7 +59,7 @@ class MCPServerSpecSchema(BaseModel):
     """MCP server configuration."""
 
     name: str = Field(..., min_length=1)
-    transport: Literal["stdio", "sse"]
+    transport: MCPTransport
     command: str = Field(default="", description="Command for stdio transport")
     args: list[str] = Field(
         default_factory=list,

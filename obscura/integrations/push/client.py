@@ -11,11 +11,16 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, TypeAlias
+
+from obscura.core.enums.messaging import PushProvider
 
 logger = logging.getLogger(__name__)
 
-Provider = Literal["apns", "fcm", "expo"]
+# Backwards-compatible alias for the canonical PushProvider StrEnum.
+# UP040 ignored: `type X = ...` produces a TypeAliasType that strips enum
+# member access; we need the runtime to stay the actual enum class.
+Provider: TypeAlias = PushProvider  # noqa: UP040
 
 
 @dataclass(frozen=True)
@@ -38,7 +43,7 @@ class PushClient:
         self,
         tokens: list[str],
         *,
-        provider: Provider = "expo",
+        provider: PushProvider | str = PushProvider.EXPO,
         apns_key_id: str | None = None,
         apns_team_id: str | None = None,
         apns_bundle_id: str | None = None,
@@ -47,7 +52,9 @@ class PushClient:
         fcm_project_id: str | None = None,
     ) -> None:
         self._tokens = tokens
-        self._provider: Provider = provider
+        self._provider: PushProvider = (
+            provider if isinstance(provider, PushProvider) else PushProvider(provider)
+        )
         self._apns_key_id = apns_key_id or os.environ.get("APNS_KEY_ID", "")
         self._apns_team_id = apns_team_id or os.environ.get("APNS_TEAM_ID", "")
         self._apns_bundle_id = apns_bundle_id or os.environ.get("APNS_BUNDLE_ID", "")
@@ -60,10 +67,10 @@ class PushClient:
         return await loop.run_in_executor(None, self._check_access_sync)
 
     def _check_access_sync(self) -> bool:
-        if self._provider == "apns" and not self._apns_key_id:
+        if self._provider is PushProvider.APNS and not self._apns_key_id:
             msg = "APNS_KEY_ID must be set for APNs push notifications."
             raise RuntimeError(msg)
-        if self._provider == "fcm" and not self._fcm_server_key:
+        if self._provider is PushProvider.FCM and not self._fcm_server_key:
             msg = "FCM_SERVER_KEY must be set for FCM push notifications."
             raise RuntimeError(msg)
         return True
@@ -100,11 +107,11 @@ class PushClient:
             f"{token}|{title}|{body_text}|{time.time()}".encode(),
         ).hexdigest()[:16]
         try:
-            if self._provider == "expo":
+            if self._provider is PushProvider.EXPO:
                 return self._send_expo(notification_id, token, title, body_text, data)
-            if self._provider == "fcm":
+            if self._provider is PushProvider.FCM:
                 return self._send_fcm(notification_id, token, title, body_text, data)
-            if self._provider == "apns":
+            if self._provider is PushProvider.APNS:
                 return self._send_apns(notification_id, token, title, body_text, data)
             msg = f"Unknown push provider: {self._provider}"
             raise ValueError(msg)
@@ -146,7 +153,7 @@ class PushClient:
         success = ticket.get("status") == "ok"
         return PushReceipt(
             notification_id=nid,
-            provider="expo",
+            provider=PushProvider.EXPO,
             token=token,
             success=success,
             status_code=status_code,
@@ -187,7 +194,7 @@ class PushClient:
             error_msg = str(results[0].get("error", "")) if results else ""
         return PushReceipt(
             notification_id=nid,
-            provider="fcm",
+            provider=PushProvider.FCM,
             token=token,
             success=success,
             status_code=status_code,
@@ -218,7 +225,7 @@ class PushClient:
             client.send_notification(notif, self._apns_bundle_id)
             return PushReceipt(
                 notification_id=nid,
-                provider="apns",
+                provider=PushProvider.APNS,
                 token=token,
                 success=True,
             )
