@@ -39,7 +39,8 @@ from obscura.agent.interaction import InteractionBus
 from obscura.agent.supervisor import SupervisorConfig
 from obscura.auth.cli_user import current_cli_user
 from obscura.cli import trace as trace_mod
-from obscura.cli.app.modes import Plan, TUIMode
+from obscura.cli.app.modes import Plan
+from obscura.core.enums.ui import TUIMode
 from obscura.cli.bootstrap import (
     _discover_mcp,  # pyright: ignore[reportPrivateUsage]
     _run_inline_agent_from_mention,  # pyright: ignore[reportPrivateUsage]

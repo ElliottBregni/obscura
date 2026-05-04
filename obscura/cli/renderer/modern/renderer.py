@@ -27,7 +27,7 @@ import textwrap
 import time
 from typing import Any
 
-from obscura.cli.renderer.modern.layout import BorderStyle
+from obscura.cli.renderer.modern.layout import get_border_chars
 from obscura.cli.renderer.modern.theme import (
     ERROR_COLOR,
     MUTED,
@@ -43,7 +43,7 @@ from obscura.cli.renderer.modern.theme import (
     TOOL_COLOR,
     Style,
 )
-from obscura.cli.renderer.modern.layout import get_border_chars
+from obscura.core.enums.ui import BorderStyle
 from obscura.core.types import AgentEvent, AgentEventKind
 
 

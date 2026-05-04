@@ -33,7 +33,7 @@ from obscura.agent.definitions import resolve_all_definitions
 from obscura.auth import secrets as _secrets
 from obscura.auth.cli_user import current_cli_user
 from obscura.cli.app.diff_engine import DiffEngine, DiffHunk
-from obscura.cli.app.modes import MODE_TOOL_GROUPS, ModeManager, Plan, TUIMode
+from obscura.cli.app.modes import MODE_TOOL_GROUPS, ModeManager, Plan
 from obscura.cli.auth_commands import CREDENTIALS_PATH, load_session
 from obscura.cli.control_commands import (
     cmd_policies,
@@ -83,6 +83,7 @@ from obscura.core.context_window import (
 )
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
+from obscura.core.enums.ui import TUIMode
 from obscura.core.event_store import SessionStatus, SQLiteEventStore
 from obscura.core.paths import (
     resolve_all_commands_dirs,

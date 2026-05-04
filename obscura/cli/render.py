@@ -36,7 +36,8 @@ from obscura.cli.renderer.modern.theme import (
 )
 from obscura.cli.tool_summaries import summarize_tool_call
 from obscura.cli.ui_primitives import random_thinking_message
-from obscura.core.feature_flags import FLAGS, BannerTheme
+from obscura.core.enums.ui import BannerTheme
+from obscura.core.feature_flags import FLAGS
 from obscura.core.types import AgentEvent, AgentEventKind
 
 logger = logging.getLogger(__name__)

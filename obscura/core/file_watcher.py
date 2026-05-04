@@ -276,7 +276,6 @@ class FileWatcher:
 
 
 __all__ = [
-    "ChangeKind",
     "FileChange",
     "FileWatcher",
 ]

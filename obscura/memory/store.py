@@ -23,11 +23,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
+from obscura.core.enums.storage import MemoryEventKind, MemorySource
 from obscura.core.pg_config import is_pg_configured
 from obscura.memory.events import (
-    EventKind,
     EventSink,
-    EventSource,
     get_default_sink,
     make_event,
 )
@@ -98,11 +97,11 @@ class MemoryStore:
         sink = self._event_sink if self._event_sink is not None else get_default_sink()
         sink.emit(
             make_event(
-                kind=EventKind(kind),
+                kind=MemoryEventKind(kind),
                 key=key,
                 value=value,
                 ttl_seconds=ttl_seconds,
-                source=EventSource.KV,
+                source=MemorySource.KV,
                 user_id=self.user_id,
             ),
         )
