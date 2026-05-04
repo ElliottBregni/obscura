@@ -27,3 +27,16 @@ class PushProvider(StrEnum):
     APNS = "apns"
     FCM = "fcm"
     EXPO = "expo"
+
+
+class TriggerKind(StrEnum):
+    """Discriminator for daemon-agent trigger payloads.
+
+    ``STOP`` keeps its legacy ``__stop__`` magic-string value so existing
+    queue producers (``DaemonAgent.stop()``) round-trip byte-identically.
+    """
+
+    IMESSAGE = "imessage"
+    MESSAGE = "message"
+    EMAIL = "email"
+    STOP = "__stop__"
