@@ -86,6 +86,7 @@ from obscura.core.parallel_plan import (
     build_turn_dag_from_parallel_plan,
     parse_parallel_plan_input,
 )
+from obscura.core.tool_context import ToolContext, bind_tool_context
 from obscura.core.types import (
     AgentEvent,
     AgentEventKind,
@@ -105,6 +106,18 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+# Known ToolContext fields the host_callbacks dict can populate directly.
+# Anything else in host_callbacks lands in ToolContext.extras for tool
+# code that reads custom keys.
+_TOOL_CTX_KNOWN_FIELDS: frozenset[str] = frozenset({
+    "ask_user_callback",
+    "user_interact_callback",
+    "permission_mode_callback",
+    "plan_approval_callback",
+    "mcp_discovery_report",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +237,7 @@ class AgentLoopV2:
         dispatch_middleware: list[Callable[[Any], Any]] | None = None,
         pre_turn: Callable[[TurnContext], Awaitable[None]] | None = None,
         post_turn: Callable[[TurnContext, TurnResult], Awaitable[None]] | None = None,
+        host_callbacks: dict[str, Any] | None = None,
     ) -> None:
         self._backend = backend
         self._registry = registry
@@ -232,6 +246,12 @@ class AgentLoopV2:
         self._dispatch_middleware = list(dispatch_middleware or [])
         self._pre_turn = pre_turn
         self._post_turn = post_turn
+        # Per-instance host callbacks threaded into ToolContext on every
+        # tool dispatch. v1 parity — tools that read
+        # ``current_tool_context().ask_user_callback`` etc. work under v2.
+        # Empty dict means no host callbacks; tools fall back to whatever
+        # legacy module-level state they support (UI.set_*_callback etc).
+        self._host_callbacks: dict[str, Any] = dict(host_callbacks or {})
 
         # Per-turn dedup keyed by SDK tool_use_id. LOAD-BEARING for
         # correctness — see the extended note on
@@ -399,6 +419,13 @@ class AgentLoopV2:
             # declared deps (or the merge produced sibling+plan nodes).
             envelopes_by_id: dict[str, _ToolEnvelopeV2] = {}
 
+            # Per-turn ToolContext bound around every tool dispatch so
+            # tools that read current_tool_context() see host_callbacks,
+            # the live history, session_id, and the registry. v1 parity.
+            tool_ctx = self._build_tool_context(
+                messages=messages, session_id=session_id
+            )
+
             async def _core_executor(
                 node: DAGNode, _resolved: dict[str, Any]
             ) -> list[ContentBlock]:
@@ -416,7 +443,7 @@ class AgentLoopV2:
                     cached = self._seen_calls[tu_id]
                     return cached.content
 
-                env = await self._dispatch_node(node)
+                env = await self._dispatch_node(node, tool_ctx)
                 if tu_id:
                     self._seen_calls[tu_id] = env
                 return env.content
@@ -747,13 +774,21 @@ class AgentLoopV2:
 
         return blocks
 
-    async def _dispatch_node(self, node: DAGNode) -> _ToolEnvelopeV2:
+    async def _dispatch_node(
+        self,
+        node: DAGNode,
+        tool_ctx: ToolContext,
+    ) -> _ToolEnvelopeV2:
         """Look up the tool, invoke it, wrap the result in a v2 envelope.
+
+        Binds *tool_ctx* via :func:`bind_tool_context` for the duration of
+        the handler call so tools that read ``current_tool_context()`` see
+        host_callbacks, session_id, history, registry, etc. — v1 parity.
 
         v2 deliberately keeps this minimal — capability checks, hooks,
         predictive cache, etc. are middleware concerns. They wrap this
-        method or the scheduler.executor. Today: lookup → invoke →
-        wrap. Errors during invocation become an error envelope.
+        method or the scheduler.executor. Today: lookup → bind → invoke
+        → wrap. Errors during invocation become an error envelope.
         """
         spec: ToolSpec | None = self._registry.get(node.tool_name)
         if spec is None:
@@ -771,9 +806,10 @@ class AgentLoopV2:
         started = time.monotonic()
         try:
             handler = spec.handler
-            result = handler(**node.tool_input)
-            if asyncio.iscoroutine(result):
-                result = await result
+            with bind_tool_context(tool_ctx):
+                result = handler(**node.tool_input)
+                if asyncio.iscoroutine(result):
+                    result = await result
         except Exception as exc:  # noqa: BLE001 — surface to model
             logger.exception("agent_loop_v2: tool %s raised", node.tool_name)
             return _ToolEnvelopeV2(
@@ -794,6 +830,32 @@ class AgentLoopV2:
             content=[ContentBlock(kind="text", text=text)],
             is_error=False,
             latency_ms=int((time.monotonic() - started) * 1000),
+        )
+
+    def _build_tool_context(
+        self,
+        *,
+        messages: list[Message],
+        session_id: str,
+    ) -> ToolContext:
+        """Build a per-turn ToolContext with registry + history + host_callbacks.
+
+        host_callbacks dict keys are mapped to ToolContext fields:
+        ``ask_user_callback``, ``user_interact_callback``,
+        ``permission_mode_callback``, ``plan_approval_callback``,
+        ``mcp_discovery_report``. Unknown keys go into ``extras``.
+        """
+        cb = self._host_callbacks
+        return ToolContext(
+            registry=self._registry,
+            history=messages,  # live mutable ref — same object the loop appends to
+            session_id=session_id,
+            ask_user_callback=cb.get("ask_user_callback"),
+            user_interact_callback=cb.get("user_interact_callback"),
+            permission_mode_callback=cb.get("permission_mode_callback"),
+            plan_approval_callback=cb.get("plan_approval_callback"),
+            mcp_discovery_report=cb.get("mcp_discovery_report"),
+            extras={k: v for k, v in cb.items() if k not in _TOOL_CTX_KNOWN_FIELDS},
         )
 
 
