@@ -22,7 +22,7 @@ import time
 from datetime import UTC, datetime
 
 from obscura.auth.secrets import safe_subprocess_env
-from obscura.core.enums.lifecycle import BackgroundTaskStatus as BackgroundTaskStatus
+from obscura.core.enums.lifecycle import BackgroundTaskStatus
 from obscura.core.models.lifecycle import BackgroundTaskRecord
 
 logger = logging.getLogger(__name__)

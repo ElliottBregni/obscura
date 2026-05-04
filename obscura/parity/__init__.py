@@ -1,5 +1,6 @@
 """Parity package: semantic conformance models, runner, scoring, reporting."""
 
+from obscura.core.enums.lifecycle import FeatureStatus
 from obscura.parity.conformance import evaluate_backend_conformance
 from obscura.parity.contracts import CONTRACTS
 from obscura.parity.defaults import default_backend_conformance
@@ -9,7 +10,6 @@ from obscura.parity.models import (
     BackendParityProfile,
     BackendParityScore,
     ContractCheckResult,
-    FeatureStatus,
     MethodContract,
     ParityFeature,
     ParityReport,

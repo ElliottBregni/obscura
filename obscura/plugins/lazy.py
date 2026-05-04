@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.enums.lifecycle import LazyState as LazyState
+from obscura.core.enums.lifecycle import LazyState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -177,5 +177,4 @@ class LazyPluginManager:
 __all__ = [
     "LazyPluginEntry",
     "LazyPluginManager",
-    "LazyState",
 ]

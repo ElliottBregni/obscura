@@ -10,7 +10,7 @@ import threading
 import time
 import logging
 
-from obscura.core.enums.lifecycle import CircuitState as CircuitState
+from obscura.core.enums.lifecycle import CircuitState
 
 logger = logging.getLogger(__name__)
 

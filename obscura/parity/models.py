@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from obscura.core.enums.lifecycle import FeatureStatus as FeatureStatus
+from obscura.core.enums.lifecycle import FeatureStatus
 from obscura.core.types import Backend
 
 
