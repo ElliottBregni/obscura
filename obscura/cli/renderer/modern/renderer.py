@@ -25,6 +25,7 @@ import signal
 import sys
 import textwrap
 import time
+from enum import Enum
 from typing import Any
 
 from obscura.cli.renderer.modern.layout import get_border_chars
@@ -155,6 +156,16 @@ class ModernRenderer:
         # Tool renderer registry (lazy)
         self._tool_registry: Any = None
 
+        # Notification stack — inline toasts above the status region.
+        # Latest at the top; auto-evict when expired. Keyed entries
+        # update-in-place (rolling progress, streaming agent output).
+        # Sources outside the agent loop (supervisor, daemon, rate
+        # limiter) push into this stack via :meth:`add_notification`.
+        self._notifications: list[Any] = []  # list[Notification]
+        # Banner zone — sticky callouts above status. Replaced or
+        # dismissed by id via :meth:`set_banner` / :meth:`dismiss_banner`.
+        self._banners: dict[str, Any] = {}  # banner_id → Banner
+
         # FPS override
         fps_str = os.environ.get("OBSCURA_RENDERER_FPS", "")
         if fps_str:
@@ -195,22 +206,43 @@ class ModernRenderer:
                     ]
                 )
             case AgentEventKind.CONTEXT_COMPACT:
-                self._commit_lines(
-                    [_styled(f"  ⚡ {_sanitize(event.text)}", STYLE_WARN)]
+                # Route to banner channel — sticky callout above status,
+                # auto-dismisses when caller calls dismiss_banner. Legacy
+                # behavior was a one-line commit; banner gives it more
+                # visibility and prevents it from scrolling away under
+                # subsequent text deltas.
+                from obscura.cli.renderer.channels import (
+                    Banner,
+                    BannerKind,
+                )
+
+                self.set_banner(
+                    Banner(
+                        kind=BannerKind.COMPACTION,
+                        title="Context compacted",
+                        body=event.text or "",
+                        banner_id="compaction",
+                    )
                 )
             case AgentEventKind.PLAN_APPROVAL_REQUEST:
+                # Route to banner channel — persistent until user
+                # responds. The action handler clears it via
+                # dismiss_banner("plan_approval").
+                from obscura.cli.renderer.channels import (
+                    Banner,
+                    BannerKind,
+                )
+
                 self._flush_all()
                 self._stop_spinner()
-                self._commit_lines(
-                    [
-                        "",
-                        _styled("  ╭─ Plan Approval Required ─╮", STYLE_WARN),
-                        _styled(
-                            f"  │ {_sanitize(event.text or 'Approve plan to exit plan mode?')}",
-                            STYLE_DIM,
-                        ),
-                        _styled("  ╰──────────────────────────╯", STYLE_WARN),
-                    ]
+                self.set_banner(
+                    Banner(
+                        kind=BannerKind.PLAN_APPROVAL,
+                        title="Plan approval required",
+                        body=event.text or "Approve plan to exit plan mode?",
+                        actions=("approve", "reject"),
+                        banner_id="plan_approval",
+                    )
                 )
             case _:
                 pass
@@ -434,7 +466,16 @@ class ModernRenderer:
             self._live_lines_count = 0
 
     def _build_live_region(self) -> list[str]:
-        """Build the current live region lines (not yet committed)."""
+        """Build the current live region lines (not yet committed).
+
+        Composition (top → bottom):
+            1. Live thinking panel
+            2. Streaming text with reveal cursor
+            3. Sticky banners (plan_approval, arbiter_kill, etc.)
+            4. Notification stack (rate-limit, supervisor heartbeats,
+               daemon outputs — auto-evicted when expired)
+            5. Session status bar
+        """
         lines: list[str] = []
         w = self._width
 
@@ -473,7 +514,17 @@ class ModernRenderer:
                                 + _styled("▌", STYLE_ACCENT)
                             )
 
-        # 3. Session status bar (shown during active streaming/thinking)
+        # 3a. Banner zone — sticky callouts above status.
+        for line in self._render_banners():
+            lines.append(line)
+
+        # 3b. Notification stack — inline toasts above status.
+        # Evict expired entries first; render whatever remains.
+        self._evict_expired_notifications()
+        for line in self._render_notifications():
+            lines.append(line)
+
+        # 4. Session status bar (shown during active streaming/thinking)
         if (
             self._spinner_visible or self._in_thinking or self._stream_buf
         ) and self._session_title:
@@ -510,6 +561,134 @@ class ModernRenderer:
             )
             lines.append(spinner_line)
 
+        return lines
+
+    # ── Notification + banner channels ───────────────────────────────────
+
+    def add_notification(self, notification: Any) -> None:
+        """Push a :class:`Notification` onto the inline stack.
+
+        If the notification has a non-empty ``key``, it replaces any
+        existing entry with the same key (rolling-progress semantics).
+        Otherwise it appends to the bottom of the stack. The stack
+        renders in insertion order; oldest visible at the top.
+
+        Sources outside the agent loop (supervisor, daemon, rate
+        limiter, kairos engine) push here directly. The frame loop
+        will redraw the live region on the next tick.
+        """
+        key = getattr(notification, "key", "") or ""
+        if key:
+            # Replace any same-key entry, preserving position.
+            for i, existing in enumerate(self._notifications):
+                if getattr(existing, "key", "") == key:
+                    self._notifications[i] = notification
+                    self._dirty = True
+                    return
+        self._notifications.append(notification)
+        # Bound the stack — drop oldest expired-soonest if we go over.
+        if len(self._notifications) > 8:
+            self._notifications.pop(0)
+        self._dirty = True
+
+    def set_banner(self, banner: Any) -> None:
+        """Pin a sticky :class:`Banner` to the live region.
+
+        ``banner.banner_id`` (or its ``kind`` if id is empty) keys the
+        slot. Calling again with the same key replaces; pass an empty
+        Banner via :meth:`dismiss_banner` to remove.
+        """
+        banner_id = getattr(banner, "banner_id", "") or str(
+            getattr(banner, "kind", "default")
+        )
+        self._banners[banner_id] = banner
+        self._dirty = True
+
+    def dismiss_banner(self, banner_id_or_kind: str) -> None:
+        """Remove a sticky banner. Accepts either banner_id or kind."""
+        for key in list(self._banners.keys()):
+            if key == banner_id_or_kind:
+                self._banners.pop(key, None)
+                self._dirty = True
+
+    def _evict_expired_notifications(self) -> None:
+        """Drop notifications past their TTL."""
+        now = time.monotonic()
+        keep = [n for n in self._notifications if getattr(n, "expires_at", 0) > now]
+        if len(keep) != len(self._notifications):
+            self._notifications = keep
+            self._dirty = True
+
+    def _render_notifications(self) -> list[str]:
+        """Render the notification stack as inline lines."""
+        if not self._notifications:
+            return []
+        lines: list[str] = []
+        for n in self._notifications:
+            severity = getattr(n, "severity", "info")
+            sev = severity.value if isinstance(severity, Enum) else str(severity)
+            style = {
+                "info": STYLE_DIM,
+                "warn": STYLE_WARN,
+                "error": STYLE_ERROR,
+                "success": STYLE_OK,
+            }.get(sev, STYLE_DIM)
+            icon = {
+                "info": "i",  # noqa: RUF001 — ASCII for terminal compat
+                "warn": "!",
+                "error": "x",
+                "success": "+",
+            }.get(sev, "-")
+            source = getattr(n, "source", "") or ""
+            title = getattr(n, "title", "") or ""
+            body = getattr(n, "body", "") or ""
+            # Format: "  i source - title - body" (truncated to width)
+            parts: list[str] = [icon]
+            if source:
+                parts.append(source)
+            if title:
+                if source:
+                    parts.append("·")
+                parts.append(title)
+            if body:
+                parts.append("—")
+                parts.append(body)
+            line = "  " + _sanitize(" ".join(parts))
+            # Truncate to terminal width.
+            if len(line) > self._width - 1:
+                line = line[: max(0, self._width - 4)] + "..."
+            lines.append(_styled(line, style))
+        return lines
+
+    def _render_banners(self) -> list[str]:
+        """Render sticky banners above the notification stack."""
+        if not self._banners:
+            return []
+        lines: list[str] = []
+        for banner in self._banners.values():
+            kind = getattr(banner, "kind", "")
+            kind_str = kind.value if isinstance(kind, Enum) else str(kind)
+            title = getattr(banner, "title", "") or ""
+            body = getattr(banner, "body", "") or ""
+            actions = getattr(banner, "actions", ())
+            # Banner styled by kind: warn for compaction/plan, error for
+            # arbiter_kill / capability_denial.
+            severity_style = (
+                STYLE_ERROR
+                if kind_str in {"arbiter_kill", "capability_denial"}
+                else STYLE_WARN
+            )
+            header = f"  ⚡ {title}"
+            if header.strip():
+                lines.append(_styled(_sanitize(header), severity_style))
+            if body:
+                body_line = f"     {body}"
+                if len(body_line) > self._width - 1:
+                    body_line = body_line[: max(0, self._width - 4)] + "..."
+                lines.append(_styled(_sanitize(body_line), STYLE_DIM))
+            if actions:
+                action_line = "     Actions: " + ", ".join(actions)
+                lines.append(_styled(_sanitize(action_line), STYLE_DIM))
         return lines
 
     def _render_thinking_panel(self, text: str, *, committed: bool) -> list[str]:
