@@ -606,6 +606,73 @@ class AgentSession:
         """Resolved capability tier (from the underlying client)."""
         return self.client.capability_tier or ""
 
+    def run_loop(
+        self,
+        prompt: str,
+        *,
+        max_turns: int | None = None,
+        on_confirm: Callable[..., Any] | None = None,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[AgentEvent]:
+        """Alias for ``stream_loop`` matching ObscuraClient's API.
+
+        Provided so supervisor's ``_run_*_agent`` helpers can accept an
+        AgentSession in place of an ObscuraClient without changing their
+        ``self._client.run_loop(...)`` call sites.
+        """
+        return self.stream_loop(
+            prompt,
+            max_turns=max_turns,
+            on_confirm=on_confirm,
+            session_id=session_id,
+            **kwargs,
+        )
+
+    async def run_loop_to_completion(
+        self,
+        prompt: str,
+        *,
+        max_turns: int | None = None,
+        on_confirm: Callable[..., Any] | None = None,
+        turn_timeout_s: float | None = None,
+        tool_allowlist: list[str] | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Run the agent loop and return the full concatenated text.
+
+        Mirrors ``ObscuraClient.run_loop_to_completion`` — concatenates
+        every ``TEXT_DELTA`` event across all turns (vs.
+        ``run_loop_to_text`` which keeps only the final turn).
+        """
+        from obscura.core.enums.agent import AgentEventKind
+
+        parts: list[str] = []
+        async for event in self.stream_loop(
+            prompt,
+            max_turns=max_turns,
+            on_confirm=on_confirm,
+            turn_timeout_s=turn_timeout_s,
+            tool_allowlist=tool_allowlist,
+            **kwargs,
+        ):
+            if event.kind == AgentEventKind.TEXT_DELTA and event.text:
+                parts.append(event.text)
+        return "".join(parts)
+
+    async def reset_session(self) -> None:
+        """Create a fresh backend session if the backend supports it.
+
+        Safe to call between independent prompts (e.g. daemon triggers)
+        to avoid stale session state in event-driven backends.
+        """
+        backend = self.backend
+        reset_fn: Any = getattr(backend, "reset_session", None)
+        if callable(reset_fn):
+            result: Any = reset_fn()
+            if hasattr(result, "__await__"):
+                await result
+
     async def run_loop_to_text(
         self,
         prompt: str,

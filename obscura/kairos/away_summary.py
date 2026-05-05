@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import time
 
-from obscura.core.client import ObscuraClient
 from obscura.core.config import ObscuraConfig
 
 logger = logging.getLogger(__name__)
@@ -109,15 +108,22 @@ async def _generate_llm_summary(context: str) -> str:
     Returns an empty string if the LLM is unavailable or fails.
     """
     try:
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
+
         cfg = ObscuraConfig.load()
         prompt = f"{AWAY_SUMMARY_PROMPT}\n\nRecent conversation:\n{context[:3000]}"
         default_model: str | None = getattr(cfg, "default_model", None)
-        async with ObscuraClient(
-            cfg.default_backend,
-            model=default_model or None,
-            system_prompt="You are a concise assistant summarizing recent work context.",
-        ) as client:
-            result = await client.run_loop_to_completion(prompt, max_turns=1)
+        async with await build_core_session(
+            SessionConfig(
+                backend=cfg.default_backend,
+                model=default_model or None,
+                system_prompt="You are a concise assistant summarizing recent work context.",
+                inject_claude_context=False,
+            ),
+            surface="a2a",
+        ) as session:
+            result = await session.run_loop_to_completion(prompt, max_turns=1)
             # Strip to first 3 sentences max.
             sentences = result.strip().split(". ")
             summary = ". ".join(sentences[:3]).strip()
