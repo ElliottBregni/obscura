@@ -124,7 +124,7 @@ def refusal_text(payload: dict[str, Any]) -> str:
 
 
 @contextmanager
-def bind_stream_log() -> Generator[dict[tuple[str, str], int], None, None]:
+def bind_stream_log() -> Generator[dict[tuple[str, str], int]]:
     """Bind a fresh per-task log for the duration of the with-block.
 
     Usage::

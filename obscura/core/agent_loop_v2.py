@@ -1,68 +1,30 @@
-"""obscura.core.agent_loop_v2 — DAG-native agent loop (clean rewrite).
+"""obscura.core.agent_loop_v2 — DAG-native agent loop.
 
-This is the successor to :class:`obscura.core.agent_loop.AgentLoop` (v1).
-v1 is ~10K lines and grew organically: a streaming tool executor, predictive
-cache, capability gates, retries, hooks, arbiter integration, and the
-core turn loop are all interleaved. v2 separates the core loop from the
-optional behaviors and uses :mod:`obscura.core.dag` natively for tool
-execution.
+The agent loop owns:
 
-Architectural diff from v1
-==========================
+1. Streaming from a :class:`BackendProtocol`, one turn at a time.
+2. Collecting ``tool_use`` blocks during the stream into
+   :class:`ToolCallInfo` objects.
+3. Firing text-delta observers (the predictive-cache observer is the
+   canonical user).
+4. After each assistant turn ends, building a :class:`TurnDAG` from the
+   collected calls (with no edges by default — matches today's batch
+   behavior).
+5. Running the DAG through :class:`Scheduler`, sequential or parallel
+   depending on whether any node has declared ``depends_on``.
+6. Binding a :class:`ToolContext` per turn so tools see host_callbacks,
+   history, session_id, and registry.
+7. Composing any caller-supplied dispatch middleware around the per-node
+   executor (``capability_gate``, ``tool_confirmation``,
+   ``predictive_cache_middleware``, etc.).
+8. Yielding :class:`AgentEvent` instances throughout (TEXT_DELTA,
+   TOOL_CALL, TOOL_RESULT, AGENT_DONE).
+9. Repeating until the model emits no tool calls or ``max_turns`` is
+   exceeded.
 
-+--------------------------+----------------------------------+---------------------------------+
-| Concern                  | v1                               | v2                              |
-+==========================+==================================+=================================+
-| Tool dispatch            | StreamingToolExecutor            | dag.Scheduler                   |
-| Intra-turn parallelism   | side_effects=="none" only        | DAG edges + concurrency caps    |
-| Retries / backoff        | inline in run()                  | RetryingBackend wrapper         |
-| Predictive cache         | inline in run()                  | predictive_cache_middleware     |
-| Capability gates         | inline _execute_single_tool      | capability_gate middleware      |
-| Arbiter (turn-level)     | inline                           | arbiter_post_turn hook          |
-| Tool confirmation        | inline + on_confirm callback     | tool_confirmation middleware    |
-| Tool allow/deny          | inline                           | tool_allowlist / tool_denylist  |
-| Hooks (pre/post tool)    | inline HookRegistry calls        | hook_middleware                 |
-| Compaction               | inline                           | compact_pre_turn hook           |
-| Event store              | inline                           | event_store_post_turn hook      |
-| host_callbacks           | ToolContext fields               | ToolContext fields (parity)     |
-| compiled_agent           | inline                           | factory translation             |
-| seen_calls dedup         | StreamingToolExecutor.seen_calls | _seen_calls dict (load-bearing) |
-| Cancellation             | abort_event + task.cancel        | scheduler.cancel_event          |
-+--------------------------+----------------------------------+---------------------------------+
-
-What v2 owns
-------------
-
-A focused, ~600-line implementation that:
-
-1. Streams from a :class:`BackendProtocol`, one turn at a time.
-2. Collects ``tool_use`` blocks during the stream into ``ToolCallInfo`` objects.
-3. Fires text-delta observers (predictive cache observer is the canonical user).
-4. After the assistant turn ends, builds a :class:`TurnDAG` from the collected
-   calls (with no edges by default — matches today's batch behavior).
-5. Runs the DAG through :class:`Scheduler`, sequential or parallel depending
-   on whether any node has declared ``depends_on``.
-6. Binds a :class:`ToolContext` per turn so tools see host_callbacks /
-   history / session_id / registry just like v1.
-7. Composes any user-supplied dispatch_middleware around the per-node
-   executor (capability_gate, tool_confirmation, predictive_cache_middleware,
-   etc.).
-8. Yields :class:`AgentEvent` instances throughout (TEXT_DELTA, TOOL_CALL,
-   TOOL_RESULT, AGENT_DONE) — same shape as v1 so callers don't need
-   to change.
-9. Repeats until the model emits no tool calls or ``max_turns`` is exceeded.
-
-Migration
----------
-
-**v2 is the default loop**. Existing call sites should migrate to
-:func:`obscura.core.agent_loop_factory.make_agent_loop`, which translates
-v1-shape kwargs to v2 middleware/hooks automatically. Set
-``OBSCURA_AGENT_LOOP=v1`` to revert to the legacy loop while debugging.
-
-v1 (:class:`obscura.core.agent_loop.AgentLoop`) is preserved as a fallback
-and deletion target. The deprecation pass and final removal happen once
-eval data confirms parity across all real-world workloads.
+Most call sites should construct via
+:func:`obscura.core.agent_loop_factory.make_agent_loop`, which assembles
+the standard middleware + hook stack from a flat kwarg surface.
 """
 
 from __future__ import annotations

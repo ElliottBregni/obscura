@@ -5,12 +5,8 @@ the per-node executor. Middleware are applied outermost-first by
 :class:`AgentLoopV2`: the first item in ``dispatch_middleware`` runs first
 on the way in and last on the way out.
 
-These cover the v1 ``AgentLoop`` features that were inlined into
-``_execute_single_tool``. Porting v1 → v2 is a matter of constructing the
-right middleware list:
-
 ============================  ===================================
-v1 ``AgentLoop`` kwarg        v2 middleware
+Caller-facing kwarg           Middleware builder
 ============================  ===================================
 ``capability_token=...``      :func:`capability_gate`
 ``tool_allowlist=[...]``      :func:`tool_allowlist`
@@ -69,8 +65,8 @@ def capability_gate(
     *token* is opaque to the middleware. Pass *is_allowed* to override the
     default check, which uses ``token.allows(tool_name)`` if the method
     exists, else accepts everything (no-op gate). The override exists so
-    callers can plug in the v1 ``CapabilityToken.is_authorized()`` style
-    check without depending on the v1 type here.
+    callers can plug in their own ``is_authorized()``-style check without
+    depending on the concrete capability-token type here.
     """
 
     def _default_check(tok: Any, name: str) -> bool:
@@ -127,7 +123,7 @@ def tool_allowlist(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Reject dispatches for tool names not in *allowed*.
 
-    Equivalent to v1's ``AgentLoop(tool_allowlist=...)``. Pass an empty
+    Equivalent to ``AgentLoop(tool_allowlist=...)``. Pass an empty
     collection to deny everything; pass ``None`` (don't include this
     middleware) to allow everything.
     """
@@ -206,9 +202,9 @@ def hook_middleware(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Fire pre/post tool-use hooks around dispatch.
 
-    Mirrors v1's per-tool hook firing in ``_execute_single_tool``. Hooks
+    Mirrors per-tool hook firing. Hooks
     that raise are logged and **swallowed** — a hook bug shouldn't break
-    the agent. (v1 has the same swallow semantic.)
+    the agent.
     """
 
     def wrap(inner: Callable[..., Any]) -> Callable[..., Any]:
@@ -267,12 +263,12 @@ def tool_confirmation(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Ask *on_confirm* before dispatching each tool. Reject if it returns False.
 
-    Mirrors v1's ``AgentLoop(on_confirm=...)`` callback. *on_confirm* may
+    Equivalent to ``AgentLoop(on_confirm=...)``. *on_confirm* may
     be sync or async; if async, it's awaited.
 
     When *registry* is provided AND *skip_for_safe* is True (both default),
     tools whose ``ToolSpec.side_effects == "none"`` skip the confirmation
-    prompt entirely — matching v1's read-only-tools-pass-through behavior.
+    prompt entirely.
     Without the registry the middleware can't read ``side_effects`` and
     falls back to prompting for every node.
 
@@ -331,7 +327,7 @@ def tool_output_level(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Filter / level-shift tool output post-dispatch.
 
-    Mirrors v1's ``tool_output_level`` + ``tool_output_overrides``. When
+    Wraps ``tool_output_level`` + ``tool_output_overrides``. When
     a tool's effective level is ``"silent"``, the result is replaced with
     a single empty text block (still satisfies the SDK contract — the
     tool_use gets a tool_result, just an empty one). ``"compact"`` /
