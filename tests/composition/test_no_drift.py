@@ -29,27 +29,61 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Symbols whose direct use indicates a surface is bypassing composition
+# Symbols whose direct use indicates a surface is bypassing composition.
+# Each symbol maps to the block that owns it.
 DRIFT_SYMBOLS = (
+    # Plugin block (composition/blocks/plugins.py)
     "get_all_builtin_tool_specs",
     "get_filtered_builtin_tool_specs",
     "get_capability_map",
     "resolve_allowed_tools_from_config",
+    # System tools block (composition/blocks/system_tools.py)
+    "get_system_tool_specs",
+    "make_memory_tool_specs",
+    # Browser bridge block (composition/blocks/browser_bridge.py)
+    "attach_if_running",
 )
 
-# Files that legitimately use these symbols and are NOT in violation
+# Files that legitimately use these symbols and are NOT in violation.
+# Each entry needs a one-line reason in nearby comments below.
 ALLOWLIST = frozenset(
     {
+        # Composition blocks themselves
         "obscura/composition/blocks/plugins.py",
+        "obscura/composition/blocks/system_tools.py",
+        "obscura/composition/blocks/browser_bridge.py",
+        # /plugins slash commands inspect plugins; do not register tools
         "obscura/cli/commands.py",
+        # bootstrap_all_builtins runs at workspace-init time, no AgentSession
         "obscura/core/workspace.py",
+        # Plugin loader implementation + helpers
         "obscura/plugins/loader.py",
         "obscura/plugins/capabilities.py",
         "obscura/plugins/__init__.py",
         "obscura/plugins/lazy.py",
         "obscura/plugins/registries/capability_index.py",
         "obscura/plugins/registries/tool_index.py",
-        "obscura/agent/agents.py",  # to be migrated; tracked
+        # System tools module + internal helpers: define / consume the
+        # canonical get_system_tool_specs aggregator
+        "obscura/tools/system/__init__.py",
+        "obscura/tools/system/_shared.py",
+        "obscura/tools/system/_sandbox.py",
+        "obscura/tools/system/_process.py",
+        # Memory tools module: make_memory_tool_specs is defined here
+        "obscura/tools/memory_tools.py",
+        # ToolBroker provider: aggregates system tools for the broker —
+        # internal aggregation mechanism, not a surface module
+        "obscura/tools/providers/__init__.py",
+        # KAIROS dream cycle has its own ad-hoc tool list (separate runtime);
+        # tracked for future migration onto AgentSession
+        "obscura/kairos/dream.py",
+        # Eval framework runs prompts against a synthetic spec list to score
+        # tool selection; not a surface that registers tools onto a session
+        "obscura/cli/eval_commands.py",
+        # Browser bridge module: attach_if_running is defined here
+        "obscura/integrations/browser/client.py",
+        # Agent.start() builds its own resolver; tracked for migration
+        "obscura/agent/agents.py",
     },
 )
 

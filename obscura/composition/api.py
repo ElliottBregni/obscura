@@ -1,9 +1,21 @@
 """obscura.composition.api — `build_api_session` for the REST API.
 
 Called per-request from `obscura.deps.ClientFactory.create_session()`.
-Constructs an `AgentSession` with plugin tools registered (via the
-shared `install_plugin_tools` block) so API requests have the same
-tool surface as REPL — no more silent feature gap between surfaces.
+Constructs an `AgentSession` with the same plugin + system tool surface
+as REPL, plus optional vector memory and project hooks. This brings the
+API to feature parity with REPL (previously API had ZERO plugin/system
+tools registered — agents could only call MCP tools).
+
+Pipeline (order matters: vector_memory must run BEFORE system_tools so
+that memory_tools see session.vector_store and register):
+    core: ObscuraClient + backend.start() (with MCP servers from config)
+    extras:
+        1. install_plugin_tools    (SAME block as REPL/A2A)
+        2. install_vector_memory   (sets session.vector_store; skipped if
+                                    no Qdrant configured for user)
+        3. install_system_tools    (registers memory_tools iff
+                                    session.vector_store is set)
+        4. install_project_hooks   (server-side audit/telemetry hooks)
 """
 
 from __future__ import annotations
@@ -11,7 +23,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from obscura.composition.blocks import install_plugin_tools
+from obscura.composition.blocks import (
+    install_plugin_tools,
+    install_project_hooks,
+    install_system_tools,
+    install_vector_memory,
+)
 from obscura.composition.core import build_core_session
 from obscura.composition.session import AgentSession, SessionConfig
 
@@ -27,16 +44,7 @@ async def build_api_session(
     user: AuthenticatedUser,
     auth: Any = None,
 ) -> AgentSession:
-    """Build a session for one API request.
-
-    Pipeline:
-      core: ObscuraClient + backend.start() (with MCP servers from config)
-      extras:
-        1. install_plugin_tools  (SAME block as REPL/A2A — no drift)
-
-    Future blocks (vector memory, project hooks, capability filter)
-    plug in here as they're extracted.
-    """
+    """Build a session for one API request."""
     session = await build_core_session(
         config,
         surface="api",
@@ -44,4 +52,7 @@ async def build_api_session(
         auth=auth,
     )
     await install_plugin_tools(session, config)
+    await install_vector_memory(session, config)
+    await install_system_tools(session, config)
+    await install_project_hooks(session, config)
     return session

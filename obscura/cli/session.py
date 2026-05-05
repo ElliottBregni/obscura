@@ -124,19 +124,9 @@ from obscura.memory_channels import (
 )
 from obscura.plugins.builtins import list_builtin_plugin_ids
 from obscura.plugins.registries.capability_index import CapabilityIndex
-from obscura.tools.arbiter_tools import get_arbiter_tool_specs
-from obscura.tools.browser import get_browser_tool_specs
-from obscura.tools.goal_tools import get_goal_tool_specs
-from obscura.tools.lsp import get_lsp_tool_specs
-from obscura.tools.memory_tools import (
-    build_channels_prompt_section,
-    make_memory_tool_specs,
-)
-from obscura.tools.profile_tools import get_profile_tool_specs
-from obscura.tools.system import Session, UI, get_system_tool_specs
+from obscura.tools.memory_tools import build_channels_prompt_section
+from obscura.tools.system import Session, UI
 from obscura.tools.system.file_state import record_file_access
-from obscura.tools.task_tools import get_task_tool_specs
-from obscura.tools.worktree import get_worktree_tool_specs
 
 _log = logging.getLogger("obscura.cli.session")
 
@@ -335,7 +325,9 @@ class ObscuraSession:
         # The session's capability_resolver is then available to
         # _wire_tool_router below — eliminating the duplicate PluginLoader
         # pass that used to live inline.
+        from obscura.composition.blocks.browser_bridge import install_browser_bridge
         from obscura.composition.blocks.plugins import install_plugin_tools
+        from obscura.composition.blocks.system_tools import install_system_tools
         from obscura.composition.session import (
             AgentSession,
             SessionConfig as _CompSessionConfig,
@@ -354,8 +346,11 @@ class ObscuraSession:
             surface="repl",
             config=comp_config,
             client=client,
+            vector_store=self._vector_store,
         )
         await install_plugin_tools(self._composition_session, comp_config)
+        await install_system_tools(self._composition_session, comp_config)
+        await install_browser_bridge(self._composition_session, comp_config)
 
         # Tool router (reads cap index from self._composition_session)
         self._wire_tool_router(config)
@@ -1217,73 +1212,19 @@ class ObscuraSession:
 
     def _assemble_tools(
         self,
-        config: SessionConfig,
+        config: SessionConfig,  # noqa: ARG002
     ) -> tuple[list[Any], int]:
-        """Gather and filter system tools.  Returns (tools, count)."""
-        system_tools: list[Any] = []
-        if not config.tools_enabled:
-            return system_tools, 0
+        """Return an empty preregistered-tools list.
 
-        try:
-            system_tools = get_system_tool_specs()
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Memory tools
-        if self._vector_store is not None:
-            try:
-                system_tools.extend(make_memory_tool_specs(self._cli_user))
-            except Exception:
-                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Worktree tools
-        try:
-            system_tools.extend(get_worktree_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Task tools
-        try:
-            system_tools.extend(get_task_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Goal tools
-        try:
-            system_tools.extend(get_goal_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Arbiter tools
-        try:
-            system_tools.extend(get_arbiter_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Profile tools
-        try:
-            system_tools.extend(get_profile_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # LSP tool
-        try:
-            system_tools.extend(get_lsp_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Browser tool
-        try:
-            system_tools.extend(get_browser_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Plugin tool registration + capability backfill + grant filtering moved
-        # to obscura.composition.blocks.plugins.install_plugin_tools, which is
-        # invoked from create() after the client is built. This collapses the
-        # duplicate REPL paths in _repl_loop.py + this module onto a single
-        # canonical pipeline. Drift defence lives in tests/composition/.
-        return system_tools, len(system_tools)
+        System + plugin tool registration moved to the composition layer:
+            - obscura.composition.blocks.system_tools.install_system_tools
+            - obscura.composition.blocks.plugins.install_plugin_tools
+        Both run from create() after the client is built (via the
+        AgentSession wrapper). This collapses the previous
+        ``_assemble_tools`` duplication of REPL behaviour onto the single
+        canonical pipeline. Drift defence lives in tests/composition/.
+        """
+        return [], 0
 
     def _wire_callbacks_and_hooks(
         self,

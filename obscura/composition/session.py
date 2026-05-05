@@ -173,9 +173,12 @@ class AgentSession:
 
     # Optional features (None when the relevant block opted out)
     vector_store: Any = None
+    context_router: Any = None
+    turn_classifier: Any = None
     capability_resolver: Any = None
     project_hooks: Any = None
     tool_router: Any = None
+    browser_bridge: Any = None
 
     # Resource teardown queue (LIFO)
     _resources: list[_Closer] = field(default_factory=_empty_resources)

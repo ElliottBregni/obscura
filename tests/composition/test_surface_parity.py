@@ -78,20 +78,25 @@ async def test_repl_api_a2a_register_same_plugin_tools(
     api_session = await build_api_session(config, user=fake_user)
     a2a_session = await build_a2a_session(config, task_id="t-test")
 
-    repl_tools = {t.name for t in repl_session.registry.all()}
-    api_tools = {t.name for t in api_session.registry.all()}
-    a2a_tools = {t.name for t in a2a_session.registry.all()}
+    # browser_* tools are REPL-only (Chrome side-panel doesn't reach API/A2A).
+    # Every other tool must be identical across all surfaces.
+    def _comparable(names: set[str]) -> set[str]:
+        return {n for n in names if not n.startswith("browser_")}
+
+    repl_tools = _comparable({t.name for t in repl_session.registry.all()})
+    api_tools = _comparable({t.name for t in api_session.registry.all()})
+    a2a_tools = _comparable({t.name for t in a2a_session.registry.all()})
 
     assert repl_tools == api_tools == a2a_tools, (
-        "All three surfaces must register the same plugin tool set.\n"
+        "All three surfaces must register the same non-browser tool set.\n"
         f"  REPL only: {repl_tools - api_tools - a2a_tools}\n"
         f"  API only:  {api_tools - repl_tools - a2a_tools}\n"
         f"  A2A only:  {a2a_tools - repl_tools - api_tools}"
     )
     # If we register zero tools the test isn't meaningful; sanity check
     assert len(repl_tools) > 0, (
-        "Expected builtin plugin tools to register on every surface; "
-        "got 0 — check that builtin manifests are discoverable in test env."
+        "Expected builtin plugin + system tools to register on every "
+        "surface; got 0 — check that fixtures discoverable in test env."
     )
 
 

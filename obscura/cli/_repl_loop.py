@@ -123,7 +123,6 @@ from obscura.core.types import (
 )
 from obscura.eval.models import EvalRunSummary
 from obscura.eval.store import EvalResultStore
-from obscura.integrations.browser.client import attach_if_running
 from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summary
 from obscura.kairos.engine import KairosEngine, is_kairos_enabled
 from obscura.kairos.frustration import FrustrationDetector
@@ -136,12 +135,9 @@ from obscura.memory_channels import (
 )
 from obscura.plugins.builtins import list_builtin_plugin_ids
 from obscura.plugins.registries.capability_index import CapabilityIndex
-from obscura.tools.memory_tools import (
-    build_channels_prompt_section,
-    make_memory_tool_specs,
-)
+from obscura.tools.memory_tools import build_channels_prompt_section
 from obscura.tools.swarm import build_agent_catalog, load_agent_configs
-from obscura.tools.system import UI, Session, get_system_tool_specs
+from obscura.tools.system import UI, Session
 from obscura.voice.session import VoiceSession
 
 _log = logging.getLogger("obscura.cli")
@@ -293,41 +289,10 @@ async def repl(
         custom_sections=custom_sections or None,
     )
 
-    # Gather system tools BEFORE client starts
-    system_tools: list[Any] = []
-    if tools_enabled:
-        try:
-            system_tools = get_system_tool_specs()
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-        if vector_store is not None:
-            try:
-                system_tools.extend(make_memory_tool_specs(cli_user))
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-
-        for _getter, _mod in [
-            ("get_worktree_tool_specs", "obscura.tools.worktree"),
-            ("get_task_tool_specs", "obscura.tools.task_tools"),
-            ("get_goal_tool_specs", "obscura.tools.goal_tools"),
-            ("get_profile_tool_specs", "obscura.tools.profile_tools"),
-            ("get_lsp_tool_specs", "obscura.tools.lsp"),
-            ("get_browser_tool_specs", "obscura.tools.browser"),
-        ]:
-            try:
-                import importlib
-
-                _m = importlib.import_module(_mod)
-                system_tools.extend(getattr(_m, _getter)())
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Plugin tool registration + capability backfill + grant filtering moved
-    # to obscura.composition.blocks.plugins.install_plugin_tools, which runs
-    # inside build_repl_session() below. tool_count is computed from the
-    # session's registry after composition.
-    tool_count = len(system_tools)
+    # System + plugin tool registration was extracted to the composition
+    # layer (install_system_tools + install_plugin_tools). Both run inside
+    # build_repl_session() below; tool_count is computed from the session's
+    # registry after composition.
 
     # Wire the ask_user callback
     if tools_enabled:
@@ -506,12 +471,15 @@ async def repl(
     _repl_session = await build_repl_session(
         _session_config,
         user=cli_user,
-        preregistered_tools=system_tools or None,
         project_hooks=project_hooks,
+        vector_store=vector_store,
+        context_router=context_router,
+        turn_classifier=turn_classifier,
     )
 
     async with _repl_session as _session:
         client = _session.client
+        tool_count = len(_session.registry.all())
         # Wire eval-driven tool router using the capability index built by
         # install_plugin_tools (no second PluginLoader pass — drift defence).
         if tools_enabled:
@@ -601,14 +569,14 @@ async def repl(
         # Best-effort browser bridge attach
         browser_bridge_client: Any = None
         browser_status: dict[str, Any] | None = None
-        if tools_enabled:
-            try:
-                browser_bridge_client, browser_status = await attach_if_running(
-                    client.register_tool,
-                )
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-                browser_bridge_client, browser_status = None, None
+        # Browser bridge attach moved to obscura.composition.blocks.browser_bridge.
+        # Read the post-build state off the session for the banner below.
+        browser_bridge_client = _session.browser_bridge
+        browser_status = (
+            getattr(browser_bridge_client, "status", None)
+            if browser_bridge_client is not None
+            else None
+        )
         if browser_status is not None:
             tool_count += int(browser_status.get("tool_count") or 0)
 
