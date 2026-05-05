@@ -747,9 +747,9 @@ class Agent:
         self._providers = providers
         self._broker_context = ctx
 
-        # Sync broker → client (for LLM function calling schemas)
+        # Sync broker → session (for LLM function calling schemas)
         for tool_spec in broker.all_specs():
-            self._client.register_tool(tool_spec)
+            self._session.register_tool(tool_spec)
 
         # Wire eval-driven tool router into the backend
         try:
@@ -757,7 +757,7 @@ class Agent:
             from obscura.core.tool_router import ToolRouter
             from obscura.core.tool_score_index import ToolScoreIndex
 
-            backend_obj = getattr(self._client, "_backend", None)
+            backend_obj = self._session.backend
             if backend_obj is not None and hasattr(backend_obj, "set_tool_router"):
                 # Load persisted scores from previous sessions
                 scores_db = str(
@@ -800,11 +800,11 @@ class Agent:
             manifest_hooks = self.manifest_proxy.hook_registry
             if manifest_hooks.count > 0:
                 # If the client has a hook registry, merge; otherwise set it
-                existing: HookRegistry | None = getattr(self._client, "_hooks", None)
+                existing: HookRegistry | None = self._session.hooks
                 if existing is not None:
                     existing.merge(manifest_hooks)
                 else:
-                    self._client._hooks = manifest_hooks  # pyright: ignore[reportPrivateUsage]
+                    self._session.hooks = manifest_hooks
 
         # Register eval hooks (tool checks + past-failure memory injection)
         if self.config.eval_tools:
@@ -816,10 +816,10 @@ class Agent:
                 )
                 from obscura.core.enums.agent import AgentEventKind as _AEK
 
-                hook_reg: HookRegistry | None = getattr(self._client, "_hooks", None)
+                hook_reg: HookRegistry | None = self._session.hooks
                 if hook_reg is None:
                     hook_reg = HookRegistry()
-                    self._client._hooks = hook_reg  # pyright: ignore[reportPrivateUsage]
+                    self._session.hooks = hook_reg
 
                 # Defer factory execution until the hook is actually run. Some
                 # test suites patch the factory with AsyncMock() which would
@@ -863,10 +863,10 @@ class Agent:
                 from obscura.core.lifecycle import make_tool_pace_hook
                 from obscura.core.enums.agent import AgentEventKind as _AEK
 
-                hook_reg_: HookRegistry | None = getattr(self._client, "_hooks", None)
+                hook_reg_: HookRegistry | None = self._session.hooks
                 if hook_reg_ is None:
                     hook_reg_ = HookRegistry()
-                    self._client._hooks = hook_reg_  # pyright: ignore[reportPrivateUsage]
+                    self._session.hooks = hook_reg_
 
                 count_hook, remind_hook, text_reset_hook = make_tool_pace_hook(
                     max_consecutive=self.config.max_consecutive_tools,

@@ -206,8 +206,33 @@ class AgentSession:
 
     @property
     def registry(self) -> ToolRegistry:
-        """The live tool registry (owned by the client)."""
+        """The live tool registry (owned by the client today)."""
         return self.client._tool_registry  # pyright: ignore[reportPrivateUsage]
+
+    @property
+    def backend(self) -> Any:
+        """The active LLM backend (owned by the client today).
+
+        Public accessor that surfaces and Agent.start use instead of
+        reaching into ``session.client._backend``. Step in the
+        ObscuraClient absorption — when the backend moves directly onto
+        AgentSession, this property's body changes but the API stays.
+        """
+        return self.client._backend  # pyright: ignore[reportPrivateUsage]
+
+    @property
+    def hooks(self) -> Any:
+        """The project hook registry threaded into the agent loop."""
+        return getattr(self.client, "_hooks", None)
+
+    @hooks.setter
+    def hooks(self, value: Any) -> None:
+        self.client._hooks = value  # pyright: ignore[reportPrivateUsage]
+
+    @property
+    def user(self) -> Any:
+        """The authenticated user (or None for unauth surfaces)."""
+        return getattr(self.client, "_user", None)
 
     def add_tool(self, spec: ToolSpec) -> bool:
         """Register a tool with the underlying client + backend.
@@ -220,8 +245,19 @@ class AgentSession:
             return False
         self.registry.register(spec)
         # Mirror to backend so it shows up in tool-use prompts
-        self.client._backend.register_tool(spec)  # pyright: ignore[reportPrivateUsage]
+        self.backend.register_tool(spec)
         return True
+
+    def register_tool(self, spec: ToolSpec) -> bool:
+        """Public alias for ``add_tool``. Forwards to the same de-duped
+        registration so ObscuraClient-style ``client.register_tool(spec)``
+        callers can migrate to ``session.register_tool(spec)``.
+        """
+        return self.add_tool(spec)
+
+    def list_tools(self) -> list[ToolSpec]:
+        """Return the active tool specs."""
+        return self.registry.all()
 
     def update_system_prompt(self, prompt: str) -> None:
         """Mutate the active system prompt post-build.
