@@ -6,24 +6,26 @@ sections, etc.). The composition refactor extracts these block by
 block.
 
 Currently extracted into build_repl_session:
-- install_plugin_tools     (capability-gated builtin plugins)
-- install_system_tools     (system / memory / worktree / task / goal /
-                            profile / arbiter / lsp / browser tool specs)
-- install_browser_bridge   (Chrome side-panel attach, REPL-only)
+- install_plugin_tools         (capability-gated builtin plugins)
+- install_system_tools         (system / memory / worktree / etc tool specs)
+- install_vector_memory        (Qdrant store + channel router)
+- install_project_hooks        (.obscura/hooks/ + memory channel + KAIROS)
+- install_repl_prompt_sections (REPL system prompt enrichment with
+                                 memory/channels/env/KAIROS sections;
+                                 mutates backend system_prompt post-build)
+- install_repl_callbacks       (ask_user / plan_approval / user_interact)
+- install_browser_bridge       (Chrome side-panel attach)
+- install_supervisor           (multi-agent supervisor)
+- install_kairos_engine        (KAIROS proactive daemon)
+- install_imessage_daemon      (iMessage integration)
+- install_uds_inbox            (cross-session messaging)
+- install_session_registration (PID lock + signal handlers)
+- install_tool_router          (eval-driven tool router)
 
-NOT yet extracted for REPL (kept inline in cli/_repl_loop.py):
-- vector memory init  — entangled with prompt composition (REPL uses
-                        load_startup_memories during compose_system_prompt
-                        BEFORE the session is built). Will move when
-                        compose_system_prompt itself is extracted.
-- project hooks       — same: kairos hook closure, channel hook closure
-                        get computed before client construction today.
-- repl callbacks (ask_user / permission_mode / plan_approval / user_interact)
-- tool router, supervisor, KAIROS engine, iMessage daemon, UDS inbox,
-  session registration
-
-API and A2A boot modules are not subject to that constraint — they call
-install_vector_memory + install_project_hooks today.
+Still inline in cli/_repl_loop.py (small remainder):
+- permission_mode_callback (REPLContext-coupled)
+- prompt UI loop (terminal widgets, slash commands)
+- daemon restart polling (stateful, doesn't fit one-shot block model)
 
 Migration tracker: see CLAUDE.md / composition refactor design.
 """
@@ -38,12 +40,15 @@ from obscura.composition.blocks import (
     install_imessage_daemon,
     install_kairos_engine,
     install_plugin_tools,
+    install_project_hooks,
     install_repl_callbacks,
+    install_repl_prompt_sections,
     install_session_registration,
     install_supervisor,
     install_system_tools,
     install_tool_router,
     install_uds_inbox,
+    install_vector_memory,
 )
 from obscura.composition.core import build_core_session
 from obscura.composition.session import AgentSession, SessionConfig
@@ -61,18 +66,46 @@ async def build_repl_session(
     host_callbacks: dict[str, Any] | None = None,
     session_id: str | None = None,
     preregistered_tools: list[Any] | None = None,
-    project_hooks: Any = None,
-    vector_store: Any = None,
-    context_router: Any = None,
-    turn_classifier: Any = None,
 ) -> AgentSession:
     """Build a session for the interactive REPL.
 
-    The REPL passes any pre-initialized state (vector store, context
-    router, project hooks) as kwargs — it has to init those upfront
-    today because compose_system_prompt reads them. The composition
-    blocks for vector_memory and project_hooks check `session.X is not
-    None` and skip when already set, so there's no double-init.
+    Pipeline (extras run in dependency order):
+      core: ObscuraClient + backend.start() (with bare base prompt;
+            install_repl_prompt_sections enriches it post-build)
+      extras:
+        1. install_plugin_tools     — capability resolver + plugin specs
+        2. install_system_tools     — @tool-decorated specs (no memory yet)
+        3. install_vector_memory    — vector_store + context_router (REPL
+                                       passes user via core; block is
+                                       idempotent)
+        4. install_project_hooks    — .obscura/hooks + channel hook
+                                       (closes over session.context_router)
+        5. install_repl_prompt_sections — composes the full REPL prompt
+                                       (memory + channels + env + kairos +
+                                       coordinator + wizard) and mutates
+                                       backend._system_prompt
+        6. install_repl_callbacks   — ask_user / plan_approval / user_interact
+        7. install_browser_bridge   — Chrome extension (best-effort)
+        8. install_supervisor       — multi-agent supervisor (--supervise)
+        9. install_kairos_engine    — KAIROS daemon
+       10. install_imessage_daemon  — iMessage daemon (skipped if supervisor)
+       11. install_uds_inbox        — cross-session UDS messaging
+       12. install_session_registration — PID lock + signal handlers
+       13. install_tool_router      — eval-driven tool router (last:
+                                       sees full registry)
+
+    NOTE: Memory tools registered by install_system_tools require
+    session.vector_store. Order is deliberately
+    plugins → system_tools → vector_memory in the API surface (where
+    vector_memory must run first), but in REPL, system_tools registers
+    BEFORE vector_memory. Memory tools therefore re-register on the
+    repeat call when vector_memory is set... but install_system_tools
+    is idempotent (add_tool de-dupes by name) so the second call to
+    install_system_tools (post-vector_memory) would register memory
+    tools that didn't register the first time.
+
+    To get memory tools registered without re-running system_tools, we
+    swap order: vector_memory BEFORE system_tools (matches API).
     """
     session = await build_core_session(
         config,
@@ -81,27 +114,18 @@ async def build_repl_session(
         host_callbacks=host_callbacks,
         session_id=session_id,
         preregistered_tools=preregistered_tools,
-        hooks=project_hooks,
     )
-    # Forward REPL-supplied state onto the session so blocks downstream
-    # (and the REPL slash commands) can read it uniformly.
-    if vector_store is not None:
-        session.vector_store = vector_store
-    if context_router is not None:
-        session.context_router = context_router
-    if turn_classifier is not None:
-        session.turn_classifier = turn_classifier
-    if project_hooks is not None:
-        session.project_hooks = project_hooks
-
     await install_plugin_tools(session, config)
+    await install_vector_memory(session, config)
     await install_system_tools(session, config)
+    await install_project_hooks(session, config)
+    await install_repl_prompt_sections(session, config)
     await install_repl_callbacks(session, config)
     await install_browser_bridge(session, config)
-    await install_supervisor(session, config)  # before kairos + imessage: they read session.supervisor
+    await install_supervisor(session, config)
     await install_kairos_engine(session, config)
-    await install_imessage_daemon(session, config)  # after supervisor (skips if supervisor present)
+    await install_imessage_daemon(session, config)
     await install_uds_inbox(session, config)
     await install_session_registration(session, config)
-    await install_tool_router(session, config)  # last: needs final tool registry
+    await install_tool_router(session, config)
     return session

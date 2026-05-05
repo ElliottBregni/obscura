@@ -28,12 +28,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from obscura.agent import AGENT_TYPE_REGISTRY
 from obscura.agent.agents import AgentStatus
-from obscura.agent.coordinator import (
-    get_coordinator_system_prompt,
-    is_coordinator_mode,
-)
 from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
 from obscura.auth.cli_user import current_cli_user
 from obscura.cli._env_loader import bootstrap_env
@@ -70,28 +65,16 @@ from obscura.cli.render import (
 )
 from obscura.cli.tips import TipScheduler
 from obscura.cli.tui_effects import ultrathink_banner
-from obscura.cli.vector_memory_bridge import (
-    init_vector_store,
-    load_startup_memories,
-    run_startup_maintenance,
-)
 from obscura.composition.repl import build_repl_session
 from obscura.composition.session import SessionConfig
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
 from obscura.core.commit_attribution import get_attribution_tracker
-from obscura.core.context import load_obscura_memory
 from obscura.core.deep_log import dlog
-from obscura.core.enums.agent import AgentEventKind, Backend
+from obscura.core.enums.agent import Backend
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.event_store import SQLiteEventStore
-from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.prompt_cache import PromptCacheManager
-from obscura.core.settings import load_all_hooks
-from obscura.core.system_prompts import (
-    compose_environment_context,
-    compose_system_prompt,
-)
 from obscura.core.types import (
     SessionRef,
     ToolChoice,
@@ -99,16 +82,8 @@ from obscura.core.types import (
 from obscura.eval.models import EvalRunSummary
 from obscura.eval.store import EvalResultStore
 from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summary
-from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+from obscura.kairos.engine import is_kairos_enabled
 from obscura.kairos.frustration import FrustrationDetector
-from obscura.memory_channels import (
-    ContextRouter,
-    TurnClassifier,
-    load_channels_from_config,
-)
-from obscura.plugins.builtins import list_builtin_plugin_ids
-from obscura.tools.memory_tools import build_channels_prompt_section
-from obscura.tools.swarm import build_agent_catalog, load_agent_configs
 from obscura.tools.system import Session
 from obscura.voice.session import VoiceSession
 
@@ -157,109 +132,16 @@ async def repl(
     # Create authenticated user for vector memory + memory tools
     cli_user = current_cli_user()
 
-    # Initialize vector memory store
-    vector_store = init_vector_store(cli_user)
+    # Vector memory init + memory channel router moved to
+    # obscura.composition.blocks.vector_memory.install_vector_memory
+    # (runs inside build_repl_session below).
 
-    # Run decay maintenance in background
-    if vector_store is not None:
-        run_startup_maintenance(vector_store)
-
-    # Initialize memory channel router
-    context_router = None
-    turn_classifier = None
-    if vector_store is not None:
-        try:
-            _channels = load_channels_from_config()
-            if _channels:
-                context_router = ContextRouter(_channels, vector_store)
-                turn_classifier = TurnClassifier(_channels)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Compose system prompt
-    include_default = not no_default_prompt
-    if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
-        include_default = False
-
-    memory_context = load_obscura_memory(sid, db_path)
-    custom_sections: list[str] = [memory_context] if memory_context else []
-
-    # Inject user identity & preferences
-    prefs_path = resolve_obscura_home() / "memory" / "preferences.md"
-    if prefs_path.exists():
-        prefs_text = prefs_path.read_text().strip()
-        if prefs_text:
-            custom_sections.append(f"# User Identity & Preferences\n\n{prefs_text}")
-
-    # Inject vector memory context at session start
-    if vector_store is not None:
-        vm_startup = load_startup_memories(vector_store, sid, top_k=3)
-        if vm_startup:
-            custom_sections.append(vm_startup)
-
-    # Inject memory channel documentation
-    if context_router is not None:
-        try:
-            channels_doc = build_channels_prompt_section(context_router.channels)
-            if channels_doc:
-                custom_sections.append(channels_doc)
-
-            sys_channel_ctx = context_router.get_system_channels()
-            if sys_channel_ctx:
-                custom_sections.append(sys_channel_ctx)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Inject environment context (available plugins, capabilities, agent types)
-    try:
-        env_section = compose_environment_context(
-            plugin_ids=list_builtin_plugin_ids(),
-            capabilities=[
-                "shell.exec",
-                "file.read",
-                "file.write",
-                "git.ops",
-                "web.browse",
-                "search.web",
-                "security.scan",
-            ],
-            agent_types=list(AGENT_TYPE_REGISTRY.keys()),
-        )
-        if env_section:
-            custom_sections.append(env_section)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Inject KAIROS context
-    try:
-        if is_kairos_enabled():
-            _probe_engine = KairosEngine()
-            _kairos_sys = _probe_engine.get_system_prompt_addition()
-            if _kairos_sys:
-                custom_sections.append(_kairos_sys)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Inject coordinator system prompt
-    try:
-        if is_coordinator_mode():
-            custom_sections.append(get_coordinator_system_prompt())
-            try:
-                catalog = build_agent_catalog(load_agent_configs())
-                if catalog:
-                    custom_sections.append(
-                        f"## Available Specialist Agents\n\n{catalog}"
-                    )
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    combined_system = compose_system_prompt(
-        base=system,
-        include_default=include_default,
-        custom_sections=custom_sections or None,
-    )
+    # System-prompt composition moved to
+    # obscura.composition.blocks.repl_prompt.install_repl_prompt_sections.
+    # The base prompt is what the caller provided; the block reads
+    # vector_store/context_router/etc. from the session and re-primes
+    # the backend's system_prompt post-build.
+    combined_system = system
 
     # System + plugin tool registration was extracted to the composition
     # layer (install_system_tools + install_plugin_tools). Both run inside
@@ -281,51 +163,11 @@ async def repl(
         except Exception:
             _log.debug("suppressed exception in repl", exc_info=True)
 
-    # Load project hooks
-    project_hooks = None
-    try:
-        _hook_registry = load_all_hooks()
-        if _hook_registry.count > 0:
-            project_hooks = _hook_registry
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Wire memory channel TOOL_CALL hook
+    # Project hooks loading + memory-channel hook + KAIROS hooks moved to
+    # obscura.composition.blocks.project_hooks.install_project_hooks.
+    # The block reads session.context_router after install_vector_memory
+    # runs, so the channel hook closure binds correctly.
     _tool_router_ref = None
-    if context_router is not None:
-        if project_hooks is None:
-            project_hooks = HookRegistry()
-
-        def _channel_tool_signal(event: Any) -> None:
-            context_router.update_signals_from_event(event)
-            if _tool_router_ref is not None and context_router.signals.file_paths:
-                _tool_router_ref.set_file_context(
-                    list(context_router.signals.file_paths),
-                )
-
-        project_hooks.add_after(_channel_tool_signal, AgentEventKind.TOOL_CALL)
-
-    # Wire Kairos tool-call hooks
-    _kairos_engine: Any = None
-    try:
-        if is_kairos_enabled():
-            if project_hooks is None:
-                project_hooks = HookRegistry()
-
-            def _kairos_tool_hook(event: Any) -> None:
-                if _kairos_engine is not None and _kairos_engine.is_running:
-                    tool = getattr(event, "tool_name", "") or ""
-                    args = str(getattr(event, "tool_input", "") or "")[:80]
-                    _kairos_engine.log_tool_use(tool, args)
-
-            def _kairos_turn_hook(event: Any) -> None:
-                if _kairos_engine is not None and _kairos_engine.is_running:
-                    _kairos_engine.log_agent_event("turn_complete")
-
-            project_hooks.add_after(_kairos_tool_hook, AgentEventKind.TOOL_CALL)
-            project_hooks.add_after(_kairos_turn_hook, AgentEventKind.TURN_COMPLETE)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
 
     # Build session via composition. install_plugin_tools runs inside,
     # registering all plugin tool specs onto the session's registry +
@@ -355,10 +197,6 @@ async def repl(
     _repl_session = await build_repl_session(
         _session_config,
         user=cli_user,
-        project_hooks=project_hooks,
-        vector_store=vector_store,
-        context_router=context_router,
-        turn_classifier=turn_classifier,
     )
 
     async with _repl_session as _session:
@@ -402,9 +240,9 @@ async def repl(
             tools_enabled=tools_enabled,
             mcp_configs=mcp_configs,
             confirm_enabled=confirm,
-            vector_store=vector_store,
-            context_router=context_router,
-            turn_classifier=turn_classifier,
+            vector_store=_session.vector_store,
+            context_router=_session.context_router,
+            turn_classifier=_session.turn_classifier,
         )
 
         # --- Single-shot mode ---

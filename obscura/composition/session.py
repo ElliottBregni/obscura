@@ -171,6 +171,11 @@ class AgentSession:
     # exposed here for blocks that need to reference them.
     host_callbacks: dict[str, Any] = field(default_factory=_empty_str_any_dict)
 
+    # Live system prompt (mutated by install_repl_prompt_sections post-build).
+    # Both Copilot and Claude backends read self._system_prompt per-stream,
+    # so update_system_prompt propagates on the next turn.
+    system_prompt: str = ""
+
     # Optional features (None when the relevant block opted out)
     vector_store: Any = None
     context_router: Any = None
@@ -217,6 +222,25 @@ class AgentSession:
         # Mirror to backend so it shows up in tool-use prompts
         self.client._backend.register_tool(spec)  # pyright: ignore[reportPrivateUsage]
         return True
+
+    def update_system_prompt(self, prompt: str) -> None:
+        """Mutate the active system prompt post-build.
+
+        Both Copilot and Claude backends read ``self._system_prompt`` at
+        each stream call (not at start), so mutation here propagates on
+        the next turn. Used by ``install_repl_prompt_sections`` to
+        compose REPL-specific memory/channel/env sections AFTER
+        vector_memory + project_hooks have populated the session.
+        """
+        self.system_prompt = prompt
+        # Update client + backend (private mutations — both providers
+        # read self._system_prompt per-stream, so this propagates)
+        self.client._system_prompt = prompt  # pyright: ignore[reportPrivateUsage]
+        backend = self.client._backend  # pyright: ignore[reportPrivateUsage]
+        if hasattr(backend, "_system_prompt"):
+            # Backends store as private str; setattr to keep pyright quiet
+            # about the protocol not declaring it
+            setattr(backend, "_system_prompt", prompt)  # noqa: B010
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
