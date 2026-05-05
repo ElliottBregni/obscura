@@ -138,24 +138,82 @@ def _build_github_pr_view(m: Match[str]) -> PreflightMatch | None:
     )
 
 
-# GitLab MR URL → glab mr view
+# GitHub issue URL → gh issue view
+_GITHUB_ISSUE_RE = re.compile(
+    r"https?://github\.com/([\w\-.]+)/([\w\-.]+)/issues/(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _build_github_issue_view(m: Match[str]) -> PreflightMatch | None:
+    owner, repo, issue = m.group(1), m.group(2), m.group(3)
+    return PreflightMatch(
+        tool_name="run_shell",
+        tool_input={
+            "command": (
+                f"gh issue view {issue} -R {owner}/{repo} "
+                "--json title,body,state,labels"
+            ),
+        },
+        reason=(
+            f"User referenced GitHub issue {owner}/{repo}#{issue}. "
+            "Preflight fetched issue metadata via `gh issue view`."
+        ),
+    )
+
+
+# GitLab MR URL (gitlab.com OR self-hosted) → glab mr view.
+# The ``-R`` flag accepts ``host:path`` for non-gitlab.com instances,
+# so we capture the hostname separately and pass it through when it
+# isn't the public host.
 _GITLAB_MR_RE = re.compile(
-    r"https?://gitlab\.com/([\w\-./]+?)/-/merge_requests/(\d+)",
+    r"https?://([\w\-.]+)/([\w\-./]+?)/-/merge_requests/(\d+)",
     re.IGNORECASE,
 )
 
 
 def _build_gitlab_mr_view(m: Match[str]) -> PreflightMatch | None:
-    repo, mr = m.group(1), m.group(2)
+    host, repo, mr = m.group(1), m.group(2), m.group(3)
+    # Skip non-GitLab hosts that happen to expose ``/-/merge_requests/``
+    # in their URL space (rare but the suffix isn't reserved). Only fire
+    # when the hostname looks like GitLab.
+    host_lower = host.lower()
+    if "gitlab" not in host_lower:
+        return None
+    repo_arg = repo if host_lower == "gitlab.com" else f"{host}:{repo}"
     return PreflightMatch(
         tool_name="run_shell",
         tool_input={
-            "command": f"glab mr view {mr} -R {repo}",
+            "command": f"glab mr view {mr} -R {repo_arg}",
         },
         reason=(
-            f"User referenced GitLab MR {repo}!{mr}. Preflight fetched "
-            "MR metadata via `glab mr view` so review can start from "
-            "real data."
+            f"User referenced GitLab MR {repo}!{mr} on {host}. Preflight "
+            "fetched MR metadata via `glab mr view`."
+        ),
+    )
+
+
+# GitLab issue URL → glab issue view
+_GITLAB_ISSUE_RE = re.compile(
+    r"https?://([\w\-.]+)/([\w\-./]+?)/-/issues/(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _build_gitlab_issue_view(m: Match[str]) -> PreflightMatch | None:
+    host, repo, issue = m.group(1), m.group(2), m.group(3)
+    host_lower = host.lower()
+    if "gitlab" not in host_lower:
+        return None
+    repo_arg = repo if host_lower == "gitlab.com" else f"{host}:{repo}"
+    return PreflightMatch(
+        tool_name="run_shell",
+        tool_input={
+            "command": f"glab issue view {issue} -R {repo_arg}",
+        },
+        reason=(
+            f"User referenced GitLab issue {repo}#{issue} on {host}. "
+            "Preflight fetched issue metadata via `glab issue view`."
         ),
     )
 
@@ -172,9 +230,19 @@ DEFAULT_RULES: tuple[PreflightRule, ...] = (
         build=_build_github_pr_view,
     ),
     PreflightRule(
+        name="github_issue_url",
+        pattern=_GITHUB_ISSUE_RE,
+        build=_build_github_issue_view,
+    ),
+    PreflightRule(
         name="gitlab_mr_url",
         pattern=_GITLAB_MR_RE,
         build=_build_gitlab_mr_view,
+    ),
+    PreflightRule(
+        name="gitlab_issue_url",
+        pattern=_GITLAB_ISSUE_RE,
+        build=_build_gitlab_issue_view,
     ),
 )
 

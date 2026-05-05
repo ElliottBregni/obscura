@@ -72,6 +72,45 @@ def test_gitlab_mr_url_matches() -> None:
     assert "freightverify-nextgen/FV-Platform-Main" in cmd
 
 
+def test_self_hosted_gitlab_mr_uses_host_in_repo_arg() -> None:
+    """Self-hosted GitLab needs ``host:path`` for ``glab -R``."""
+    matches = pp.find_matches(
+        "review https://gitlab.example.com/team/proj/-/merge_requests/42",
+    )
+    cmd = matches[0].tool_input["command"]
+    assert isinstance(cmd, str)
+    assert "glab mr view 42" in cmd
+    assert "gitlab.example.com:team/proj" in cmd
+
+
+def test_non_gitlab_host_with_merge_requests_path_does_not_match() -> None:
+    """A random host with ``/-/merge_requests/`` shouldn't trigger glab."""
+    matches = pp.find_matches(
+        "see https://example.com/foo/-/merge_requests/1",
+    )
+    assert matches == []
+
+
+def test_github_issue_url_matches() -> None:
+    matches = pp.find_matches(
+        "what's the deal with https://github.com/anthropics/claude-code/issues/456",
+    )
+    cmd = matches[0].tool_input["command"]
+    assert isinstance(cmd, str)
+    assert "gh issue view 456" in cmd
+    assert "anthropics/claude-code" in cmd
+
+
+def test_gitlab_issue_url_matches() -> None:
+    matches = pp.find_matches(
+        "context for https://gitlab.com/foo/bar/-/issues/7",
+    )
+    cmd = matches[0].tool_input["command"]
+    assert isinstance(cmd, str)
+    assert "glab issue view 7" in cmd
+    assert "foo/bar" in cmd
+
+
 def test_multiple_matches_in_one_prompt() -> None:
     matches = pp.find_matches(
         "can you use glab? also review "
