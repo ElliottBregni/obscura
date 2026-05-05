@@ -111,6 +111,72 @@ def test_gitlab_issue_url_matches() -> None:
     assert "foo/bar" in cmd
 
 
+# ---------------------------------------------------------------------------
+# Python import question
+# ---------------------------------------------------------------------------
+
+
+def test_can_python_import_matches() -> None:
+    matches = pp.find_matches("can python import requests?")
+    py_matches = [m for m in matches if 'import_module("requests")' in str(m.tool_input.get("command", ""))]
+    assert len(py_matches) == 1
+
+
+def test_is_module_installed_matches() -> None:
+    matches = pp.find_matches("is the numpy module installed?")
+    py_matches = [m for m in matches if 'import_module("numpy")' in str(m.tool_input.get("command", ""))]
+    assert len(py_matches) == 1
+
+
+def test_does_module_exist_matches() -> None:
+    matches = pp.find_matches("does the foo_bar module exist on this system?")
+    py_matches = [m for m in matches if 'import_module("foo_bar")' in str(m.tool_input.get("command", ""))]
+    assert len(py_matches) == 1
+
+
+def test_python_import_rejects_shell_metachar_module_names() -> None:
+    """Shell-injection-shaped module names must not produce a tool call."""
+    matches = pp.find_matches("can python import foo; rm -rf /")
+    py_matches = [m for m in matches if "rm -rf" in str(m.tool_input.get("command", ""))]
+    assert py_matches == []
+
+
+def test_unrelated_import_phrasing_does_not_match_python_rule() -> None:
+    """`import` in a sentence without anchor words shouldn't fire."""
+    matches = pp.find_matches("write me an import statement for csv")
+    py_matches = [m for m in matches if "importlib" in str(m.tool_input.get("command", ""))]
+    assert py_matches == []
+
+
+# ---------------------------------------------------------------------------
+# npm package question
+# ---------------------------------------------------------------------------
+
+
+def test_npm_view_matches() -> None:
+    matches = pp.find_matches("what's the latest version of lodash on npm?")
+    npm_matches = [m for m in matches if "npm view lodash" in str(m.tool_input.get("command", ""))]
+    assert len(npm_matches) == 1
+
+
+def test_is_pkg_on_npm_matches() -> None:
+    matches = pp.find_matches("is react published on npm?")
+    npm_matches = [m for m in matches if "npm view react" in str(m.tool_input.get("command", ""))]
+    assert len(npm_matches) == 1
+
+
+def test_npm_view_explicit_command_matches() -> None:
+    matches = pp.find_matches("can you run npm view @types/node")
+    npm_matches = [m for m in matches if "npm view @types/node" in str(m.tool_input.get("command", ""))]
+    assert len(npm_matches) == 1
+
+
+def test_npm_rejects_shell_metachar_in_pkg_name() -> None:
+    matches = pp.find_matches("is foo;rm on npm?")
+    npm_matches = [m for m in matches if ";rm" in str(m.tool_input.get("command", ""))]
+    assert npm_matches == []
+
+
 def test_multiple_matches_in_one_prompt() -> None:
     matches = pp.find_matches(
         "can you use glab? also review "

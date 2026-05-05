@@ -200,6 +200,86 @@ _GITLAB_ISSUE_RE = re.compile(
 )
 
 
+# "can python import X" / "is X importable" / "does the X module exist".
+# We require an explicit "python" / "module" / "package" / "importable"
+# anchor to avoid matching every English "import" usage. Alternation
+# order matters — the most specific (capturing) alts come first so
+# alt 1's leftmost-match doesn't shadow alt 3.
+_PYTHON_IMPORT_RE = re.compile(
+    r"\b(?:can\s+(?:python\s+)?import\s+([\w.]+)"
+    r"|is\s+(?:the\s+)?([\w.]+)\s+(?:python\s+)?(?:module|package)\s+(?:installed|importable|available)"
+    r"|does\s+(?:the\s+)?([\w.]+)\s+(?:module|package)\s+exist)"
+    r"\b",
+    re.IGNORECASE,
+)
+
+
+def _build_python_import_check(m: Match[str]) -> PreflightMatch | None:
+    # Try each capture group; the first non-None is the module name.
+    module = next((g for g in m.groups() if g), None)
+    if not module:
+        return None
+    # Drop trailing punctuation/articles that the regex left attached.
+    module = module.strip().lower()
+    if module in _BINARY_QUESTION_STOPWORDS or len(module) < 2:
+        return None
+    # Module names contain only letters/digits/underscore/dot. Reject
+    # anything else as a precaution against shell injection (we shlex-quote
+    # below regardless).
+    if not re.fullmatch(r"[\w.]+", module):
+        return None
+    quoted = module.replace("'", "")
+    return PreflightMatch(
+        tool_name="run_shell",
+        tool_input={
+            "command": (
+                f"python3 -c 'import importlib, sys; "
+                f"m = importlib.import_module(\"{quoted}\"); "
+                f"print(getattr(m, \"__version__\", \"unknown\"))' 2>&1"
+            ),
+        },
+        reason=(
+            f"User asked about a Python module (`{module}`). Preflight "
+            "ran `python -c 'import …; print(version)'` so the answer is "
+            "grounded, not guessed."
+        ),
+    )
+
+
+# "is foo on npm" / "what version of foo on npm" / "what's the latest foo on npm".
+# Anchored on "npm" so we don't match every package-shaped word.
+_NPM_PACKAGE_RE = re.compile(
+    r"\b(?:is\s+(?P<n1>[@\w/\-]+)\s+(?:on\s+npm|published(?:\s+on\s+npm)?)"
+    r"|(?:what(?:'s|\s+is)?\s+the\s+)?(?:latest|current)\s+(?:version\s+of\s+)?(?P<n2>[@\w/\-]+)\s+on\s+npm"
+    r"|npm\s+(?:show|view)\s+(?P<n3>[@\w/\-]+))"
+    r"\b",
+    re.IGNORECASE,
+)
+
+
+def _build_npm_view(m: Match[str]) -> PreflightMatch | None:
+    pkg = m.group("n1") or m.group("n2") or m.group("n3")
+    if not pkg:
+        return None
+    pkg = pkg.strip().lower()
+    # An npm package name is roughly: optional @scope/, then word chars
+    # / dashes. Reject anything that looks like a shell metachar.
+    if not re.fullmatch(r"@?[\w][\w/\-.]*", pkg):
+        return None
+    if pkg in _BINARY_QUESTION_STOPWORDS or len(pkg) < 2:
+        return None
+    return PreflightMatch(
+        tool_name="run_shell",
+        tool_input={
+            "command": f"npm view {pkg} version 2>&1",
+        },
+        reason=(
+            f"User asked about an npm package (`{pkg}`). Preflight ran "
+            "`npm view <pkg> version` so the answer is grounded."
+        ),
+    )
+
+
 def _build_gitlab_issue_view(m: Match[str]) -> PreflightMatch | None:
     host, repo, issue = m.group(1), m.group(2), m.group(3)
     host_lower = host.lower()
@@ -243,6 +323,16 @@ DEFAULT_RULES: tuple[PreflightRule, ...] = (
         name="gitlab_issue_url",
         pattern=_GITLAB_ISSUE_RE,
         build=_build_gitlab_issue_view,
+    ),
+    PreflightRule(
+        name="python_import_question",
+        pattern=_PYTHON_IMPORT_RE,
+        build=_build_python_import_check,
+    ),
+    PreflightRule(
+        name="npm_package_question",
+        pattern=_NPM_PACKAGE_RE,
+        build=_build_npm_view,
     ),
 )
 
