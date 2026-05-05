@@ -18,7 +18,7 @@ What core does:
 - Build ToolRegistry, register pre-supplied tools
 - Generate identity (capability) token (composition.tokens)
 - Construct backend via composition.backend_factory.create_backend
-- Connect MCP servers BEFORE backend.start (so Claude SDK sees them)
+- Run install_mcp_servers BEFORE backend.start (so Claude SDK sees them)
 - await backend.start()
 - Return AgentSession with _owned_* state populated
 
@@ -29,6 +29,14 @@ What core does NOT do (extras blocks add):
 - hook loading (install_project_hooks)
 - skill context (install_skill_context)
 - supervisor / KAIROS / browser bridge / iMessage daemon (REPL extras)
+
+MCP server connection is performed by the canonical
+``install_mcp_servers`` block (composition/blocks/mcp_servers.py),
+called once from here. Surface modules (REPL/API/A2A) MUST NOT call
+the block again — core has already done it. The block is idempotent
+(``session.add_tool`` de-dupes by name) so a stray repeat call is
+harmless, but creates a redundant MCPBackend connection that wastes
+sockets.
 """
 
 from __future__ import annotations
@@ -63,64 +71,6 @@ def _resolve_model(
     if model_alias is not None and model is None:
         return model_alias
     return model
-
-
-async def _connect_mcp_servers(
-    mcp_servers: list[dict[str, Any]] | None,
-    *,
-    backend_kind: Any,
-    backend: Any,
-    tool_registry: Any,
-) -> Any:
-    """Connect MCP servers, register their tools with both the registry
-    and backend. Returns the MCPBackend instance for later teardown
-    (or None when no servers / Codex backend).
-
-    Mirrors ObscuraClient.start's MCP setup. Runs BEFORE
-    backend.start() so Claude SDK sees all tools when initializing.
-    """
-    if not mcp_servers:
-        return None
-
-    from obscura.core.enums.agent import Backend
-
-    if backend_kind == Backend.CODEX:
-        # Codex SDK owns its own MCP routing; don't double-bind
-        return None
-
-    from obscura.core.enums.protocol import MCPTransport
-    from obscura.integrations.mcp.types import MCPConnectionConfig
-    from obscura.providers.mcp_backend import MCPBackend
-
-    configs: list[MCPConnectionConfig] = []
-    for server in mcp_servers:
-        transport = MCPTransport(server.get("transport", "stdio"))
-        configs.append(
-            MCPConnectionConfig(
-                transport=transport,
-                command=server.get("command"),
-                args=server.get("args", []),
-                url=server.get("url"),
-                env=server.get("env", {}),
-                headers=server.get("headers", {}),
-                name=server.get("name", ""),
-            ),
-        )
-
-    mcp_backend = MCPBackend(configs)
-    await mcp_backend.start()
-
-    mcp_tools = mcp_backend.list_tools()
-    for spec in mcp_tools:
-        tool_registry.register(spec)
-        backend.register_tool(spec)
-
-    if not mcp_tools:
-        logger.warning(
-            "MCP servers configured but no tools registered. Errors: %s",
-            mcp_backend.connection_errors,
-        )
-    return mcp_backend
 
 
 async def build_core_session(
@@ -200,26 +150,10 @@ async def build_core_session(
     for spec in tool_registry.all():
         backend.register_tool(spec)
 
-    # 7. Connect MCP servers BEFORE backend.start so Claude SDK sees
-    # all tools when initializing
-    mcp_backend = await _connect_mcp_servers(
-        config.mcp_servers if not codex_native_mcp else None,
-        backend_kind=backend_kind,
-        backend=backend,
-        tool_registry=tool_registry,
-    )
-
-    # 8. Start backend
-    try:
-        await backend.start()
-    except Exception:
-        logger.exception("build_core_session: backend.start failed")
-        raise
-
-    # 9. Build session with owned state populated.
-    # The _owned_* underscore prefix is "dataclass-internal", not
-    # "private API" in the encapsulation sense — passing them as
-    # constructor kwargs keeps pyright quiet without setattr cruft.
+    # 7. Build session with owned state populated. Construct BEFORE
+    # backend.start() so install_mcp_servers can register MCP tools on
+    # the backend in time for Claude SDK initialisation (Claude reads
+    # self._tools when building SDK options).
     session = AgentSession(
         session_id=sid,
         surface=surface,
@@ -231,9 +165,23 @@ async def build_core_session(
         _owned_tool_registry=tool_registry,
         _owned_hooks=hooks,
         _owned_user=user,
-        _owned_mcp_backend=mcp_backend,
         _owned_system_prompt=effective_prompt,
         _capability_token=capability_token,
         _circuit_registry=CircuitBreakerRegistry(),
     )
+
+    # 8. Connect MCP servers via the canonical block. Codex skips this
+    # block (it owns its own MCP routing via the SDK config). Surface
+    # modules MUST NOT call this block again — core has done it.
+    from obscura.composition.blocks.mcp_servers import install_mcp_servers
+
+    await install_mcp_servers(session, config)
+
+    # 9. Start backend
+    try:
+        await backend.start()
+    except Exception:
+        logger.exception("build_core_session: backend.start failed")
+        raise
+
     return session
