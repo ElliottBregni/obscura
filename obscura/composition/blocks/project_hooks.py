@@ -116,11 +116,13 @@ async def install_project_hooks(
 
     session.project_hooks = project_hooks
 
-    # Rebind on the underlying client so make_agent_loop sees them at
+    # Rebind via session.hooks setter so make_agent_loop sees them at
     # stream_loop time. Hooks are read fresh per-loop, not baked into
-    # backend construction, so post-build rebinding is correct.
+    # backend construction, so post-build rebinding is correct. The
+    # setter routes to _owned_hooks (composition path) or
+    # client._hooks (legacy path).
     if project_hooks is not None:
-        session.client._hooks = project_hooks  # pyright: ignore[reportPrivateUsage]
+        session.hooks = project_hooks
 
     logger.info(
         "install_project_hooks: hooks=%s channel_router=%s (surface=%s)",

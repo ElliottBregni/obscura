@@ -67,7 +67,7 @@ async def install_tool_router(
         from obscura.core.tool_score_index import ToolScoreIndex
         from obscura.core.types import ToolRouterCapable
 
-        backend = session.client._backend  # pyright: ignore[reportPrivateUsage]
+        backend = session.backend
         if not isinstance(backend, ToolRouterCapable):
             logger.debug(
                 "install_tool_router: backend %s is not ToolRouterCapable",

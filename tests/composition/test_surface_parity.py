@@ -12,27 +12,19 @@ captures what gets registered.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from obscura.composition.session import SessionConfig
 
 
-class _RecordingClient:
-    """Stand-in for ObscuraClient that records tool registrations."""
+class _RecordingBackend:
+    """Stand-in backend that records tool registrations."""
 
-    def __init__(self, *_args: Any, **kwargs: Any) -> None:
-        from obscura.core.tools import ToolRegistry
-
-        self._tool_registry = ToolRegistry()
-        self._backend = self
+    def __init__(self) -> None:
         self._registered: list[str] = []
-        # Pre-register any tools passed via the `tools` kwarg
-        for spec in kwargs.get("tools") or []:
-            if spec.name not in self._registered:
-                self._registered.append(spec.name)
-                self._tool_registry.register(spec)
+        self._system_prompt = ""
 
     def register_tool(self, spec: Any) -> None:
         if spec.name not in self._registered:
@@ -41,20 +33,29 @@ class _RecordingClient:
     async def start(self) -> None:
         return None
 
-    async def __aenter__(self) -> _RecordingClient:
-        return self
-
-    async def __aexit__(self, *_: Any) -> None:
+    async def stop(self) -> None:
         return None
 
 
 @pytest.fixture
 def patched_client():
-    """Patch ObscuraClient where build_core_session imports it."""
-    with patch(
-        "obscura.core.client.ObscuraClient",
-        new=_RecordingClient,
-    ) as m:
+    """Patch composition.core's backend factory so build_core_session
+    doesn't try to instantiate a real LLM backend.
+
+    Stage 4b: composition no longer goes through ObscuraClient — it
+    builds the backend via create_backend. Patch THAT, plus
+    resolve_auth (returns AuthConfig).
+    """
+    with (
+        patch(
+            "obscura.composition.backend_factory.create_backend",
+            side_effect=lambda **_kw: _RecordingBackend(),
+        ) as m,
+        patch(
+            "obscura.core.auth.resolve_auth",
+            return_value=MagicMock(),
+        ),
+    ):
         yield m
 
 
@@ -117,7 +118,7 @@ async def test_a2a_session_registers_tools_on_backend(
     config = SessionConfig(backend="copilot", tools_enabled=True)
     session = await build_a2a_session(config, task_id="t-a2a")
 
-    backend_tools = session.client._backend._registered  # type: ignore[union-attr]
+    backend_tools = session.backend._registered
     registry_tools = {t.name for t in session.registry.all()}
 
     assert set(backend_tools) == registry_tools, (

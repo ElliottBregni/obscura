@@ -419,10 +419,10 @@ class Agent:
         return MemoryStore.for_user(self.user)
 
     def list_registered_tools(self) -> list[ToolSpec]:
-        """Return all tools currently registered on the underlying client."""
-        if self._client is None:
+        """Return all tools currently registered on the session."""
+        if self._session is None:
             return []
-        return self._client.list_tools()
+        return self._session.list_tools()
 
     async def start(self) -> None:
         """Initialize the agent and connect to backend."""
@@ -1387,9 +1387,9 @@ class Agent:
             except Exception as exc:
                 logger.debug("Failed to persist tool scores: %s", exc)
 
-        if self._client:
+        if self._session is not None:
             try:
-                await self._client.stop()
+                await self._session.aclose()
             except RuntimeError as e:
                 # Ignore cancel scope errors from underlying SDK
                 if "cancel scope" not in str(e):

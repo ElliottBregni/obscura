@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, override
 
 if TYPE_CHECKING:
-    from obscura.core.client import ObscuraClient
     from obscura.core.tools import ToolRegistry
     from obscura.core.types import AgentEvent, ToolSpec
 
@@ -163,8 +162,13 @@ class AgentSession:
     # Frozen config
     config: SessionConfig
 
-    # Core wiring (built by build_core_session)
-    client: ObscuraClient
+    # Core wiring (built by build_core_session).
+    # ``client`` is the legacy ObscuraClient handle. On the composition
+    # path (post-Stage-4b), it's None — composition builds the backend
+    # directly and stores it on _owned_backend/_owned_tool_registry. On
+    # the Agent.start legacy path, ObscuraClient is still constructed
+    # and held here for back-compat.
+    client: Any = None  # ObscuraClient | None at type level
 
     # Surface-supplied callbacks (ask_user / permission_mode / etc.)
     # These are also threaded into client.host_callbacks at build time;
@@ -191,15 +195,26 @@ class AgentSession:
     imessage_daemon_task: Any = None  # asyncio.Task[None] | None
 
     # ── Reliability state (set by composition/core.py during build) ──
-    # These mirror what ObscuraClient holds today. Once Stage 4 lands,
-    # composition builds the backend directly and these are the
-    # canonical source — ObscuraClient delegates to the session.
+    # These mirror what ObscuraClient holds today. After Stage 4b,
+    # composition is the canonical owner — ObscuraClient (when present)
+    # mirrors them.
     _capability_token: Any = None
     _circuit_registry: Any = None
     _cache: Any = None
     _current_loop: Any = None
     _max_retries: int = 2
     _retry_initial_backoff: float = 0.5
+
+    # ── Direct backend ownership (Stage 4b) ──
+    # When composition/core builds the backend directly (no ObscuraClient
+    # in the path), these are populated and the accessors below prefer
+    # them over reading from client._backend / client._tool_registry.
+    _owned_backend: Any = None
+    _owned_tool_registry: Any = None
+    _owned_hooks: Any = None
+    _owned_user: Any = None
+    _owned_mcp_backend: Any = None
+    _owned_system_prompt: str = ""
 
     # Resource teardown queue (LIFO)
     _resources: list[_Closer] = field(default_factory=_empty_resources)
@@ -217,32 +232,45 @@ class AgentSession:
 
     @property
     def registry(self) -> ToolRegistry:
-        """The live tool registry (owned by the client today)."""
-        return self.client._tool_registry  # pyright: ignore[reportPrivateUsage]
+        """The live tool registry.
+
+        Composition path: returns ``_owned_tool_registry``.
+        Legacy ObscuraClient path: returns ``client._tool_registry``.
+        """
+        if self._owned_tool_registry is not None:
+            return self._owned_tool_registry
+        return self.client._tool_registry
 
     @property
     def backend(self) -> Any:
-        """The active LLM backend (owned by the client today).
+        """The active LLM backend.
 
-        Public accessor that surfaces and Agent.start use instead of
-        reaching into ``session.client._backend``. Step in the
-        ObscuraClient absorption — when the backend moves directly onto
-        AgentSession, this property's body changes but the API stays.
+        Composition path: returns ``_owned_backend`` (set by
+        ``build_core_session``). Legacy path: returns ``client._backend``.
         """
-        return self.client._backend  # pyright: ignore[reportPrivateUsage]
+        if self._owned_backend is not None:
+            return self._owned_backend
+        return self.client._backend
 
     @property
     def hooks(self) -> Any:
         """The project hook registry threaded into the agent loop."""
+        if self._owned_backend is not None:
+            return self._owned_hooks
         return getattr(self.client, "_hooks", None)
 
     @hooks.setter
     def hooks(self, value: Any) -> None:
-        self.client._hooks = value  # pyright: ignore[reportPrivateUsage]
+        if self._owned_backend is not None:
+            self._owned_hooks = value
+        else:
+            self.client._hooks = value
 
     @property
     def user(self) -> Any:
         """The authenticated user (or None for unauth surfaces)."""
+        if self._owned_backend is not None:
+            return self._owned_user
         return getattr(self.client, "_user", None)
 
     def add_tool(self, spec: ToolSpec) -> bool:
@@ -275,18 +303,29 @@ class AgentSession:
 
         Both Copilot and Claude backends read ``self._system_prompt`` at
         each stream call (not at start), so mutation here propagates on
-        the next turn. Used by ``install_repl_prompt_sections`` to
-        compose REPL-specific memory/channel/env sections AFTER
-        vector_memory + project_hooks have populated the session.
+        the next turn.
         """
         self.system_prompt = prompt
-        # Update client + backend (private mutations — both providers
-        # read self._system_prompt per-stream, so this propagates)
-        self.client._system_prompt = prompt  # pyright: ignore[reportPrivateUsage]
-        backend = self.client._backend  # pyright: ignore[reportPrivateUsage]
+        self._owned_system_prompt = prompt
+        # Mirror to client when present (legacy path)
+        if self.client is not None:
+            self.client._system_prompt = prompt
+        # Mirror to backend (works for both composition and legacy paths)
+        backend = self.backend
         if hasattr(backend, "_system_prompt"):
-            # Backends store as private str; setattr to keep pyright quiet
-            # about the protocol not declaring it
+            setattr(backend, "_system_prompt", prompt)  # noqa: B010
+
+    def update_owned_system_prompt(self, prompt: str) -> None:
+        """Set ``_owned_system_prompt`` (composition path).
+
+        Composition surfaces use this rather than touching the protected
+        attribute directly. Equivalent to ``update_system_prompt`` but
+        explicit about not mutating the legacy client.
+        """
+        self.system_prompt = prompt
+        self._owned_system_prompt = prompt
+        backend = self.backend
+        if hasattr(backend, "_system_prompt"):
             setattr(backend, "_system_prompt", prompt)  # noqa: B010
 
     # ── Lifecycle ────────────────────────────────────────────────────
@@ -331,7 +370,7 @@ class AgentSession:
         await self.aclose()
 
     async def aclose(self) -> None:
-        """Idempotent. Tear down resources LIFO, then close the client."""
+        """Idempotent. Tear down resources LIFO, then close backend/client."""
         async with self._close_lock:
             if self._closed:
                 return
@@ -341,10 +380,24 @@ class AgentSession:
                     await closer.aclose()
                 except Exception:
                     logger.exception("teardown failed for %r", closer)
-            try:
-                await self.client.__aexit__(None, None, None)
-            except Exception:
-                logger.exception("client close failed")
+            # Composition path: stop backend directly (and any owned MCP)
+            if self._owned_backend is not None:
+                if self._owned_mcp_backend is not None:
+                    try:
+                        await self._owned_mcp_backend.stop()
+                    except Exception:
+                        logger.exception("mcp backend stop failed")
+                try:
+                    await self._owned_backend.stop()
+                except Exception:
+                    logger.exception("backend stop failed")
+                return
+            # Legacy path: close ObscuraClient
+            if self.client is not None:
+                try:
+                    await self.client.__aexit__(None, None, None)
+                except Exception:
+                    logger.exception("client close failed")
 
     # ── Agent loop wrappers ───────────────────────────────────────────
 
