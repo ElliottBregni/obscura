@@ -6,7 +6,14 @@ Provides a centralized logging system that captures:
   - Every agent event (kind, turn, metadata)
   - Session lifecycle events (start, compact, dream, end)
 
-Logs are structured JSON, written to ``~/.obscura/logs/`` with rotation.
+Every entry is a single JSON object emitted to a pluggable sink. The
+default :class:`JSONLSink` writes rotated ``~/.obscura/logs/deep.jsonl``
+files; :class:`StdoutSink` writes JSON lines to stdout (intended for
+containerized deployments that pipe stdout to log aggregators).
+
+Sink selection:
+  ``OBSCURA_DEEP_LOG``       — ``0/false/no/off`` disables logging entirely.
+  ``OBSCURA_DEEP_LOG_SINK``  — ``jsonl`` (default) | ``stdout`` | ``none``.
 
 Usage::
 
@@ -23,9 +30,10 @@ import contextlib
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -34,49 +42,170 @@ _MAX_LOG_SIZE = 10 * 1024 * 1024  # 10MB per file
 _MAX_LOG_FILES = 5  # Keep 5 rotated files
 
 
+# ---------------------------------------------------------------------------
+# Sink Protocol + implementations
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class DeepLogSink(Protocol):
+    """Where structured log entries go.
+
+    Implementations are responsible for serialization and durability.
+    They are NOT responsible for buffering — :class:`DeepLogger` owns
+    that and calls :meth:`write` once per buffered batch.
+    """
+
+    def write(self, entry: dict[str, Any]) -> None:
+        """Emit a single structured entry. Should swallow I/O errors."""
+        ...
+
+    def close(self) -> None:
+        """Release any resources held by the sink."""
+        ...
+
+    def description(self) -> str:
+        """Human-readable identity of the sink (path, ``"stdout"``, ...)."""
+        ...
+
+
+class JSONLSink:
+    """Append-only JSON-lines file with size-based rotation.
+
+    Writes to ``~/.obscura/logs/deep.jsonl``; on rollover, files cascade
+    ``deep.jsonl → deep.1.jsonl → … → deep.{MAX}.jsonl`` (oldest dropped).
+    """
+
+    def __init__(self, log_dir: Path | None = None) -> None:
+        self._log_dir = log_dir if log_dir is not None else _LOG_DIR
+        self._log_file = self._log_dir / "deep.jsonl"
+        self._file_handle: Any = None
+
+    def _ensure_file(self) -> None:
+        if self._file_handle is not None:
+            return
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._rotate_if_needed()
+        self._file_handle = self._log_file.open("a", encoding="utf-8")
+
+    def _rotate_if_needed(self) -> None:
+        if not self._log_file.exists():
+            return
+        if self._log_file.stat().st_size < _MAX_LOG_SIZE:
+            return
+        # deep.jsonl → deep.1.jsonl → ... → deep.{MAX}.jsonl (deleted)
+        for i in range(_MAX_LOG_FILES, 0, -1):
+            old = self._log_dir / f"deep.{i}.jsonl"
+            if i == _MAX_LOG_FILES and old.exists():
+                old.unlink()
+            elif old.exists():
+                old.rename(self._log_dir / f"deep.{i + 1}.jsonl")
+        self._log_file.rename(self._log_dir / "deep.1.jsonl")
+
+    def write(self, entry: dict[str, Any]) -> None:
+        try:
+            self._ensure_file()
+            assert self._file_handle is not None
+            self._file_handle.write(json.dumps(entry, default=str) + "\n")
+            self._file_handle.flush()
+        except Exception:
+            logger.debug("suppressed exception in JSONLSink.write", exc_info=True)
+
+    def close(self) -> None:
+        if self._file_handle is not None:
+            with contextlib.suppress(Exception):
+                self._file_handle.close()
+            self._file_handle = None
+
+    def description(self) -> str:
+        return str(self._log_file)
+
+
+class StdoutSink:
+    """JSON-lines on stdout — for containerized deployments."""
+
+    def write(self, entry: dict[str, Any]) -> None:
+        try:
+            sys.stdout.write(json.dumps(entry, default=str) + "\n")
+            sys.stdout.flush()
+        except Exception:
+            logger.debug("suppressed exception in StdoutSink.write", exc_info=True)
+
+    def close(self) -> None:
+        # stdout is not ours to close.
+        pass
+
+    def description(self) -> str:
+        return "stdout"
+
+
+class NullSink:
+    """Discards entries. Used when the logger is disabled."""
+
+    def write(self, entry: dict[str, Any]) -> None:  # noqa: ARG002
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def description(self) -> str:
+        return "null"
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def create_deep_log_sink(name: str | None = None) -> DeepLogSink:
+    """Build a :class:`DeepLogSink` from an env-style name.
+
+    ``None`` (or unset env var) → :class:`JSONLSink`.
+    ``"jsonl"`` → :class:`JSONLSink`.
+    ``"stdout"`` → :class:`StdoutSink`.
+    ``"none"`` / ``"null"`` → :class:`NullSink`.
+    """
+    raw = name if name is not None else os.environ.get("OBSCURA_DEEP_LOG_SINK", "jsonl")
+    chosen = raw.strip().lower()
+    if chosen in ("", "jsonl", "file"):
+        return JSONLSink()
+    if chosen == "stdout":
+        return StdoutSink()
+    if chosen in ("none", "null", "off"):
+        return NullSink()
+    logger.warning(
+        "unknown OBSCURA_DEEP_LOG_SINK=%r, falling back to jsonl", raw,
+    )
+    return JSONLSink()
+
+
+# ---------------------------------------------------------------------------
+# DeepLogger — owns buffering + typed methods, delegates I/O to the sink
+# ---------------------------------------------------------------------------
+
+
 class DeepLogger:
     """Structured JSON logger for deep debugging.
 
-    Each log entry is a single JSON line with:
+    Each log entry is a single JSON object with:
     - ``ts``: Unix timestamp
     - ``type``: Event type (tool_call, api_request, event, error)
     - ``data``: Event-specific payload
     """
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(
+        self,
+        enabled: bool = True,
+        sink: DeepLogSink | None = None,
+    ) -> None:
         self._enabled = enabled
-        self._log_file: Path | None = None
-        self._file_handle: Any = None
+        self._sink: DeepLogSink = sink if sink is not None else create_deep_log_sink()
         self._buffer: list[dict[str, Any]] = []
         self._buffer_limit = 50  # Flush every N entries
         self._total_entries = 0
 
-    def _ensure_file(self) -> None:
-        """Lazily open the log file."""
-        if self._file_handle is not None:
-            return
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
-        self._log_file = _LOG_DIR / "deep.jsonl"
-        self._rotate_if_needed()
-        self._file_handle = self._log_file.open("a", encoding="utf-8")
-
-    def _rotate_if_needed(self) -> None:
-        """Rotate log file if it exceeds max size."""
-        if self._log_file is None or not self._log_file.exists():
-            return
-        if self._log_file.stat().st_size < _MAX_LOG_SIZE:
-            return
-        # Rotate: deep.jsonl → deep.1.jsonl → ... → deep.5.jsonl (deleted)
-        for i in range(_MAX_LOG_FILES, 0, -1):
-            old = _LOG_DIR / f"deep.{i}.jsonl"
-            if i == _MAX_LOG_FILES and old.exists():
-                old.unlink()
-            elif old.exists():
-                old.rename(_LOG_DIR / f"deep.{i + 1}.jsonl")
-        self._log_file.rename(_LOG_DIR / "deep.1.jsonl")
-
     def _write(self, entry: dict[str, Any]) -> None:
-        """Write a log entry."""
+        """Buffer a log entry."""
         if not self._enabled:
             return
         entry["ts"] = time.time()
@@ -86,26 +215,17 @@ class DeepLogger:
             self.flush()
 
     def flush(self) -> None:
-        """Flush buffered entries to disk."""
+        """Drain the in-memory buffer to the sink."""
         if not self._buffer:
             return
-        try:
-            self._ensure_file()
-            assert self._file_handle is not None
-            for entry in self._buffer:
-                self._file_handle.write(json.dumps(entry, default=str) + "\n")
-            self._file_handle.flush()
-        except Exception:
-            logger.debug("suppressed exception in flush", exc_info=True)
+        for entry in self._buffer:
+            self._sink.write(entry)
         self._buffer.clear()
 
     def close(self) -> None:
-        """Flush and close the log file."""
+        """Flush and release the sink."""
         self.flush()
-        if self._file_handle is not None:
-            with contextlib.suppress(Exception):
-                self._file_handle.close()
-            self._file_handle = None
+        self._sink.close()
 
     # ── Typed log methods ──────────────────────────────────────────────
 
@@ -222,7 +342,9 @@ class DeepLogger:
 
     @property
     def log_path(self) -> str:
-        return str(self._log_file or _LOG_DIR / "deep.jsonl")
+        """Backwards-compatible identifier — sink description (file path,
+        ``"stdout"``, etc.)."""
+        return self._sink.description()
 
 
 # ── Module singleton ───────────────────────────────────────────────────
