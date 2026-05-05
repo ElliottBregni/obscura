@@ -923,8 +923,9 @@ class Agent:
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
             # Execute with timeout enforcement
+            assert self._session is not None
             message = await asyncio.wait_for(
-                self._client.send(full_prompt, **self.config.completion_params),
+                self._session.send(full_prompt, **self.config.completion_params),
                 timeout=self.config.timeout_seconds,
             )
             self._result = message.text
@@ -980,7 +981,8 @@ class Agent:
             relevant_memory = self._load_relevant_memory(prompt)
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
-            async for chunk in self._client.stream(
+            assert self._session is not None
+            async for chunk in self._session.stream(
                 full_prompt,
                 **self.config.completion_params,
             ):
@@ -1037,8 +1039,9 @@ class Agent:
             relevant_memory = self._load_relevant_memory(prompt)
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
+            assert self._session is not None
             result = await asyncio.wait_for(
-                self._client.run_loop_to_completion(
+                self._session.run_loop_to_text(
                     full_prompt,
                     max_turns=max_turns,
                     on_confirm=on_confirm,
@@ -1115,7 +1118,8 @@ class Agent:
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
             text_parts: list[str] = []
-            async for event in self._client.run_loop(
+            assert self._session is not None
+            async for event in self._session.stream_loop(
                 full_prompt,
                 max_turns=max_turns,
                 on_confirm=on_confirm,
