@@ -53,7 +53,6 @@ from obscura.agent.peers import (
     PeerInvocationEnvelope,
     PeerRegistry,
 )
-from obscura.core.client import ObscuraClient
 from obscura.core.enums.protocol import MCPTransport
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_mcp_dir
@@ -320,7 +319,10 @@ class Agent:
         # remains as a back-compat alias pointing at session.client so the
         # 26 existing self._client.X call sites keep working unchanged.
         self._session: Any = None  # AgentSession | None
-        self._client: ObscuraClient | None = None
+        # Held as Any to accept either ObscuraClient (legacy) or
+        # AgentSession.client (composition path; might be None on the
+        # composition path since composition stores backend directly).
+        self._client: Any = None
         self._mcp_backend: MCPBackend | None = None
         self._providers: list[Any] = []
         self._broker_context: BrokerContext | None = None
@@ -336,12 +338,12 @@ class Agent:
 
     # -- Observability/test accessors -----------------------------------
     @property
-    def client(self) -> ObscuraClient | None:
+    def client(self) -> Any:
         """Testing/observability: injected client (read/write)."""
         return self._client
 
     @client.setter
-    def client(self, value: ObscuraClient | None) -> None:
+    def client(self, value: Any) -> None:
         self._client = value
 
     @property

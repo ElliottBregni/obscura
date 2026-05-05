@@ -62,7 +62,6 @@ from obscura.cli.render import (
 from obscura.cli.trace import tail_entries, tail_pretty
 from obscura.cli.tui_effects import context_bar, effort_badge, ultrathink_banner
 from obscura.core._default_skills import DEFAULT_SKILLS
-from obscura.core.client import ObscuraClient
 from obscura.core.compaction import compact_history
 from obscura.core.context_lazy import (
     EVAL_GRADING_PROMPT,
@@ -308,7 +307,7 @@ def _empty_bool_dict() -> dict[str, bool]:
 class REPLContext:
     """Mutable state for the REPL session."""
 
-    client: ObscuraClient
+    client: Any  # ObscuraClient | AgentSession — duck-typed handle
     store: SQLiteEventStore
     session_id: str
     backend: str
@@ -458,20 +457,42 @@ class REPLContext:
             self.runtime = None
 
     async def recreate_client(self, backend: str, model: str | None) -> None:
-        """Stop old client, create a new one for a different backend."""
-        await self.client.stop()
-        new_client = ObscuraClient(
-            backend,
-            model=model,
-            system_prompt=self.get_effective_system_prompt(),
-            mcp_servers=self.mcp_configs or None,
+        """Stop old client, create a new one for a different backend.
+
+        Migrated from direct ObscuraClient construction to
+        composition.build_core_session — the new client (an
+        AgentSession) quacks the same way as the old ObscuraClient for
+        every method REPLContext invokes (.send / .stream / .run_loop /
+        .register_tool / .resume_session / .stop).
+        """
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
+
+        # Old client teardown: aclose if it's a session, stop if it's a
+        # legacy ObscuraClient.
+        old_client = self.client
+        if hasattr(old_client, "aclose"):
+            try:
+                await old_client.aclose()
+            except Exception:
+                logger.debug("recreate_client: old aclose failed", exc_info=True)
+        else:
+            await old_client.stop()
+
+        new_session = await build_core_session(
+            SessionConfig(
+                backend=backend,
+                model=model,
+                system_prompt=self.get_effective_system_prompt(),
+                mcp_servers=self.mcp_configs or [],
+                inject_claude_context=False,
+            ),
+            surface="repl",
         )
-        await new_client.start()
         if self.tools_enabled:
             all_specs = get_system_tool_specs()
             mm = self.mode_manager
             mode_allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
-            # Also apply capability-based filtering from config.toml
             cap_allowed: set[str] | None = None
             try:
                 from obscura.plugins.capabilities import (
@@ -482,15 +503,13 @@ class REPLContext:
             except Exception:
                 logger.debug("suppressed exception in recreate_client", exc_info=True)
             for spec in all_specs:
-                # Mode filter (None = all modes allowed)
                 if mode_allowed is not None and spec.name not in mode_allowed:
                     continue
-                # Capability filter (None = no cap filtering)
                 cap = getattr(spec, "capability", "")
                 if cap_allowed is not None and cap and spec.name not in cap_allowed:
                     continue
-                new_client.register_tool(spec)
-        self.client = new_client
+                new_session.register_tool(spec)
+        self.client = new_session
         self.backend = backend
         self.model = model
 

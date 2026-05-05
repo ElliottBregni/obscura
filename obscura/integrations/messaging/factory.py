@@ -7,7 +7,6 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from obscura.core.client import ObscuraClient
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.enums.agent import Backend
 from obscura.integrations.messaging.kairos_runner import (
@@ -152,11 +151,21 @@ async def build_channel_router(
         logger.debug("suppressed exception in build_channel_router", exc_info=True)
         _backend_enum = Backend("claude")
 
-    client = ObscuraClient(backend=_backend_enum)
-    await client.start()
+    # Migrated from direct ObscuraClient construction to composition.
+    # session.backend / session.registry give us the same handles we
+    # were reaching for as client.backend_impl / client._tool_registry.
+    from obscura.composition.core import build_core_session
+    from obscura.composition.session import SessionConfig
 
-    backend_impl = client.backend_impl
-    tool_registry = client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    session = await build_core_session(
+        SessionConfig(
+            backend=_backend_enum.value,
+            inject_claude_context=False,
+        ),
+        surface="api",
+    )
+    backend_impl = session.backend
+    tool_registry = session.registry
 
     # Resolve the global default mode (env var overrides kwarg default)
     _env_default = os.environ.get("OBSCURA_CHANNEL_MODE", "")

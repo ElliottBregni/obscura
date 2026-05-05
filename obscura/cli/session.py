@@ -86,7 +86,6 @@ from obscura.cli.widgets import (
     render_notification_banner,
 )
 from obscura.core.cleanup import run_cleanup
-from obscura.core.client import ObscuraClient
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compaction import should_auto_compact
 from obscura.core.context import load_obscura_memory
@@ -255,7 +254,7 @@ class ObscuraSession:
     _store: SQLiteEventStore
     _sid: str
     _ctx: REPLContext
-    _client: ObscuraClient
+    _client: Any  # AgentSession (was ObscuraClient pre-absorption)
     _client_cm: Any  # the async-context-manager wrapper
     _vector_store: Any
     context_router: Any
@@ -306,18 +305,28 @@ class ObscuraSession:
         self._tool_count = tool_count
         project_hooks = self._wire_callbacks_and_hooks(config, system_tools)
 
-        # Build client
-        client = ObscuraClient(
-            config.backend,
+        # Build session via composition (was direct ObscuraClient before).
+        # AgentSession quacks the same way ObscuraSession's downstream
+        # code expects (.send / .stream / .run_loop / .resume_session /
+        # .register_tool / .stop replaced by .aclose).
+        from obscura.composition.core import build_core_session as _bcs
+        from obscura.composition.session import SessionConfig as _CSC
+
+        comp_config = _CSC(
+            backend=config.backend,
             model=config.model,
             system_prompt=combined_system,
-            tools=system_tools or None,
-            mcp_servers=mcp_configs or None,
+            mcp_servers=mcp_configs or [],
+            inject_claude_context=False,
+        )
+        session = await _bcs(
+            comp_config,
+            surface="repl",
+            preregistered_tools=system_tools or None,
             hooks=project_hooks,
         )
-        self._client_cm = client
-        await client.__aenter__()
-        self._client = client
+        self._client_cm = session
+        self._client = session
 
         # Plugin registration via composition. We wrap the already-built
         # client in an AgentSession so install_plugin_tools can register
@@ -328,26 +337,13 @@ class ObscuraSession:
         from obscura.composition.blocks.browser_bridge import install_browser_bridge
         from obscura.composition.blocks.plugins import install_plugin_tools
         from obscura.composition.blocks.system_tools import install_system_tools
-        from obscura.composition.session import (
-            AgentSession,
-            SessionConfig as _CompSessionConfig,
-        )
 
-        comp_config = _CompSessionConfig(
-            backend=config.backend,
-            model=config.model,
-            tools_enabled=config.tools_enabled,
-            extras={"compiled_ws": config.compiled_ws}
-            if config.compiled_ws is not None
-            else {},
-        )
-        self._composition_session = AgentSession(
-            session_id=self._sid,
-            surface="repl",
-            config=comp_config,
-            client=client,
-            vector_store=self._vector_store,
-        )
+        # The composition session built above IS the canonical session;
+        # no need to wrap it again. Forward _vector_store onto it so
+        # downstream blocks see it.
+        self._composition_session = session
+        if self._vector_store is not None:
+            session.vector_store = self._vector_store
         await install_plugin_tools(self._composition_session, comp_config)
         await install_system_tools(self._composition_session, comp_config)
         await install_browser_bridge(self._composition_session, comp_config)
@@ -366,7 +362,7 @@ class ObscuraSession:
 
         # Build REPL context
         self._ctx = REPLContext(
-            client=client,
+            client=session,
             store=self._store,
             session_id=self._sid,
             backend=config.backend,
@@ -406,7 +402,7 @@ class ObscuraSession:
         return self._ctx
 
     @property
-    def client(self) -> ObscuraClient:
+    def client(self) -> Any:  # AgentSession (was ObscuraClient)
         return self._client
 
     @property
@@ -1003,11 +999,17 @@ class ObscuraSession:
 
             logging.getLogger("obscura.agent.daemon_agent").setLevel(logging.WARNING)
 
-            daemon_client = ObscuraClient(
-                agent_def.model,
-                system_prompt=agent_def.system_prompt,
+            from obscura.composition.core import build_core_session as _bcs2
+            from obscura.composition.session import SessionConfig as _CSC2
+
+            daemon_client = await _bcs2(
+                _CSC2(
+                    backend=agent_def.model,
+                    system_prompt=agent_def.system_prompt,
+                    inject_claude_context=False,
+                ),
+                surface="a2a",
             )
-            await daemon_client.__aenter__()
 
             # Load persisted schedules
             try:
