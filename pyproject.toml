@@ -155,47 +155,12 @@ dev = [
     "respx>=0.21",
 ]
 
-# Package discovery - explicitly define what to include
-[tool.setuptools]
-packages = [
-    "obscura",
-    "obscura.core",
-    "obscura.core.client",
-    "obscura.providers",
-    "obscura.tools",
-    "obscura.tools.system",
-    "obscura.tools.policy",
-    "obscura.tools.providers",
-    "obscura.integrations",
-    "obscura.integrations.msgraph",
-    "obscura.integrations.mcp",
-    "obscura.integrations.a2a",
-    "obscura.integrations.a2a.transports",
-    "obscura.auth",
-    "obscura.agent",
-    "obscura.memory",
-    "obscura.vector_memory",
-    "obscura.telemetry",
-    "obscura.server",
-    "obscura.routes",
-    "obscura.deps",
-    "obscura.cli",
-    "obscura.cli.app",
-    "obscura.eval",
-    "obscura.testing",
-    "obscura.parity",
-    "obscura.heartbeat",
-    "obscura.skills",
-    "obscura.schemas",
-    "obscura.mcp_server",
-    "obscura.runtime",
-    "obscura.runtime.cache",
-    "obscura.runtime.storage",
-    "obscura.vault_gen",
-    "obscura.vault_gen.access",
-    "obscura.vault_gen.sync",
-    "obscura.vault_gen.sync.adapters",
-]
+# Package discovery — auto-find every `obscura.*` package with __init__.py.
+# Explicit lists drift: missing one subpackage means it silently disappears
+# from the wheel and you get "ModuleNotFoundError" only at runtime.
+[tool.setuptools.packages.find]
+include = ["obscura*"]
+exclude = ["tests*", "build*"]
 
 [tool.setuptools.package-data]
 obscura = ["py.typed"]
