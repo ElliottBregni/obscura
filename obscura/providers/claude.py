@@ -723,6 +723,36 @@ class ClaudeBackend(BackendToolHostMixin):
                 )
                 filtered = result.tools
 
+            # Phase-3 opt-in SDK tier filter (OBSCURA_PHASE3_SDK_TIER=1).
+            # Off by default: the Claude Agent SDK commits the tool list
+            # at session creation, so filtered-out tools are uncallable
+            # until session recreate. Same caveat as Copilot.
+            import os as _os
+
+            if _os.environ.get("OBSCURA_PHASE3_SDK_TIER", "").strip().lower() in {
+                "1", "true", "yes", "on",
+            }:
+                from obscura.core.tool_observability import (
+                    TurnToolStats,
+                    emit_turn_tool_stats,
+                )
+                from obscura.core.tool_tiering import CORE_TOOL_NAMES
+
+                pre_phase3 = list(filtered)
+                filtered = [t for t in filtered if t.name in CORE_TOOL_NAMES]
+                kept_names = {t.name for t in filtered}
+                dropped = tuple(t.name for t in pre_phase3 if t.name not in kept_names)
+                emit_turn_tool_stats(
+                    TurnToolStats(
+                        backend="claude",
+                        registry_total=len(pre_phase3),
+                        core_count=len(filtered),
+                        discovered_count=0,
+                        sent_count=len(filtered),
+                        dropped=dropped,
+                    ),
+                )
+
             if not self._tool_policy.allow_native or len(filtered) < len(self._tools):
                 # When native tools are blocked (default) OR the filter reduced
                 # the set, set an explicit allowlist so the LLM can only call

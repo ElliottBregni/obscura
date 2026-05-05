@@ -820,6 +820,46 @@ class CopilotBackend(BackendToolHostMixin):
                         result.quarantined_count,
                     )
 
+            # Phase-3 opt-in SDK tier filter (OBSCURA_PHASE3_SDK_TIER=1).
+            # Off by default because the Copilot SDK commits the tool list
+            # at session creation — once filtered, deferred tools are
+            # uncallable until session recreate. Enabling this trades
+            # mid-session callability for ~80%+ token savings on the
+            # initial system message.
+            import os as _os
+
+            if _os.environ.get("OBSCURA_PHASE3_SDK_TIER", "").strip().lower() in {
+                "1", "true", "yes", "on",
+            }:
+                from obscura.core.tool_observability import (
+                    TurnToolStats,
+                    emit_turn_tool_stats,
+                )
+                from obscura.core.tool_tiering import CORE_TOOL_NAMES
+
+                pre_phase3 = list(filtered)
+                filtered = [
+                    t for t in filtered
+                    if t.name in CORE_TOOL_NAMES
+                    or (
+                        t.name.startswith("mcp__")
+                        and (t.name.rsplit("__", 1)[-1] if "__" in t.name else "")
+                        in CORE_TOOL_NAMES
+                    )
+                ]
+                kept_names = {t.name for t in filtered}
+                dropped = tuple(t.name for t in pre_phase3 if t.name not in kept_names)
+                emit_turn_tool_stats(
+                    TurnToolStats(
+                        backend="copilot",
+                        registry_total=len(pre_phase3),
+                        core_count=len(filtered),
+                        discovered_count=0,  # SDK loop has no per-task discovery
+                        sent_count=len(filtered),
+                        dropped=dropped,
+                    ),
+                )
+
             # Safety-net hard cap — should rarely trigger with a router.
             _MAX_COPILOT_TOOLS = 128
             if len(filtered) > _MAX_COPILOT_TOOLS:
