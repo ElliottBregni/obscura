@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from obscura.composition.blocks import (
     install_a2a_input_bridge,
@@ -37,7 +37,7 @@ from obscura.composition.blocks import (
     install_tool_router,
 )
 from obscura.composition.core import build_core_session
-from obscura.composition.session import AgentSession, SessionConfig
+from obscura.composition.session import AgentSession, SessionConfig, SessionExtras
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolCallInfo
@@ -63,8 +63,8 @@ async def build_a2a_session(
     (e.g. ``ask_user``, ``exit_plan_mode``) drive the same A2A
     INPUT_REQUIRED state machine.
     """
-    extras: dict[str, Any] = dict(config.extras)
-    extras["a2a_task_id"] = task_id
+    # SessionExtras is a TypedDict (dict at runtime); copy + extend.
+    extras: SessionExtras = {**config.extras, "a2a_task_id": task_id}
     config_with_task = SessionConfig(
         backend=config.backend,
         model=config.model,

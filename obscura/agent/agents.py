@@ -477,18 +477,19 @@ class Agent:
         # (replacing inject_claude_context=True on the legacy client).
         from obscura.composition.blocks.skill_context import install_skill_context
         from obscura.composition.core import build_core_session
-        from obscura.composition.session import SessionConfig
+        from obscura.composition.session import SessionConfig, SessionExtras
 
         try:
+            agent_extras: SessionExtras = {
+                "lazy_load_skills": self.config.lazy_load_skills,
+                "skill_filter": self.config.skill_filter,
+            }
             session_config = SessionConfig(
                 backend=self.config.provider,
                 model=self.config.model_id,
                 system_prompt=self.config.system_prompt,
                 inject_claude_context=False,  # block handles it explicitly below
-                extras={
-                    "lazy_load_skills": self.config.lazy_load_skills,
-                    "skill_filter": self.config.skill_filter,
-                },
+                extras=agent_extras,
             )
             self._session = await build_core_session(
                 session_config,

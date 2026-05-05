@@ -216,7 +216,10 @@ async def build_core_session(
         logger.exception("build_core_session: backend.start failed")
         raise
 
-    # 9. Build session with owned state populated
+    # 9. Build session with owned state populated.
+    # The _owned_* underscore prefix is "dataclass-internal", not
+    # "private API" in the encapsulation sense — passing them as
+    # constructor kwargs keeps pyright quiet without setattr cruft.
     session = AgentSession(
         session_id=sid,
         surface=surface,
@@ -224,19 +227,13 @@ async def build_core_session(
         client=None,  # composition path — no ObscuraClient
         host_callbacks=dict(callbacks),
         system_prompt=effective_prompt,
+        _owned_backend=backend,
+        _owned_tool_registry=tool_registry,
+        _owned_hooks=hooks,
+        _owned_user=user,
+        _owned_mcp_backend=mcp_backend,
+        _owned_system_prompt=effective_prompt,
+        _capability_token=capability_token,
+        _circuit_registry=CircuitBreakerRegistry(),
     )
-    # Populate owned state via setattr to keep pyright quiet about
-    # protected-name access (these underscores are dataclass-internal,
-    # not "private API" in the encapsulation sense).
-    setattr(session, "_owned_backend", backend)  # noqa: B010
-    setattr(session, "_owned_tool_registry", tool_registry)  # noqa: B010
-    setattr(session, "_owned_hooks", hooks)  # noqa: B010
-    setattr(session, "_owned_user", user)  # noqa: B010
-    setattr(session, "_owned_mcp_backend", mcp_backend)  # noqa: B010
-    setattr(session, "_owned_system_prompt", effective_prompt)  # noqa: B010
-    setattr(session, "_capability_token", capability_token)  # noqa: B010
-    setattr(session, "_circuit_registry", CircuitBreakerRegistry())  # noqa: B010
-    setattr(session, "_cache", None)  # noqa: B010
-    setattr(session, "_max_retries", 2)  # noqa: B010
-    setattr(session, "_retry_initial_backoff", 0.5)  # noqa: B010
     return session

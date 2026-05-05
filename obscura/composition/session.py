@@ -35,7 +35,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, override
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, override
 
 if TYPE_CHECKING:
     from obscura.core.tools import ToolRegistry
@@ -54,6 +54,48 @@ def _empty_str_any_dict() -> dict[str, Any]:
     return {}
 
 
+class SessionExtras(TypedDict, total=False):
+    """Typed surface-specific knobs passed via ``SessionConfig.extras``.
+
+    All keys are optional (``total=False``). Adding a new knob requires
+    declaring it here so callsites get type-checked — typos like
+    ``extras["supervize"]`` were silently no-op before this typed dict
+    existed.
+
+    Per-block ownership:
+        repl_prompt:  ``no_default_prompt``
+        plugins:      ``compiled_ws``
+        skill_context:``skill_filter``, ``lazy_load_skills``
+        supervisor:   ``supervise``, ``agent_infos``
+        a2a:          ``a2a_task_id``  (set by ``build_a2a_session``)
+        api factory:  ``model_alias``  (consumed by ``backend_factory``)
+    """
+
+    # plugins block
+    compiled_ws: Any  # plugins.compiled_workspace.CompiledWorkspace | None
+
+    # supervisor block
+    supervise: bool
+    agent_infos: list[Any]  # list[AgentInfo]
+
+    # skill_context block
+    skill_filter: list[str] | None
+    lazy_load_skills: bool
+
+    # repl_prompt block
+    no_default_prompt: bool
+
+    # api factory (deps/__init__.py) → backend_factory
+    model_alias: str
+
+    # a2a builder — written by build_a2a_session, read by tooling
+    a2a_task_id: str
+
+
+def _empty_extras() -> SessionExtras:
+    return SessionExtras()
+
+
 @dataclass
 class SessionConfig:
     """Frozen-by-convention input to `build_*_session()`.
@@ -61,6 +103,9 @@ class SessionConfig:
     Surface-specific extras (e.g. REPL `compiled_ws`, FastAPI request)
     go in `extras` to keep the dataclass shape stable across surfaces.
     Building blocks read from `extras` for surface-specific knobs.
+
+    ``extras`` is a ``SessionExtras`` ``TypedDict`` (``total=False``) —
+    typos at callsites will fail pyright rather than silently no-op.
     """
 
     backend: str = ""
@@ -75,8 +120,9 @@ class SessionConfig:
     # API/A2A get them from request body or config respectively)
     mcp_servers: list[dict[str, Any]] = field(default_factory=_empty_mcp_servers)
 
-    # Surface-specific knobs (compiled_ws, request, oauth_token, etc.)
-    extras: dict[str, Any] = field(default_factory=_empty_str_any_dict)
+    # Surface-specific knobs (compiled_ws, supervise, skill_filter, etc.)
+    # See ``SessionExtras`` for the typed key set.
+    extras: SessionExtras = field(default_factory=_empty_extras)
 
 
 class _Closer(Protocol):
@@ -221,6 +267,26 @@ class AgentSession:
     _closed: bool = False
     _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
+    def __post_init__(self) -> None:
+        """Enforce the construction invariant.
+
+        Exactly one of ``client`` (legacy ObscuraClient path) or
+        ``_owned_backend`` (composition path) must be set. If neither
+        is, ``backend`` / ``registry`` / ``hooks`` / ``user`` would
+        crash with ``AttributeError: NoneType`` on first access. This
+        catches misuse at construction rather than on the first
+        property read.
+        """
+        client_set = self.client is not None
+        owned_set = self._owned_backend is not None
+        assert client_set != owned_set, (
+            "AgentSession requires exactly one of `client` (legacy "
+            "ObscuraClient path) or `_owned_backend` (composition "
+            f"path); got client={client_set}, _owned_backend={owned_set}. "
+            "Use build_core_session(...) for the composition path or "
+            "pass `client=<ObscuraClient>` for the legacy path."
+        )
+
     # ── Tool registration ─────────────────────────────────────────────
     # NOTE: AgentSession reaches into ObscuraClient's _tool_registry and
     # _backend below. This is the deliberate intermediate state of the
@@ -299,11 +365,21 @@ class AgentSession:
         return self.registry.all()
 
     def update_system_prompt(self, prompt: str) -> None:
-        """Mutate the active system prompt post-build.
+        """Mutate the active system prompt post-build (canonical mutator).
 
-        Both Copilot and Claude backends read ``self._system_prompt`` at
-        each stream call (not at start), so mutation here propagates on
-        the next turn.
+        Updates three locations in lock-step so the next stream call
+        sees the new prompt:
+
+        1. ``self.system_prompt``       — surface-visible field
+        2. ``self._owned_system_prompt``— composition-path mirror
+        3. ``self.client._system_prompt`` (when ``client`` is set —
+           legacy ObscuraClient path)
+        4. ``backend._system_prompt``   — both paths; Copilot and Claude
+           backends read this per-stream (not at start)
+
+        This is the only public mutator. Use it from any surface and
+        from any composition block — internal helpers should not bypass
+        it by writing ``_owned_system_prompt`` directly.
         """
         self.system_prompt = prompt
         self._owned_system_prompt = prompt
@@ -313,20 +389,7 @@ class AgentSession:
         # Mirror to backend (works for both composition and legacy paths)
         backend = self.backend
         if hasattr(backend, "_system_prompt"):
-            setattr(backend, "_system_prompt", prompt)  # noqa: B010
-
-    def update_owned_system_prompt(self, prompt: str) -> None:
-        """Set ``_owned_system_prompt`` (composition path).
-
-        Composition surfaces use this rather than touching the protected
-        attribute directly. Equivalent to ``update_system_prompt`` but
-        explicit about not mutating the legacy client.
-        """
-        self.system_prompt = prompt
-        self._owned_system_prompt = prompt
-        backend = self.backend
-        if hasattr(backend, "_system_prompt"):
-            setattr(backend, "_system_prompt", prompt)  # noqa: B010
+            backend._system_prompt = prompt
 
     # ── Lifecycle ────────────────────────────────────────────────────
 

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
 
     from obscura.agent.agents import AgentRuntime
-    from obscura.composition.session import AgentSession
+    from obscura.composition.session import AgentSession, SessionExtras
     from obscura.core.config import ObscuraConfig
 
 logger = logging.getLogger(__name__)
@@ -91,11 +91,14 @@ class ClientFactory:
             else None
         )
 
+        api_extras: SessionExtras = (
+            {"model_alias": model_alias} if model_alias else {}
+        )
         config = SessionConfig(
             backend=backend,
             model=model,
             system_prompt=system_prompt,
-            extras={"model_alias": model_alias} if model_alias else {},
+            extras=api_extras,
         )
 
         try:

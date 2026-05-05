@@ -68,7 +68,7 @@ from obscura.cli.render import (
 from obscura.cli.tips import TipScheduler
 from obscura.cli.tui_effects import ultrathink_banner
 from obscura.composition.repl import build_repl_session
-from obscura.composition.session import SessionConfig
+from obscura.composition.session import SessionConfig, SessionExtras
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.deep_log import dlog
@@ -189,7 +189,7 @@ async def repl(
     agent_infos = _discover_agent_infos()
     available_agents = [a.name for a in agent_infos] or None
 
-    _session_extras: dict[str, Any] = {
+    _session_extras: SessionExtras = {
         "supervise": supervise,
         "agent_infos": agent_infos,
     }
