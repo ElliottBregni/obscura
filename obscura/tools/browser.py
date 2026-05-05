@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.tools import tool
@@ -28,7 +29,15 @@ _page: Any = None
 
 
 async def _ensure_browser() -> Any:
-    """Lazily launch a headless browser and return the page."""
+    """Lazily launch (or connect to) a browser and return the page.
+
+    If ``OBSCURA_BROWSER_CDP`` is set (e.g. ``http://localhost:9222``) the
+    tool connects to an already-running Chrome over CDP instead of
+    launching its own headless instance. Useful when you want playwright
+    to drive a visible browser on the host machine — start Chrome with
+    ``--remote-debugging-port=9222`` and reverse-forward 9222 into this
+    process's environment.
+    """
     global _browser, _page
     if _page is not None:
         return _page
@@ -37,14 +46,23 @@ async def _ensure_browser() -> Any:
     except ImportError:
         msg = (
             "Browser tool requires playwright. Install with:\n"
-            "  uv pip install playwright && playwright install chromium"
+            "  uv tool install playwright && playwright install chromium"
         )
         raise RuntimeError(
             msg,
         )
     pw = await async_playwright().start()
-    _browser = await pw.chromium.launch(headless=True)
-    _page = await _browser.new_page()
+    cdp_url = os.environ.get("OBSCURA_BROWSER_CDP", "").strip()
+    if cdp_url:
+        logger.info("connecting playwright to existing Chrome at %s", cdp_url)
+        _browser = await pw.chromium.connect_over_cdp(cdp_url)
+        ctx = (
+            _browser.contexts[0] if _browser.contexts else await _browser.new_context()
+        )
+        _page = await ctx.new_page()
+    else:
+        _browser = await pw.chromium.launch(headless=True)
+        _page = await _browser.new_page()
     return _page
 
 

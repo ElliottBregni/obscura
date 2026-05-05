@@ -1,0 +1,477 @@
+"""Plugin bootstrapper — installs runtime dependencies declared in manifests.
+
+Handles pip, uv, npx, npm, cargo, and binary-check dependencies.
+Called by the loader pipeline *before* handler resolution.
+
+Usage::
+
+    from obscura.plugins.bootstrapper import run_bootstrap
+
+    result = run_bootstrap(spec)
+    if not result.ok:
+        print(f"Bootstrap failed: {result.errors}")
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+from collections.abc import Callable
+
+if TYPE_CHECKING:
+    from obscura.plugins.models import BootstrapDep, PluginSpec
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Obscura venv resolution
+# ---------------------------------------------------------------------------
+
+
+def _obscura_venv_python() -> str:
+    """Return the obscura venv Python, or sys.executable as fallback.
+
+    Resolution order:
+    1. ``$OBSCURA_VENV_PYTHON`` env var — explicit override
+    2. ``$OBSCURA_HOME/venv/bin/python`` — global home venv
+    3. Project-local ``.venv/bin/python`` — walk up from this file's location
+       to find a ``pyproject.toml`` / ``.venv`` pair
+    4. ``sys.executable`` — whatever Python is running right now
+    """
+    # 1. Explicit override
+    explicit = os.environ.get("OBSCURA_VENV_PYTHON", "").strip()
+    if explicit and Path(explicit).is_file():
+        return explicit
+
+    # 2. Global OBSCURA_HOME venv
+    venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
+    venv_python = venv_dir / "bin" / "python"
+    if venv_python.is_file():
+        return str(venv_python)
+
+    # 3. Project-local .venv — walk up from this module's location
+    here = Path(__file__).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / ".venv" / "bin" / "python"
+        if candidate.is_file():
+            return str(candidate)
+        # Stop searching once we hit a pyproject.toml boundary with no .venv
+        if (ancestor / "pyproject.toml").is_file() and not candidate.is_file():
+            break
+
+    return sys.executable
+
+
+def _obscura_venv_bin() -> Path:
+    """Return the bin directory of the obscura venv, or sys.prefix/bin.
+
+    Resolution order mirrors ``_obscura_venv_python()``.
+    """
+    # 1. Explicit override
+    explicit = os.environ.get("OBSCURA_VENV_PYTHON", "").strip()
+    if explicit:
+        explicit_bin = Path(explicit).parent
+        if explicit_bin.is_dir():
+            return explicit_bin
+
+    # 2. Global OBSCURA_HOME venv
+    venv_dir = Path(os.environ.get("OBSCURA_HOME", Path.home() / ".obscura")) / "venv"
+    venv_bin = venv_dir / "bin"
+    if venv_bin.is_dir():
+        return venv_bin
+
+    # 3. Project-local .venv
+    here = Path(__file__).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / ".venv" / "bin"
+        if candidate.is_dir():
+            return candidate
+        if (ancestor / "pyproject.toml").is_file():
+            break
+
+    return Path(sys.prefix) / "bin"
+
+
+# ---------------------------------------------------------------------------
+# Result model
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BootstrapResult:
+    """Outcome of running bootstrap for a plugin."""
+
+    plugin_id: str
+    ok: bool = True
+    installed: list[str] = field(default_factory=list[str])  # deps that were installed
+    skipped: list[str] = field(default_factory=list[str])  # already present
+    errors: list[str] = field(default_factory=list[str])  # hard failures
+    warnings: list[str] = field(default_factory=list[str])  # optional dep failures
+
+
+# ---------------------------------------------------------------------------
+# Dependency checkers
+# ---------------------------------------------------------------------------
+
+
+def _is_pip_installed(package: str) -> bool:
+    """Check if a pip package is installed in the obscura venv.
+
+    Prefers ``uv pip show`` (works without pip in the venv), falls back
+    to ``python -m pip show`` for environments without uv.
+    """
+    name = (
+        package.split("[", maxsplit=1)[0]
+        .split(">=", maxsplit=1)[0]
+        .split("==", maxsplit=1)[0]
+        .split("<", maxsplit=1)[0]
+        .strip()
+    )
+    venv_python = _obscura_venv_python()
+    # Prefer uv — it doesn't need pip inside the venv
+    if shutil.which("uv") is not None:
+        try:
+            result = subprocess.run(
+                ["uv", "pip", "show", name, "--python", venv_python],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            return result.returncode == 0
+        except Exception:
+            logger.debug("suppressed exception in _is_pip_installed", exc_info=True)
+    # Fallback to pip
+    try:
+        result = subprocess.run(
+            [venv_python, "-m", "pip", "show", name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        logger.debug("suppressed exception in _is_pip_installed", exc_info=True)
+        return False
+
+
+def _is_binary_available(name: str) -> bool:
+    """Check if a binary is on PATH or in the obscura venv bin dir."""
+    # Check the obscura venv bin directory first
+    obscura_bin = _obscura_venv_bin() / name
+    if obscura_bin.is_file():
+        return True
+    if shutil.which(name) is not None:
+        return True
+    # Check ~/.local/bin (user pip installs)
+    local_bin = Path.home() / ".local" / "bin" / name
+    return bool(local_bin.is_file())
+
+
+def _is_npm_installed(package: str) -> bool:
+    """Check if an npm package is installed globally."""
+    try:
+        result = subprocess.run(
+            ["npm", "list", "-g", package, "--depth=0"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        logger.debug("suppressed exception in _is_npm_installed", exc_info=True)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Installers
+# ---------------------------------------------------------------------------
+
+
+def _install_pip(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install a pip package into the obscura venv.
+
+    Prefers ``uv pip install`` (works without pip in the venv), falls
+    back to ``python -m pip install`` for environments without uv.
+    """
+    pkg = dep.package + dep.version if dep.version else dep.package
+    venv_python = _obscura_venv_python()
+    # Prefer uv — it doesn't need pip inside the venv
+    if shutil.which("uv") is not None:
+        try:
+            result = subprocess.run(
+                ["uv", "pip", "install", pkg, "--python", venv_python],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                return True, ""
+            # Don't fall through — uv gave a real answer
+            return False, result.stderr.strip()
+        except Exception:
+            logger.debug("suppressed exception in _install_pip", exc_info=True)
+    # Fallback to pip
+    try:
+        result = subprocess.run(
+            [venv_python, "-m", "pip", "install", "--quiet", pkg],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        logger.debug("suppressed exception in _install_pip", exc_info=True)
+        return False, str(exc)
+
+
+def _install_uv(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via uv pip install into the obscura venv."""
+    if not _is_binary_available("uv"):
+        return _install_pip(dep)  # fallback to pip
+
+    pkg = dep.package + dep.version if dep.version else dep.package
+    venv_python = _obscura_venv_python()
+    try:
+        result = subprocess.run(
+            ["uv", "pip", "install", pkg, "--python", venv_python],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        logger.debug("suppressed exception in _install_uv", exc_info=True)
+        return False, str(exc)
+
+
+def _install_npx(dep: BootstrapDep) -> tuple[bool, str]:
+    """Npx packages are run on-demand, just verify npx is available."""
+    if _is_binary_available("npx"):
+        return True, ""
+    return False, "npx not found — install Node.js"
+
+
+def _install_npm(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install an npm package globally."""
+    pkg = dep.package
+    try:
+        result = subprocess.run(
+            ["npm", "install", "-g", pkg],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        logger.debug("suppressed exception in _install_npm", exc_info=True)
+        return False, str(exc)
+
+
+def _install_cargo(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via cargo install."""
+    if not _is_binary_available("cargo"):
+        return False, "cargo not found — install Rust toolchain"
+    pkg = dep.package
+    try:
+        result = subprocess.run(
+            ["cargo", "install", pkg],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        logger.debug("suppressed exception in _install_cargo", exc_info=True)
+        return False, str(exc)
+
+
+def _check_binary(dep: BootstrapDep) -> tuple[bool, str]:
+    """Verify a binary is on PATH (no install — just a check)."""
+    if _is_binary_available(dep.package):
+        return True, ""
+    return False, f"Binary '{dep.package}' not found on PATH"
+
+
+def _install_brew(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via Homebrew (macOS/Linux)."""
+    if not _is_binary_available("brew"):
+        return False, "brew not found — install Homebrew: https://brew.sh"
+    pkg = dep.package
+    try:
+        result = subprocess.run(
+            ["brew", "install", pkg],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.strip()
+    except Exception as exc:
+        logger.debug("suppressed exception in _install_brew", exc_info=True)
+        return False, str(exc)
+
+
+def _install_pipx(dep: BootstrapDep) -> tuple[bool, str]:
+    """Install via pipx (isolated CLI tool installs)."""
+    # Try pipx first, fall back to uv tool install, then pip
+    for cmd in (["pipx", "install"], ["uv", "tool", "install"]):
+        if not _is_binary_available(cmd[0]):
+            continue
+        try:
+            result = subprocess.run(
+                [*cmd, dep.package],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                return True, ""
+            if "already" in result.stderr.lower():
+                return True, ""
+        except Exception:
+            logger.debug("suppressed exception in _install_pipx", exc_info=True)
+            continue
+    # Final fallback: pip install into current env
+    return _install_pip(dep)
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher
+# ---------------------------------------------------------------------------
+
+
+def _brew_binary_name(package: str) -> str:
+    """Extract the binary name from a brew package spec.
+
+    Tap formulas like ``nats-io/nats-tools/nats`` install a binary
+    named ``nats`` (the last path component).  Plain names like ``fd``
+    are returned as-is.
+    """
+    return package.rsplit("/", 1)[-1]
+
+
+_Checker = Callable[[str], bool]
+_Installer = Callable[["BootstrapDep"], "tuple[bool, str]"]
+
+_INSTALLERS: dict[str, tuple[_Checker, _Installer]] = {
+    "pip": (_is_pip_installed, _install_pip),
+    "uv": (_is_pip_installed, _install_uv),
+    "npx": (lambda p: _is_binary_available("npx"), _install_npx),
+    "npm": (_is_npm_installed, _install_npm),
+    "cargo": (_is_binary_available, _install_cargo),
+    "binary": (_is_binary_available, _check_binary),
+    "brew": (lambda p: _is_binary_available(_brew_binary_name(p)), _install_brew),
+    "pipx": (_is_binary_available, _install_pipx),
+}
+
+
+def _bootstrap_dep(dep: BootstrapDep) -> tuple[str, bool, str]:
+    """Bootstrap a single dependency. Returns (action, success, error)."""
+    checker, installer = _INSTALLERS.get(dep.type, (None, None))
+    if checker is None or installer is None:
+        return "error", False, f"Unknown dep type: {dep.type}"
+
+    # Check if already present
+    try:
+        if checker(dep.package):
+            return "skipped", True, ""
+    except Exception:
+        logger.debug("suppressed exception in _bootstrap_dep", exc_info=True)
+
+    # Install
+    logger.info("Installing %s dependency: %s %s", dep.type, dep.package, dep.version)
+    ok, err = installer(dep)
+    if ok:
+        return "installed", True, ""
+    return "error", False, err
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def run_bootstrap(spec: PluginSpec) -> BootstrapResult:
+    """Run the bootstrap pipeline for a plugin.
+
+    Checks each declared dependency and installs if missing.
+    Returns a result with installed/skipped/error lists.
+    """
+    result = BootstrapResult(plugin_id=spec.id)
+
+    if spec.bootstrap is None:
+        return result
+
+    bootstrap = spec.bootstrap
+
+    for dep in bootstrap.deps:
+        action, _ok, err = _bootstrap_dep(dep)
+        label = f"{dep.type}:{dep.package}"
+
+        if action == "skipped":
+            result.skipped.append(label)
+        elif action == "installed":
+            result.installed.append(label)
+            logger.info("Installed %s for plugin %s", label, spec.id)
+        elif dep.optional:
+            result.warnings.append(f"{label}: {err}")
+            logger.debug("Optional dep %s failed for %s: %s", label, spec.id, err)
+        else:
+            result.errors.append(f"{label}: {err}")
+            result.ok = False
+            logger.debug("Required dep %s failed for %s: %s", label, spec.id, err)
+
+    # Run post_install command if all required deps succeeded
+    if result.ok and bootstrap.post_install:
+        try:
+            proc = subprocess.run(
+                shlex.split(bootstrap.post_install),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if proc.returncode != 0:
+                result.warnings.append(f"post_install failed: {proc.stderr.strip()}")
+        except Exception as exc:
+            logger.debug("suppressed exception in run_bootstrap", exc_info=True)
+            result.warnings.append(f"post_install failed: {exc}")
+
+    # Run check_command to verify
+    if result.ok and bootstrap.check_command:
+        try:
+            proc = subprocess.run(
+                shlex.split(bootstrap.check_command),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if proc.returncode != 0:
+                result.warnings.append(f"check_command failed: {proc.stderr.strip()}")
+        except Exception as exc:
+            logger.debug("suppressed exception in run_bootstrap", exc_info=True)
+            result.warnings.append(f"check_command failed: {exc}")
+
+    return result
+
+
+__all__ = [
+    "BootstrapResult",
+    "run_bootstrap",
+]

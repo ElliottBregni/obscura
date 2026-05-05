@@ -1,0 +1,101 @@
+Metadata-Version: 2.4
+Name: obscura-agent
+Version: 0.5.3
+Summary: Obscura - Multi-agent context management with TUI
+Requires-Python: >=3.13
+Requires-Dist: github-copilot-sdk>=0.2.1
+Requires-Dist: claude-agent-sdk>=0.1.0
+Requires-Dist: openai-codex-app-server-sdk @ git+https://github.com/openai/codex.git@rust-v0.128.0#subdirectory=sdk/python
+Requires-Dist: openai>=1.0.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: numpy>=2.1.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: pydantic>=2.0
+Requires-Dist: structlog>=23.0.0
+Requires-Dist: qdrant-client>=1.17.0
+Requires-Dist: sentence-transformers>=3.0.0
+Requires-Dist: psycopg2-binary>=2.9.9
+Requires-Dist: click>=8.3.1
+Requires-Dist: rich>=14.3.2
+Requires-Dist: prompt-toolkit>=3.0.50
+Requires-Dist: toons>=0.5.0
+Requires-Dist: fastmcp>=3.1.0
+Requires-Dist: tomli-w==1.2.0
+Requires-Dist: pyjwt[crypto]>=2.8.0
+Requires-Dist: keyring>=25.0
+Provides-Extra: voice
+Requires-Dist: openai-whisper>=20240930; extra == "voice"
+Requires-Dist: websockets>=12.0; extra == "voice"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
+Requires-Dist: cryptography>=42.0; extra == "dev"
+Requires-Dist: fastapi>=0.128.4; extra == "dev"
+Requires-Dist: uvicorn>=0.40.0; extra == "dev"
+Requires-Dist: sse-starlette>=3.2.0; extra == "dev"
+Requires-Dist: pyright>=1.1.390; extra == "dev"
+Requires-Dist: ruff>=0.8.0; extra == "dev"
+Requires-Dist: pytest-cov>=6.0; extra == "dev"
+Provides-Extra: web
+Requires-Dist: playwright>=1.50.0; extra == "web"
+Provides-Extra: server
+Requires-Dist: fastapi>=0.115.0; extra == "server"
+Requires-Dist: uvicorn[standard]>=0.32.0; extra == "server"
+Requires-Dist: httpx>=0.27.0; extra == "server"
+Requires-Dist: sse-starlette>=2.1.0; extra == "server"
+Provides-Extra: telemetry
+Requires-Dist: opentelemetry-api>=1.20.0; extra == "telemetry"
+Requires-Dist: opentelemetry-sdk>=1.20.0; extra == "telemetry"
+Requires-Dist: opentelemetry-exporter-otlp-proto-grpc>=1.20.0; extra == "telemetry"
+Requires-Dist: opentelemetry-instrumentation-fastapi>=0.41b0; extra == "telemetry"
+Requires-Dist: structlog>=23.0.0; extra == "telemetry"
+Provides-Extra: a2a
+Requires-Dist: redis[hiredis]>=5.0.0; extra == "a2a"
+Requires-Dist: grpcio>=1.60.0; extra == "a2a"
+Requires-Dist: grpcio-tools>=1.60.0; extra == "a2a"
+Requires-Dist: grpcio-reflection>=1.60.0; extra == "a2a"
+Requires-Dist: protobuf>=4.25.0; extra == "a2a"
+Provides-Extra: metrics
+Requires-Dist: psutil>=5.9.0; extra == "metrics"
+Provides-Extra: yaml
+Requires-Dist: pyyaml>=6.0; extra == "yaml"
+Provides-Extra: toml
+Requires-Dist: tomli-w>=1.0; extra == "toml"
+Provides-Extra: anthropic
+Requires-Dist: anthropic>=0.40.0; extra == "anthropic"
+Provides-Extra: duckdb
+Requires-Dist: duckdb>=1.0.0; extra == "duckdb"
+Provides-Extra: datafusion
+Requires-Dist: datafusion>=40.0; extra == "datafusion"
+Provides-Extra: huggingface
+Requires-Dist: huggingface_hub>=0.20; extra == "huggingface"
+Provides-Extra: x-twitter
+Requires-Dist: xdk>=0.4.5; extra == "x-twitter"
+Provides-Extra: notion
+Requires-Dist: notion-client>=2.0.0; extra == "notion"
+Provides-Extra: coingecko
+Requires-Dist: pycoingecko>=3.0.0; extra == "coingecko"
+Provides-Extra: datadog
+Requires-Dist: datadog-api-client>=2.0.0; extra == "datadog"
+Provides-Extra: msgraph
+Requires-Dist: msal>=1.27.0; extra == "msgraph"
+Provides-Extra: gws
+Requires-Dist: gws-cli; extra == "gws"
+Provides-Extra: plugins-data
+Requires-Dist: obscura-agent[datafusion,duckdb]; extra == "plugins-data"
+Provides-Extra: plugins-finance
+Requires-Dist: obscura-agent[coingecko]; extra == "plugins-finance"
+Provides-Extra: plugins-productivity
+Requires-Dist: obscura-agent[gws,msgraph,notion]; extra == "plugins-productivity"
+Provides-Extra: plugins-observability
+Requires-Dist: obscura-agent[datadog]; extra == "plugins-observability"
+Provides-Extra: plugins-social
+Requires-Dist: obscura-agent[x-twitter]; extra == "plugins-social"
+Provides-Extra: plugins-ml
+Requires-Dist: obscura-agent[huggingface]; extra == "plugins-ml"
+Provides-Extra: plugins-all
+Requires-Dist: obscura-agent[coingecko,datadog,datafusion,duckdb,gws,huggingface,msgraph,notion,x-twitter]; extra == "plugins-all"
+Provides-Extra: full
+Requires-Dist: obscura-agent[a2a,anthropic,metrics,plugins-all,server,telemetry,voice]; extra == "full"
+Provides-Extra: providers
+Requires-Dist: obscura-agent[anthropic,coingecko,datadog,msgraph,notion,x-twitter]; extra == "providers"

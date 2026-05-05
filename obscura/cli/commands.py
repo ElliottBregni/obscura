@@ -97,6 +97,7 @@ from obscura.core.paths import (
 )
 from obscura.core.permission_modes import PermissionMode
 from obscura.core.templates import list_templates, load_template
+from obscura.core.system_prompts import load_prompt
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.types import EFFORT_THINKING_BUDGETS, EffortLevel
 from obscura.kairos.goals import GoalBoard
@@ -128,6 +129,26 @@ if TYPE_CHECKING:
 
 _MESSAGE_ROLE_OVERHEAD_TOKENS = 4
 _RESPONSE_RESERVE_TOKENS = 4096
+
+
+# Sigil reference is loaded from obscura/prompts/sigil_reference.md so the
+# content lives next to the other system-prompt fragments and can be edited
+# without touching Python. Lazy + cached to avoid re-reading every turn.
+_sigil_reference_cache: str | None = None
+
+
+def _get_sigil_reference() -> str:
+    global _sigil_reference_cache
+    if _sigil_reference_cache is None:
+        try:
+            _sigil_reference_cache = load_prompt("sigil_reference")
+        except FileNotFoundError:
+            logger.warning(
+                "sigil_reference.md not found in obscura/prompts/ — "
+                "agents will not see sigil docs in their system prompt",
+            )
+            _sigil_reference_cache = ""
+    return _sigil_reference_cache
 
 
 def _estimate_tokens(text: str) -> int:
@@ -393,13 +414,26 @@ class REPLContext:
         return self.mode_manager
 
     def get_effective_system_prompt(self) -> str:
-        """Combine mode system prompt with user system prompt."""
+        """Combine mode system prompt + sigil reference + user system prompt.
+
+        The sigil reference is always appended so the agent understands what
+        ``$`` / ``@`` / ``*@`` / ``!`` / ``/`` references mean when they
+        appear in conversation content. This is invariant across modes and
+        user-set prompts — it's a property of the host runtime, not a user
+        instruction.
+        """
         mode_prompt = ""
         if self.mode_manager is not None:
             mode_prompt = self.mode_manager.get_system_prompt()
-        if mode_prompt and self.system_prompt:
-            return f"{mode_prompt}\n\n{self.system_prompt}"
-        return mode_prompt or self.system_prompt
+        parts: list[str] = []
+        if mode_prompt:
+            parts.append(mode_prompt)
+        if self.system_prompt:
+            parts.append(self.system_prompt)
+        sigil_ref = _get_sigil_reference()
+        if sigil_ref:
+            parts.append(sigil_ref)
+        return "\n\n".join(parts)
 
     async def get_runtime(self) -> Any:
         """Get or create the AgentRuntime, wiring InteractionBus to CLI."""
@@ -678,6 +712,117 @@ class REPLContext:
         remaining = " ".join(tokens[rest_start:])
         return skills, command, remaining
 
+    def expand_inline_references(self, text: str) -> str:
+        """Expand $skill / @command / *@command / !agent references anywhere in `text`.
+
+        Each reference is replaced inline:
+
+          * ``$<name>``  → skill body
+          * ``@<name>``  → @command body (with empty $ARGUMENTS)
+          * ``*@<name>`` → same as ``@<name>`` (eval semantics only apply to
+            leading-token form)
+          * ``!<name>``  → agent card (name, description, key config) so the
+            host model has context about that agent — not a spawn
+
+        Unknown names are left untouched. The expansion is single-pass —
+        substituted bodies are NOT re-scanned, which keeps things bounded if
+        a command references another command.
+
+        References are detected with word boundaries: ``@review`` matches but
+        ``email@review`` does not. The leading-token parsers
+        (:meth:`parse_chained_input` and ``_INLINE_AGENT_MENTION_RE``) are the
+        right tools when an argument string follows the reference; this method
+        is for mid-prompt references that take no arguments.
+        """
+        if not text or not any(c in text for c in "$@!"):
+            return text
+
+        # Order matters: try *@ before @ so the asterisk is consumed.
+        # `[\w-]+` matches kebab-case names like `new-agent`.
+        pattern = re.compile(
+            r"(?<![\w@$*!])(\*@|@|\$|!)([A-Za-z][\w-]*)",
+        )
+
+        def _replace(match: re.Match[str]) -> str:
+            sigil = match.group(1)
+            name = match.group(2)
+            full = match.group(0)
+            if sigil == "$":
+                body = self.resolve_dollar_skill(name)
+                if body is None:
+                    return full
+                # Skill = ambient context applied to the whole response.
+                return (
+                    f"\n\n>>> SKILL CONTEXT (`${name}`) — apply throughout"
+                    f" your response:\n{body}\n"
+                    f"<<< end skill `${name}`\n\n"
+                )
+            if sigil == "!":
+                card = self._build_agent_card(name)
+                if card is None:
+                    return full
+                # Agent card is reference-only; the host can spawn the agent
+                # via the !-leading-token form or the delegate_to_agent tool.
+                return (
+                    f"\n\n>>> AGENT REFERENCE (`!{name}`) — this agent is"
+                    f" available; consider delegating via"
+                    f" delegate_to_agent if its capabilities match the"
+                    f" task:\n{card}\n"
+                    f"<<< end agent `!{name}`\n\n"
+                )
+            # @ or *@ — both expand to the resolved command body. Treat as
+            # an inline instruction the model should perform as part of
+            # answering the user's request.
+            resolved = self.resolve_at_command(name, "")
+            if resolved is None:
+                return full
+            return (
+                f"\n\n>>> INLINE COMMAND (`@{resolved.name}`) — follow the"
+                f" instructions below as part of fulfilling the user's"
+                f" request:\n{resolved.body}\n"
+                f"<<< end command `@{resolved.name}`\n\n"
+            )
+
+        return pattern.sub(_replace, text)
+
+    def _build_agent_card(self, name: str) -> str | None:
+        """Build a compact agent card for inline ``!<name>`` expansion.
+
+        Reads `agents.yaml` (active + disabled) and formats the entry as a
+        short text block. Returns None if no agent with that name exists, so
+        the caller can leave the literal ``!<name>`` in place.
+        """
+        try:
+            configs = load_agent_configs(include_disabled=True)
+        except Exception:
+            logger.debug("suppressed exception in _build_agent_card", exc_info=True)
+            return None
+        cfg = configs.get(name)
+        if cfg is None:
+            return None
+        lines: list[str] = [f"name: {name}"]
+        if cfg.get("description"):
+            lines.append(f"description: {cfg['description']}")
+        if cfg.get("provider"):
+            lines.append(f"provider: {cfg['provider']}")
+        if cfg.get("max_turns"):
+            lines.append(f"max_turns: {cfg['max_turns']}")
+        if cfg.get("tags"):
+            tags = cfg["tags"]
+            if isinstance(tags, list):
+                lines.append(f"tags: {', '.join(str(t) for t in tags)}")
+        sp = cfg.get("system_prompt") or ""
+        if sp:
+            sp_str = " ".join(str(sp).split())
+            if len(sp_str) > 400:
+                sp_str = sp_str[:400] + "…"
+            lines.append(f"system_prompt: {sp_str}")
+        lines.append(
+            "(agent context — host can `!" + name + " <prompt>` to invoke, "
+            "or use the delegate_to_agent tool)"
+        )
+        return "\n".join(lines)
+
     # ── * eval helpers ────────────────────────────────────────────────────
 
     def get_eval_suite(self, command_name: str) -> EvalSuite | None:
@@ -946,7 +1091,15 @@ async def cmd_model(args: str, ctx: REPLContext) -> str | None:
 
 
 async def cmd_system(args: str, ctx: REPLContext) -> str | None:
-    """Set the system prompt."""
+    """Set the system prompt.
+
+    Forms:
+      /system                       — show the current system prompt
+      /system <text>                — set the system prompt verbatim
+      /system @<command> [<args>]   — resolve an @command and use its body
+                                      (with $ARGUMENTS substituted) as the
+                                      system prompt
+    """
     prompt = args.strip()
     if not prompt:
         if ctx.system_prompt:
@@ -954,6 +1107,34 @@ async def cmd_system(args: str, ctx: REPLContext) -> str | None:
         else:
             print_info("No system prompt set.")
         return None
+
+    if prompt.startswith("@"):
+        head, _, tail = prompt[1:].partition(" ")
+        cmd_name = head.strip()
+        cmd_args = tail.strip()
+        if not cmd_name:
+            print_error("Usage: /system @<command-name> [args]")
+            return None
+        resolved = ctx.resolve_at_command(cmd_name, cmd_args)
+        if resolved is None:
+            suggestions = ctx._get_command_loader().suggest_commands(  # pyright: ignore[reportPrivateUsage]
+                cmd_name,
+                limit=5,
+            )
+            hint = f" Did you mean: {', '.join(suggestions)}?" if suggestions else ""
+            print_error(f"Unknown @command: @{cmd_name}.{hint}")
+            return None
+        if resolved.inferred_from:
+            print_info(
+                f"@{resolved.inferred_from} → @{resolved.name} (fuzzy match)",
+            )
+        ctx.system_prompt = resolved.body
+        await ctx.recreate_client(ctx.backend, ctx.model)
+        print_ok(
+            f"System prompt set from @{resolved.name} ({len(resolved.body)} chars).",
+        )
+        return None
+
     ctx.system_prompt = prompt
     await ctx.recreate_client(ctx.backend, ctx.model)
     print_ok("System prompt updated.")
@@ -4291,17 +4472,128 @@ async def _a2a_list_agents(ctx: REPLContext) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+async def cmd_vector(args: str, _ctx: REPLContext) -> str | None:
+    """Probe the configured vector backend (Qdrant default).
+
+    Subcommands:
+        /vector              show health (default)
+        /vector health       structured backend status + latency
+        /vector backend      print resolved backend name and env config
+    """
+    from obscura.data.vector_memory import vector_healthcheck
+    from obscura.data.vector_memory.factory import (
+        is_vector_memory_enabled,
+        resolve_vector_backend,
+    )
+
+    parts = args.strip().split()
+    sub = parts[0] if parts else "health"
+
+    if sub == "backend":
+        if not is_vector_memory_enabled():
+            print_warning("Vector memory is disabled (OBSCURA_VECTOR_MEMORY=off).")
+            return None
+        try:
+            name = resolve_vector_backend()
+        except Exception as exc:
+            logger.debug("resolve_vector_backend failed", exc_info=True)
+            print_error(f"Could not resolve backend: {exc}")
+            return None
+        print_info(f"Resolved backend: {name}")
+        env_keys = (
+            "OBSCURA_VECTOR_BACKEND",
+            "OBSCURA_VECTOR_MEMORY",
+            "OBSCURA_QDRANT_MODE",
+            "OBSCURA_QDRANT_PATH",
+            "QDRANT_URL",
+        )
+        for k in env_keys:
+            v = os.environ.get(k)
+            if v is not None:
+                console.print(f"  [dim]{k}=[/]{v}")
+        return None
+
+    # default: health
+    result = vector_healthcheck()
+    if result["ok"]:
+        print_ok(
+            f"Vector backend '{result['backend']}' healthy ({result['latency_ms']} ms)",
+        )
+    elif not result["enabled"]:
+        print_warning(
+            f"Vector memory disabled: {result.get('error', 'unknown')}",
+        )
+    else:
+        print_error(
+            f"Vector backend '{result.get('backend', '?')}' unhealthy: "
+            f"{result.get('error', 'unknown')}",
+        )
+    return None
+
+
 async def cmd_memory(args: str, ctx: REPLContext) -> str | None:
-    """Show vector memory stats, search, or clear auto-saved memories."""
+    """Manage memory stores.
+
+    Vector store (semantic): /memory stats | search <q> | clear [mcp]
+    Lazy keyword store (FTS5): /memory remember <text> | recall <q> | forget <id>
+    """
+    parts = args.strip().split(maxsplit=1)
+    subcmd = parts[0] if parts else "stats"
+    rest = parts[1] if len(parts) > 1 else ""
+
+    # FTS keyword store subcommands — independent of vector_store. Routes
+    # through the data-layer factory so it works for SQLite (default) and
+    # Postgres (selected via `OBSCURA_DB_URL` or `OBSCURA_PG_*`).
+    if subcmd in {"remember", "recall", "forget"}:
+        from obscura.data.keyword_memory import get_keyword_memory_repo
+
+        store = get_keyword_memory_repo()
+        try:
+            if subcmd == "remember":
+                if not rest:
+                    print_warning("Usage: /memory remember <text>")
+                    return None
+                new_id = store.remember(rest)
+                print_ok(f"Remembered as #{new_id} in default namespace.")
+            elif subcmd == "recall":
+                if not rest:
+                    print_warning("Usage: /memory recall <query>")
+                    return None
+                results = store.recall(rest, top_k=10)
+                if not results:
+                    print_info("No matches.")
+                else:
+                    for r in results:
+                        preview = r.content[:160].replace("\n", " ")
+                        console.print(
+                            f"  [bold]#{r.id}[/] [dim]({r.namespace})[/] "
+                            f"score={r.score:.2f}  {preview}",
+                        )
+            elif subcmd == "forget":
+                try:
+                    mid = int(rest.strip())
+                except ValueError:
+                    logger.debug(
+                        "invalid id for /memory forget: %r",
+                        rest,
+                        exc_info=True,
+                    )
+                    print_warning("Usage: /memory forget <id>")
+                    return None
+                if store.forget(mid):
+                    print_ok(f"Forgot memory #{mid}.")
+                else:
+                    print_info(f"No memory with id {mid}.")
+        finally:
+            store.close()
+        return None
+
+    # Vector-store subcommands below — require ctx.vector_store.
     if ctx.vector_store is None:
         print_warning(
             "Vector memory is disabled. Set OBSCURA_VECTOR_MEMORY=on to enable.",
         )
         return None
-
-    parts = args.strip().split(maxsplit=1)
-    subcmd = parts[0] if parts else "stats"
-    rest = parts[1] if len(parts) > 1 else ""
 
     if subcmd == "stats":
         try:
@@ -4469,6 +4761,52 @@ async def cmd_init(args: str, _ctx: REPLContext) -> str | None:
             logger.debug("suppressed exception in cmd_init", exc_info=True)
             print_warning(f"OBSCURA.md generation failed: {exc}")
 
+    # Phase 2b: Seed editable prompt files in ~/.obscura/ if missing.
+    # Each entry is (filename_in_home, template_name, blurb). Existing files
+    # are never overwritten — these are user-editable copies.
+    seeds: list[tuple[str, str, str]] = []
+    if "--no-soul" not in args:
+        seeds.append(
+            ("SOUL.md", "soul_default", "cross-project agent defaults"),
+        )
+    if "--no-sys" not in args:
+        seeds.append(
+            (
+                "sys.md",
+                "default_agent",
+                "default system prompt — overrides the built-in for this user",
+            ),
+        )
+        seeds.append(
+            (
+                "subagent.md",
+                "subagent",
+                "sub-agent system prompt — overrides the built-in for spawned agents",
+            ),
+        )
+
+    if seeds:
+        obscura_home = Path.home() / ".obscura"
+        for filename, template_name, blurb in seeds:
+            target = obscura_home / filename
+            if target.exists():
+                continue
+            try:
+                content = load_prompt(template_name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+                print_ok(f"Created {target} ({blurb})")
+            except FileNotFoundError:
+                logger.debug(
+                    "template %r missing — skipping %s seed",
+                    template_name,
+                    filename,
+                    exc_info=True,
+                )
+            except Exception as exc:
+                logger.debug("suppressed exception in cmd_init", exc_info=True)
+                print_warning(f"{filename} seed failed: {exc}")
+
     # Phase 3: Show agent definitions
     try:
         defs = resolve_all_definitions()
@@ -4488,7 +4826,28 @@ def _build_onboarding_prompt() -> str:
     return """\
 Explore this repository and create a OBSCURA.md file in the root directory.
 
-For a **code repository**, the OBSCURA.md should contain:
+The file MUST start with a YAML frontmatter block declaring memory namespaces
+specific to this project — this complements the cross-project rules in SOUL.md
+by telling future agents what kinds of things are worth remembering here.
+
+```
+---
+remember:
+  - namespace: project:<repo-slug>
+    when: "Architectural decisions, design tradeoffs accepted, or non-obvious wiring."
+    examples:
+      - "<infer 1-2 plausible examples from what you read>"
+  - namespace: project:<repo-slug>:gotchas
+    when: "Subtle bugs, broken-by-default behaviors, or workarounds."
+  - namespace: project:<repo-slug>:user-prefs
+    when: "How the user prefers to work in this repo specifically."
+---
+
+# <Project Name>
+... markdown body ...
+```
+
+For a **code repository**, the body should contain:
 1. **Build & Development** — How to install, build, run, and test
 2. **Architecture** — Key modules, data flow, important patterns
 3. **Key Patterns** — Coding conventions, naming, imports
@@ -4502,11 +4861,12 @@ Steps:
 1. Read README.md, package.json/pyproject.toml, Makefile/Dockerfile if they exist
 2. Explore the directory structure (tree, ls)
 3. Read 3-5 key files to understand the project and its patterns
-4. Write OBSCURA.md with the information you found
+4. Pick a kebab-case slug for the project namespace based on the repo name
+5. Write OBSCURA.md with the frontmatter + body
 
-Keep it concise (under 200 lines). Focus on what an AI agent needs to know
-to work effectively in this project. Use code blocks for commands.
-Do NOT make up information — only document what you can verify."""
+Keep it concise (under 200 lines, frontmatter included). Focus on what an AI
+agent needs to know to work effectively in this project. Use code blocks for
+commands. Do NOT make up information — only document what you can verify."""
 
 
 # ---------------------------------------------------------------------------
@@ -9838,6 +10198,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "a2a": cmd_a2a,
     # Memory
     "memory": cmd_memory,
+    "vector": cmd_vector,
     # Workspace
     "init": cmd_init,
     "migrate": cmd_migrate,
@@ -9960,7 +10321,8 @@ COMPLETIONS: dict[str, list[str]] = {
     "a2a": ["discover", "send", "stream", "list", "agents"],
     "init": ["--force"],
     "migrate": ["external", "--force", "--list"],
-    "memory": ["stats", "search", "clear"],
+    "memory": ["stats", "search", "clear", "remember", "recall", "forget"],
+    "vector": ["health", "backend"],
     "status": ["--json"],
     "policies": [],
     "replay": [],

@@ -1,0 +1,82 @@
+"""Auto-classify conversation turns into memory channel namespaces.
+
+When :func:`~obscura.cli.vector_memory_bridge.auto_save_turn` saves a turn,
+the classifier determines which channel namespaces the turn should be stored
+in based on keyword and file-path triggers.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from obscura.memory_channels.models import MemoryChannel
+
+# Same regex as router.py
+_FILE_PATH_RE = re.compile(
+    r"[\w/.~-]+\.(?:py|toml|yaml|yml|json|md|ts|tsx|js|jsx|rs|go|sh)",
+)
+
+# Default namespace when no channels match
+_DEFAULT_NAMESPACE = "cli:conversation"
+
+
+class TurnClassifier:
+    """Classify conversation turns into channel namespaces.
+
+    Parameters
+    ----------
+    channels:
+        List of :class:`MemoryChannel` definitions to match against.
+
+    """
+
+    def __init__(self, channels: list[MemoryChannel]) -> None:
+        self._channels = [c for c in channels if c.enabled]
+
+    def classify(self, user_text: str, assistant_text: str) -> list[str]:
+        """Return namespace strings that this turn should be saved to.
+
+        Always includes :data:`_DEFAULT_NAMESPACE`.  Additional namespaces
+        are added when keyword or file-glob triggers match.
+        """
+        combined = f"{user_text or ''}\n{assistant_text or ''}".lower()
+        file_paths = set(_FILE_PATH_RE.findall(combined))
+
+        namespaces: list[str] = [_DEFAULT_NAMESPACE]
+
+        for channel in self._channels:
+            triggers = channel.triggers
+
+            # Always-on channels get every turn
+            if triggers.always:
+                if channel.namespace not in namespaces:
+                    namespaces.append(channel.namespace)
+                continue
+
+            if channel.namespace in namespaces:
+                continue
+
+            # Keyword match
+            if triggers.keywords:
+                if any(kw.lower() in combined for kw in triggers.keywords):
+                    namespaces.append(channel.namespace)
+                    continue
+
+            # File glob match
+            if triggers.file_globs and any(
+                fnmatch.fnmatch(fp, pat)
+                for pat in triggers.file_globs
+                for fp in file_paths
+            ):
+                namespaces.append(channel.namespace)
+                continue
+
+            # Tool name match (check if tool names appear in text)
+            if triggers.tool_names:
+                if any(tn.lower() in combined for tn in triggers.tool_names):
+                    namespaces.append(channel.namespace)
+
+        return namespaces

@@ -49,10 +49,15 @@ from obscura.cli.bootstrap import (
     _discover_mcp,  # pyright: ignore[reportPrivateUsage]
 )
 from obscura.cli.commands import (
+    COMMANDS,
     COMPLETIONS,
     REPLContext,
     estimate_effective_context_tokens,
     handle_command,
+)
+from obscura.core.system_prompts import (
+    compose_active_goals_section,
+    compose_user_memory_section,
 )
 from obscura.cli.prompt import (
     PromptStatus,
@@ -151,6 +156,7 @@ from obscura.tools.memory_tools import (
 )
 from obscura.tools.swarm import build_agent_catalog, load_agent_configs
 from obscura.tools.system import UI, Session, get_system_tool_specs
+from obscura.tools.system._repl_commands import SlashBridge
 from obscura.voice.session import VoiceSession
 
 _log = logging.getLogger("obscura.cli")
@@ -232,6 +238,18 @@ async def repl(
         if prefs_text:
             custom_sections.append(f"# User Identity & Preferences\n\n{prefs_text}")
 
+    # Inject `user:*` memories (eager — the only namespace prefix loaded
+    # at boot; everything else is lazy via `recall_memory`).
+    user_mem_section = compose_user_memory_section()
+    if user_mem_section:
+        custom_sections.append(user_mem_section)
+
+    # Inject active goals from the goal board whose `project_root` matches
+    # the current working directory. Lazy: read once at session start.
+    goals_section = compose_active_goals_section()
+    if goals_section:
+        custom_sections.append(goals_section)
+
     # Inject vector memory context at session start
     if vector_store is not None:
         vm_startup = load_startup_memories(vector_store, sid, top_k=3)
@@ -293,6 +311,19 @@ async def repl(
                     )
             except Exception:
                 _log.debug("suppressed exception in repl", exc_info=True)
+    except Exception:
+        _log.debug("suppressed exception in repl", exc_info=True)
+
+    # Inject active wizard profile prompts (highest precedence — appended last
+    # so they can override or augment any earlier section).
+    try:
+        from obscura.wizard import WizardService
+
+        _wiz = WizardService()
+        _profile = _wiz.resolve_active_profile()
+        if _profile is not None:
+            for _text in _wiz.load_profile_prompt_text(_profile):
+                custom_sections.append(_text)
     except Exception:
         _log.debug("suppressed exception in repl", exc_info=True)
 
@@ -542,6 +573,18 @@ async def repl(
     except Exception:
         _log.debug("suppressed exception in repl", exc_info=True)
 
+    # Resolve active wizard profile to thread skill_filter into the client.
+    # Empty / None list disables filtering — i.e. load every discovered skill.
+    _profile_skill_filter: list[str] | None = None
+    try:
+        from obscura.wizard import WizardService as _Wiz
+
+        _active_profile = _Wiz().resolve_active_profile()
+        if _active_profile is not None and _active_profile.skills:
+            _profile_skill_filter = list(_active_profile.skills)
+    except Exception:
+        _log.debug("skill_filter resolution failed", exc_info=True)
+
     # Build client
     async with ObscuraClient(
         backend,
@@ -550,6 +593,7 @@ async def repl(
         tools=system_tools or None,
         mcp_servers=mcp_configs or None,
         hooks=project_hooks,
+        skill_filter=_profile_skill_filter,
     ) as client:
         # Wire eval-driven tool router
         if tools_enabled:
@@ -617,6 +661,21 @@ async def repl(
             context_router=context_router,
             turn_classifier=turn_classifier,
         )
+
+        # Install slash-command bridge so agent loop tools can run /init etc.
+        try:
+
+            async def _run_slash(name: str, arguments: str) -> tuple[str, str | None]:
+                handler = COMMANDS.get(name)
+                if handler is None:
+                    raise KeyError(name)
+                with console.capture() as cap:
+                    ret = await handler(arguments, ctx)
+                return cap.get(), ret
+
+            SlashBridge.set_callback(_run_slash)
+        except Exception:
+            _log.debug("suppressed exception in repl", exc_info=True)
 
         # --- Single-shot mode ---
         if prompt:
@@ -1329,11 +1388,13 @@ async def repl(
                             )
                             continue
                         _pi(f"@{resolved.name}: {resolved.description}")
-                        blocks.append(resolved.body)
+                        # Expand any nested $skill / @command refs in the body
+                        blocks.append(ctx.expand_inline_references(resolved.body))
                         if resolved.meta.tools_enabled:
                             _cmd_allowed_tools = True
                     elif remaining:
-                        blocks.append(remaining)
+                        # Expand any inline $skill / @command / *@command refs
+                        blocks.append(ctx.expand_inline_references(remaining))
 
                     user_input = "\n\n---\n\n".join(blocks)
 

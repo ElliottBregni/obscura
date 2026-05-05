@@ -1,0 +1,328 @@
+"""obscura.cli.vector_memory_bridge — Vector memory integration for the CLI REPL.
+
+Provides helpers for:
+- Session-start memory retrieval
+- Pre-message context injection (search before each user turn)
+- Post-message auto-save (store conversation turns)
+- Formatting vector results into system prompt sections
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
+
+from obscura.auth.cli_user import current_cli_user
+from obscura.profile.learner import ProfileLearner
+from obscura.profile.store import ProfileStore
+from obscura.vector_memory import VectorMemoryStore
+
+if TYPE_CHECKING:
+    from obscura.auth.models import AuthenticatedUser
+
+_logger = logging.getLogger(__name__)
+
+# Namespace used for all CLI auto-saved memories
+CLI_NAMESPACE = "cli:conversation"
+
+
+# ---------------------------------------------------------------------------
+# Feature gate
+# ---------------------------------------------------------------------------
+
+
+def is_vector_memory_enabled() -> bool:
+    """Check if vector memory is enabled via env var.
+
+    Defaults to True. Set OBSCURA_VECTOR_MEMORY=off to disable.
+    """
+    val = os.environ.get("OBSCURA_VECTOR_MEMORY", "on").strip().lower()
+    return val not in ("off", "false", "0", "no")
+
+
+# ---------------------------------------------------------------------------
+# Initialization
+# ---------------------------------------------------------------------------
+
+
+def init_vector_store(user: AuthenticatedUser) -> VectorMemoryStore | None:
+    """Initialize a VectorMemoryStore for the CLI session.
+
+    Returns None if vector memory is disabled or initialization fails.
+    """
+    if not is_vector_memory_enabled():
+        return None
+    try:
+        return VectorMemoryStore.for_user(user)
+    except Exception as e:
+        _logger.warning(f"Could not initialize vector memory: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Session-start context retrieval
+# ---------------------------------------------------------------------------
+
+
+def load_startup_memories(
+    store: VectorMemoryStore,
+    session_id: str,
+    top_k: int = 3,
+) -> str:
+    """Search vector memory for recent/relevant context at session start.
+
+    Uses a broad query to find recent important memories.
+    Returns formatted string for injection into system prompt, or "".
+    """
+    try:
+        results = store.search_reranked(
+            query="recent conversation context and important information",
+            namespace=CLI_NAMESPACE,
+            top_k=top_k,
+            recency_weight=0.6,
+        )
+        if not results:
+            return ""
+        return _format_memories_section(
+            results,
+            header="## Recalled Memories (from previous sessions)",
+        )
+    except Exception as e:
+        _logger.warning(f"Could not load startup memories: {e}")
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Pre-message search (RAG-style context injection)
+# ---------------------------------------------------------------------------
+
+
+def search_relevant_context(
+    store: VectorMemoryStore,
+    query: str,
+    top_k: int = 3,
+    threshold: float = 0.1,
+) -> str:
+    """Search vector memory for context relevant to the user's message.
+
+    Returns a formatted context block to prepend to the user message,
+    or "" if no relevant memories found.
+    """
+    try:
+        results = store.search_reranked(
+            query=query,
+            namespace=None,
+            top_k=top_k,
+            recency_weight=0.2,
+        )
+        results = [r for r in results if r.score > threshold]
+        if not results:
+            return ""
+        return _format_memories_section(
+            results,
+            header="[Relevant context from memory]",
+        )
+    except Exception as e:
+        _logger.debug(f"Vector memory search failed: {e}")
+        return ""
+
+
+def search_with_router(
+    router: Any,
+    text: str,
+) -> str:
+    """Query active memory channels via the :class:`ContextRouter`.
+
+    Updates signals from the user text, then queries matched channels.
+    Returns formatted context block, or ``""`` if no channels matched.
+    """
+    try:
+        router.update_signals_from_text(text)
+        return router.query_active_channels(query=text)
+    except Exception as e:
+        _logger.debug(f"Channel router query failed: {e}")
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Post-message auto-save
+# ---------------------------------------------------------------------------
+
+
+def auto_save_turn(
+    store: VectorMemoryStore,
+    session_id: str,
+    user_text: str,
+    assistant_text: str,
+    turn_number: int,
+    classifier: Any | None = None,
+) -> None:
+    """Save a conversation turn to vector memory in a background thread.
+
+    Saves a combined summary of the user message and assistant response.
+    When a :class:`TurnClassifier` is provided, the turn is also saved to
+    matched channel namespaces.
+    Runs in a daemon thread so it does not block the REPL.
+    """
+
+    def _save() -> None:
+        try:
+            # Skip persisting transport/debug noise from MCP server logs.
+            if _is_mcp_noise_turn(user_text, assistant_text):
+                return
+
+            timestamp = datetime.now(UTC).isoformat()
+            base_key = f"turn_{session_id}_{turn_number}_{timestamp}"
+
+            user_snippet = user_text[:500]
+            assistant_snippet = assistant_text[:1000]
+
+            combined = f"User: {user_snippet}\nAssistant: {assistant_snippet}"
+
+            meta = {
+                "session_id": session_id,
+                "turn": turn_number,
+                "timestamp": timestamp,
+                "user_message_preview": user_text[:100],
+            }
+
+            # Determine namespaces to save to
+            namespaces = [CLI_NAMESPACE]
+            if classifier is not None:
+                try:
+                    namespaces = classifier.classify(user_text, assistant_text)
+                except Exception:
+                    _logger.debug("Turn classification failed, using default namespace")
+
+            for ns in namespaces:
+                key = f"{base_key}_{ns}" if ns != CLI_NAMESPACE else base_key
+                store.set(
+                    key=key,
+                    text=combined,
+                    metadata=meta,
+                    namespace=ns,
+                    memory_type="episode",
+                    ttl=timedelta(days=30),
+                )
+        except Exception as e:
+            _logger.debug(f"Auto-save to vector memory failed: {e}")
+
+        # Auto-learn profile facts from user messages (best-effort, silent).
+        try:
+            profile_store = ProfileStore.for_user(
+                current_cli_user(), vector_store=store
+            )
+            learner = ProfileLearner(profile_store)
+            new_facts = learner.process_turn(user_text)
+            if new_facts:
+                _logger.debug(
+                    "Auto-learned %d profile facts from turn %d",
+                    len(new_facts),
+                    turn_number,
+                )
+        except Exception:
+            _logger.debug("Profile auto-learn skipped", exc_info=True)
+
+    thread = threading.Thread(target=_save, daemon=True)
+    thread.start()
+
+
+def run_startup_maintenance(store: VectorMemoryStore) -> None:
+    """Run decay maintenance in a background daemon thread.
+
+    Called at session start when ``maintenance_on_startup`` is enabled.
+    Non-blocking — the REPL is not held up.
+    """
+    if not getattr(store, "decay_config", None):
+        return
+    if not store.decay_config.maintenance_on_startup:
+        return
+
+    def _run() -> None:
+        try:
+            report = store.run_maintenance()
+            if report.expired_purged or report.episodes_consolidated:
+                _logger.info(
+                    "Startup maintenance: purged=%d, consolidated=%d, summaries=%d (%.0fms)",
+                    report.expired_purged,
+                    report.episodes_consolidated,
+                    report.summaries_created,
+                    report.duration_ms,
+                )
+        except Exception:
+            _logger.debug("Startup maintenance failed", exc_info=True)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+
+def clear_mcp_noise_memories(store: VectorMemoryStore) -> int:
+    """Delete only MCP-log-like memories from the CLI namespace."""
+    removed = 0
+    try:
+        keys = store.list_keys(namespace=CLI_NAMESPACE)
+    except Exception:
+        _logger.debug("suppressed exception in clear_mcp_noise_memories", exc_info=True)
+        return 0
+
+    for key in keys:
+        try:
+            entry = store.get(key)
+            if entry is None:
+                continue
+            if _is_mcp_noise_text(entry.text) and store.delete(key):
+                removed += 1
+        except Exception:
+            _logger.debug(
+                "suppressed exception in clear_mcp_noise_memories", exc_info=True
+            )
+            continue
+    return removed
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+
+def _format_memories_section(
+    entries: list[Any],
+    header: str = "## Relevant Memories",
+    max_text_len: int = 300,
+) -> str:
+    """Format vector search results into a readable context section."""
+    lines = [header, ""]
+    for i, entry in enumerate(entries, 1):
+        text = entry.text
+        if len(text) > max_text_len:
+            text = text[:max_text_len] + "..."
+        score_str = f"{entry.score:.2f}"
+        lines.append(f"{i}. (score: {score_str}) {text}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _is_mcp_noise_turn(user_text: str, assistant_text: str) -> bool:
+    combined = f"{user_text}\n{assistant_text}"
+    return _is_mcp_noise_text(combined)
+
+
+def _is_mcp_noise_text(text: str) -> bool:
+    s = text.lower()
+    markers = (
+        "mcp server",
+        "/mcp ",
+        "mcp:",
+        "jsonrpc",
+        "tool_use_start",
+        "tool_use_delta",
+        "tool_result",
+        "invalid_request_body",
+        "stdio transport",
+        "anthropic.tools.beta.messages",
+    )
+    hit_count = sum(1 for marker in markers if marker in s)
+    return hit_count >= 2

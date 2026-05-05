@@ -1,0 +1,48 @@
+id = "lightpanda"
+name = "Lightpanda"
+version = "1.0.0"
+author = "obscura-team"
+source_type = "builtin"
+runtime_type = "cli"
+trust_level = "builtin"
+description = "Headless browser automation via Lightpanda — fast page fetch and CDP control."
+
+[[capabilities]]
+id = "web.lightpanda"
+description = "Headless browser fetch and automation via Lightpanda."
+tools = [
+    "lightpanda_fetch",
+    "lightpanda_version",
+]
+requires_approval = false
+default_grant = true
+
+[[tools]]
+name = "lightpanda_fetch"
+description = "Fetch a URL with Lightpanda (JS-rendered HTML to stdout). Returns the final rendered page content."
+capability = "web.lightpanda"
+side_effects = "read"
+handler = "obscura.tools.providers.agent_primitives:lightpanda_fetch"
+
+[tools.parameters]
+type = "object"
+[tools.parameters.properties]
+[tools.parameters.properties.url]
+type = "string"
+description = "URL to fetch and render."
+[tools.parameters.properties.timeout]
+type = "integer"
+description = "Timeout in seconds (default 30)."
+required = ["url"]
+
+[[tools]]
+name = "lightpanda_version"
+description = "Check Lightpanda binary availability and version."
+capability = "web.lightpanda"
+side_effects = "read"
+handler = "obscura.tools.providers.agent_primitives:lightpanda_version"
+
+[bootstrap]
+deps = [
+    { type = "binary", package = "lightpanda" },
+]

@@ -1,0 +1,35 @@
+apiVersion = "obscura/v1"
+kind = "Pack"
+
+[metadata]
+name = "code-quality-pack"
+description = "Development quality tools for linting, scanning, and testing."
+tags = [
+    "dev",
+    "quality",
+    "security",
+]
+
+[spec]
+plugins = [
+    "system-tools",
+    "gitleaks",
+    "websearch",
+]
+templates = []
+policies = [
+    "safe-dev",
+]
+instructions = "Always run gitleaks before committing code.\nUse pyright for type checking Python files.\n"
+
+[spec.capabilities]
+grant = [
+    "shell.exec",
+    "file.read",
+    "file.write",
+    "git.ops",
+    "security.scan",
+]
+deny = []
+
+[spec.config]

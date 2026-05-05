@@ -99,7 +99,21 @@ def _retry(
     raise last_exc  # Re-raise so callers can decide to continue or abort
 
 
-_DEFAULT_VAULT_DIR = Path.home() / ".obscura" / "vault"
+def _resolve_default_vault_dir() -> Path:
+    """Default vault dir, with ``OBSCURA_VAULT_DIR`` env override.
+
+    The env var lets the wizard's active profile (and its
+    ``vault_path`` field) point VaultSync at a different vault without
+    having to thread the path through every call site that constructs
+    ``VaultSync()`` with no args.
+    """
+    import os as _os
+
+    override = _os.environ.get("OBSCURA_VAULT_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".obscura" / "vault"
+
 
 # Zone subdirectories created by bootstrap.
 _ZONE_DIRS = (
@@ -175,7 +189,11 @@ class VaultSync:
         autosync: bool = True,
         dry_run: bool = False,
     ) -> None:
-        self.vault_dir = Path(vault_dir or _DEFAULT_VAULT_DIR).expanduser()
+        # Resolve the default lazily so a wizard profile can set
+        # OBSCURA_VAULT_DIR after this module was imported.
+        self.vault_dir = Path(
+            vault_dir or _resolve_default_vault_dir(),
+        ).expanduser()
         # Optional per-project vault overlay (e.g. <project>/.obscura/vault/).
         # When set, scan() merges both; project files shadow global ones.
         self.project_vault_dir: Path | None = (
