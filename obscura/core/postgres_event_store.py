@@ -11,8 +11,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.enums.agent import AgentEventKind
+from obscura.core.enums.lifecycle import (
+    SESSION_VALID_TRANSITIONS as VALID_TRANSITIONS,
+)
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.event_store import EventRecord, SessionRecord
+from obscura.core.session_utils import list_active_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +229,32 @@ class PostgreSQLEventStore:
     async def get_session(self, session_id: str) -> SessionRecord | None:
         return await asyncio.to_thread(self._get_session_sync, session_id)
 
+    async def update_status(
+        self,
+        session_id: str,
+        status: SessionStatus,
+    ) -> None:
+        await asyncio.to_thread(self._update_status_sync, session_id, status)
+
+    async def update_session(
+        self,
+        session_id: str,
+        *,
+        summary: str | None = None,
+        message_count: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            self._update_session_sync,
+            session_id,
+            summary=summary,
+            message_count=message_count,
+            metadata=metadata,
+        )
+
+    async def reap_orphaned_sessions(self) -> int:
+        return await asyncio.to_thread(self._reap_orphaned_sessions_sync)
+
     async def append(self, session_id: str, event: AgentEvent) -> EventRecord:
         return await asyncio.to_thread(self._append_sync, session_id, event)
 
@@ -261,6 +291,112 @@ class PostgreSQLEventStore:
                 if not row_any:
                     return None
                 return _row_to_session(cast(Mapping[str, Any], row_any))
+        finally:
+            self._put_conn(conn)
+
+    def _update_status_sync(
+        self,
+        session_id: str,
+        status: SessionStatus,
+    ) -> None:
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT status FROM events.sessions WHERE id = %s",
+                    (session_id,),
+                )
+                row_any: Any = cur.fetchone()
+                if not row_any:
+                    msg = f"Session not found: {session_id}"
+                    raise ValueError(msg)
+                row = cast(Mapping[str, Any], row_any)
+                current = SessionStatus(row["status"])
+                if status not in VALID_TRANSITIONS[current]:
+                    msg = f"Invalid transition: {current.value} -> {status.value}"
+                    raise ValueError(msg)
+                now = datetime.now(UTC)
+                cur.execute(
+                    "UPDATE events.sessions SET status = %s, updated_at = %s WHERE id = %s",
+                    (status.value, now, session_id),
+                )
+                conn.commit()
+        finally:
+            self._put_conn(conn)
+
+    def _update_session_sync(
+        self,
+        session_id: str,
+        *,
+        summary: str | None = None,
+        message_count: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> None:
+        sets: list[str] = []
+        params: list[Any] = []
+
+        if summary is not None:
+            sets.append("summary = %s")
+            params.append(summary)
+        if message_count is not None:
+            sets.append("message_count = %s")
+            params.append(message_count)
+        if metadata is not None:
+            sets.append("metadata = %s")
+            params.append(json.dumps(dict(metadata), default=str))
+
+        if not sets:
+            return
+
+        sets.append("updated_at = %s")
+        params.append(datetime.now(UTC))
+        params.append(session_id)
+
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE events.sessions SET {', '.join(sets)} WHERE id = %s",
+                    params,
+                )
+                conn.commit()
+        finally:
+            self._put_conn(conn)
+
+    def _reap_orphaned_sessions_sync(self) -> int:
+        active_statuses = (
+            SessionStatus.RUNNING,
+            SessionStatus.WAITING_FOR_TOOL,
+            SessionStatus.WAITING_FOR_USER,
+        )
+        placeholders = ",".join(["%s"] * len(active_statuses))
+        conn = self._get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT id FROM events.sessions WHERE status IN ({placeholders})",
+                    [s.value for s in active_statuses],
+                )
+                rows = cast(list[Mapping[str, Any]], cur.fetchall())
+                if not rows:
+                    return 0
+
+                alive_ids = {
+                    s.get("session_id", "")[:16] for s in list_active_sessions()
+                }
+                reaped = 0
+                now = datetime.now(UTC)
+                for row in rows:
+                    sid = str(row["id"])
+                    if sid[:16] not in alive_ids:
+                        cur.execute(
+                            "UPDATE events.sessions SET status = %s, updated_at = %s WHERE id = %s",
+                            (SessionStatus.FAILED.value, now, sid),
+                        )
+                        reaped += 1
+                if reaped:
+                    conn.commit()
+                return reaped
         finally:
             self._put_conn(conn)
 
