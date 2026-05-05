@@ -124,12 +124,16 @@ async def build_core_session(
     # Mirror reliability state from the freshly-built client so the
     # session's own send/stream/run_loop methods can use them directly
     # (Stage 3 of ObscuraClient absorption — session methods stop
-    # forwarding through client.X).
-    session._capability_token = getattr(client, "_capability_token", None)
-    session._circuit_registry = getattr(client, "_circuit_registry", None)
-    session._cache = getattr(client, "_cache", None)
-    session._max_retries = getattr(client, "_max_retries", 2)
-    session._retry_initial_backoff = getattr(
-        client, "_retry_initial_backoff", 0.5,
+    # forwarding through client.X). Once Stage 4 lands, build_core
+    # populates these from create_backend + helpers directly without
+    # going through ObscuraClient at all.
+    setattr(session, "_capability_token", getattr(client, "_capability_token", None))  # noqa: B010
+    setattr(session, "_circuit_registry", getattr(client, "_circuit_registry", None))  # noqa: B010
+    setattr(session, "_cache", getattr(client, "_cache", None))  # noqa: B010
+    setattr(session, "_max_retries", getattr(client, "_max_retries", 2))  # noqa: B010
+    setattr(  # noqa: B010
+        session,
+        "_retry_initial_backoff",
+        getattr(client, "_retry_initial_backoff", 0.5),
     )
     return session
