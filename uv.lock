@@ -1772,7 +1772,7 @@ wheels = [
 ]
 
 [[package]]
-name = "obscura"
+name = "obscura-agent"
 version = "0.5.3"
 source = { editable = "." }
 dependencies = [
@@ -1983,17 +1983,17 @@ requires-dist = [
     { name = "msal", marker = "extra == 'msgraph'", specifier = ">=1.27.0" },
     { name = "notion-client", marker = "extra == 'notion'", specifier = ">=2.0.0" },
     { name = "numpy", specifier = ">=2.1.0" },
-    { name = "obscura", extras = ["anthropic", "msgraph", "coingecko", "notion", "datadog", "x-twitter"], marker = "extra == 'providers'" },
-    { name = "obscura", extras = ["coingecko"], marker = "extra == 'plugins-finance'" },
-    { name = "obscura", extras = ["datadog"], marker = "extra == 'plugins-observability'" },
-    { name = "obscura", extras = ["duckdb", "datafusion"], marker = "extra == 'plugins-data'" },
-    { name = "obscura", extras = ["duckdb", "datafusion", "huggingface", "x-twitter", "notion", "coingecko", "datadog", "msgraph", "gws"], marker = "extra == 'plugins-all'" },
-    { name = "obscura", extras = ["huggingface"], marker = "extra == 'plugins-ml'" },
-    { name = "obscura", extras = ["notion", "gws", "msgraph"], marker = "extra == 'plugins-productivity'" },
-    { name = "obscura", extras = ["server", "telemetry", "a2a", "metrics", "voice", "anthropic", "plugins-all"], marker = "extra == 'full'" },
-    { name = "obscura", extras = ["x-twitter"], marker = "extra == 'plugins-social'" },
+    { name = "obscura-agent", extras = ["anthropic", "msgraph", "coingecko", "notion", "datadog", "x-twitter"], marker = "extra == 'providers'" },
+    { name = "obscura-agent", extras = ["coingecko"], marker = "extra == 'plugins-finance'" },
+    { name = "obscura-agent", extras = ["datadog"], marker = "extra == 'plugins-observability'" },
+    { name = "obscura-agent", extras = ["duckdb", "datafusion"], marker = "extra == 'plugins-data'" },
+    { name = "obscura-agent", extras = ["duckdb", "datafusion", "huggingface", "x-twitter", "notion", "coingecko", "datadog", "msgraph", "gws"], marker = "extra == 'plugins-all'" },
+    { name = "obscura-agent", extras = ["huggingface"], marker = "extra == 'plugins-ml'" },
+    { name = "obscura-agent", extras = ["notion", "gws", "msgraph"], marker = "extra == 'plugins-productivity'" },
+    { name = "obscura-agent", extras = ["server", "telemetry", "a2a", "metrics", "voice", "anthropic", "plugins-all"], marker = "extra == 'full'" },
+    { name = "obscura-agent", extras = ["x-twitter"], marker = "extra == 'plugins-social'" },
     { name = "openai", specifier = ">=1.0.0" },
-    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
+    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&rev=rust-v0.128.0" },
     { name = "openai-whisper", marker = "extra == 'voice'", specifier = ">=20240930" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
@@ -2096,7 +2096,7 @@ wheels = [
 [[package]]
 name = "openai-codex-app-server-sdk"
 version = "0.116.0a1"
-source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#67849d950d843c954102adb0db0e11f993aefdb7" }
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&rev=rust-v0.128.0#e4310be51f617f5e60382038fa9cbf53a2429ca4" }
 dependencies = [
     { name = "pydantic" },
 ]
