@@ -316,6 +316,10 @@ class Agent:
         self.created_at = datetime.now(UTC)
         self.updated_at = self.created_at
         self.iteration_count = 0
+        # AgentSession is the source of truth post-migration; self._client
+        # remains as a back-compat alias pointing at session.client so the
+        # 26 existing self._client.X call sites keep working unchanged.
+        self._session: Any = None  # AgentSession | None
         self._client: ObscuraClient | None = None
         self._mcp_backend: MCPBackend | None = None
         self._providers: list[Any] = []
@@ -464,19 +468,49 @@ class Agent:
         else:
             self._capability_resolver = None
 
-        self._client = ObscuraClient(
-            self.config.provider,
-            model=self.config.model_id,
-            system_prompt=self.config.system_prompt,
-            lazy_load_skills=self.config.lazy_load_skills,
-            skill_filter=self.config.skill_filter,
-            capability_resolver=capability_resolver,
-            agent_id=self.id,
-            inject_claude_context=True,
-            user=self.user,
-        )
+        # Build the agent's session via composition. ObscuraClient is no
+        # longer constructed directly here; build_core_session owns the
+        # backend + tool registry, and we install the skill_context block
+        # to load OBSCURA.md / instructions / capability-gated skills
+        # (replacing inject_claude_context=True on the legacy client).
+        from obscura.composition.blocks.skill_context import install_skill_context
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
+
         try:
-            await self._client.start()
+            session_config = SessionConfig(
+                backend=self.config.provider,
+                model=self.config.model_id,
+                system_prompt=self.config.system_prompt,
+                inject_claude_context=False,  # block handles it explicitly below
+                extras={
+                    "lazy_load_skills": self.config.lazy_load_skills,
+                    "skill_filter": self.config.skill_filter,
+                },
+            )
+            self._session = await build_core_session(
+                session_config,
+                surface="a2a",  # Agents are spawned by A2A/supervisor today
+                user=self.user,
+                session_id=self.id,
+            )
+            # Set capability_resolver BEFORE install_skill_context so the
+            # ContextLoader's skill gating sees it. (install_plugin_tools
+            # would set this on a normal surface; Agent has its own
+            # capability discovery flow above.)
+            if capability_resolver is not None:
+                self._session.capability_resolver = capability_resolver
+            # Run skill_context block to inject OBSCURA.md + skills.
+            await install_skill_context(
+                self._session,
+                SessionConfig(
+                    backend=self.config.provider,
+                    inject_claude_context=True,
+                    extras=session_config.extras,
+                ),
+            )
+            # Back-compat alias: existing self._client.X calls work unchanged.
+            self._client = self._session.client
         except Exception as exc:
             await self.runtime.emit_lifecycle_event(
                 kind="agent.start_failed",
@@ -485,6 +519,11 @@ class Agent:
                 details={"error": str(exc)},
             )
             raise
+
+        # Narrow types for the rest of start() — both must be set if we
+        # reached here without raising.
+        assert self._session is not None
+        assert self._client is not None
 
         # Create ToolBroker as the authoritative tool registry
         policy_engine = PluginPolicyEngine()
