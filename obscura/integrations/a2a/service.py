@@ -15,7 +15,6 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.core.types import AgentEvent, ToolCallInfo
 from obscura.integrations.a2a.event_mapper import EventMapper
@@ -40,21 +39,28 @@ logger = logging.getLogger(__name__)
 class A2AService:
     """Core A2A service — protocol-agnostic business logic.
 
+    Per-task agent execution goes through ``obscura.composition.a2a.
+    build_a2a_session``, which constructs an ``AgentSession`` with all
+    plugin tools registered and the backend started. This means A2A
+    agents can call tools end-to-end — the previous ``get_runtime``-
+    based design left agents toolless when ``get_runtime`` was unset
+    (the production default), and they returned placeholder strings.
+
     Parameters
     ----------
     store:
         Task persistence backend (in-memory or Redis).
     agent_card:
         Pre-built agent card for ``/.well-known/agent.json``.
-    get_runtime:
-        Factory that returns an ``AgentRuntime`` for a given user dict.
-        The A2A layer injects ``on_confirm`` callbacks so agent loops
-        can be paused for external input.
     agent_model:
         Model backend to use when spawning agents (default: ``"copilot"``).
     agent_system_prompt:
         System prompt for spawned agents.
-
+    agent_max_turns:
+        Max model turns per task before the loop bails.
+    agent_backend:
+        Provider backend identifier (``"copilot"``, ``"claude"``, …).
+        Passed straight through to ``SessionConfig.backend``.
     """
 
     def __init__(
@@ -62,14 +68,14 @@ class A2AService:
         store: TaskStore,
         agent_card: AgentCard,
         *,
-        get_runtime: Callable[..., Any] | None = None,
+        agent_backend: str = "copilot",
         agent_model: str = "copilot",
         agent_system_prompt: str = "",
         agent_max_turns: int = 10,
     ) -> None:
         self._store = store
         self._agent_card = agent_card
-        self._get_runtime = get_runtime
+        self._agent_backend = agent_backend
         self._agent_model = agent_model
         self._agent_system_prompt = agent_system_prompt
         self._agent_max_turns = agent_max_turns
@@ -364,31 +370,32 @@ class A2AService:
     async def _execute_agent(self, task: Task, prompt: str) -> str:
         """Execute the agent and return the final text result.
 
-        If ``get_runtime`` is not configured (e.g., in tests), returns
-        a placeholder indicating no runtime is available.
+        Builds a per-task ``AgentSession`` via ``build_a2a_session`` so
+        the agent has the full plugin tool set available. The session is
+        torn down (backend stop, etc.) when this method returns.
         """
-        if not self._get_runtime:
-            logger.warning("No agent runtime configured — returning placeholder")
-            return f"[No agent runtime] Received: {prompt}"
+        from obscura.composition.a2a import build_a2a_session
+        from obscura.composition.session import SessionConfig
 
-        runtime = self._get_runtime()
-        agent = runtime.spawn(
-            name=f"a2a-{task.id}",
+        config = SessionConfig(
+            backend=self._agent_backend,
             model=self._agent_model,
             system_prompt=self._agent_system_prompt,
+            max_turns=self._agent_max_turns,
         )
-        await agent.start()
-
         on_confirm = self._make_on_confirm(task.id)
-        try:
-            result = await agent.run_loop(
+
+        async with await build_a2a_session(
+            config,
+            task_id=task.id,
+            on_confirm=on_confirm,
+        ) as session:
+            result = await session.run_loop_to_text(
                 prompt,
                 max_turns=self._agent_max_turns,
                 on_confirm=on_confirm,
             )
-            return str(result) if result else ""
-        finally:
-            await agent.stop()
+            return result or ""
 
     async def _execute_agent_stream(
         self,
@@ -396,35 +403,28 @@ class A2AService:
         prompt: str,
     ) -> AsyncIterator[AgentEvent]:
         """Execute the agent and yield AgentEvent objects."""
-        if not self._get_runtime:
-            logger.warning("No agent runtime configured — yielding placeholder")
-            yield AgentEvent(kind=AgentEventKind.TURN_START)
-            yield AgentEvent(
-                kind=AgentEventKind.TEXT_DELTA,
-                text=f"[No agent runtime] Received: {prompt}",
-            )
-            yield AgentEvent(kind=AgentEventKind.TURN_COMPLETE)
-            yield AgentEvent(kind=AgentEventKind.AGENT_DONE)
-            return
+        from obscura.composition.a2a import build_a2a_session
+        from obscura.composition.session import SessionConfig
 
-        runtime = self._get_runtime()
-        agent = runtime.spawn(
-            name=f"a2a-{task.id}",
+        config = SessionConfig(
+            backend=self._agent_backend,
             model=self._agent_model,
             system_prompt=self._agent_system_prompt,
+            max_turns=self._agent_max_turns,
         )
-        await agent.start()
-
         on_confirm = self._make_on_confirm(task.id)
-        try:
-            async for event in agent.stream_loop(
+
+        async with await build_a2a_session(
+            config,
+            task_id=task.id,
+            on_confirm=on_confirm,
+        ) as session:
+            async for event in session.stream_loop(
                 prompt,
                 max_turns=self._agent_max_turns,
                 on_confirm=on_confirm,
             ):
                 yield event
-        finally:
-            await agent.stop()
 
     # ------------------------------------------------------------------
     # Helpers

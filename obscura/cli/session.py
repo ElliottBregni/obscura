@@ -25,7 +25,7 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, replace as _dc_replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -123,14 +123,6 @@ from obscura.memory_channels import (
     load_channels_from_config,
 )
 from obscura.plugins.builtins import list_builtin_plugin_ids
-from obscura.plugins.capabilities import resolve_allowed_tools_from_config
-from obscura.plugins.loader import (
-    PluginLoader,
-    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
-    get_all_builtin_tool_specs,
-    get_capability_map,
-    get_filtered_builtin_tool_specs,
-)
 from obscura.plugins.registries.capability_index import CapabilityIndex
 from obscura.tools.arbiter_tools import get_arbiter_tool_specs
 from obscura.tools.browser import get_browser_tool_specs
@@ -289,6 +281,7 @@ class ObscuraSession:
     _daemon_task: asyncio.Task[None] | None
     _uds_inbox: Any
     _background_tasks: set[asyncio.Task[str]]
+    _composition_session: Any  # obscura.composition.session.AgentSession
 
     # ── Factory ────────────────────────────────────────────────────────────
 
@@ -336,7 +329,35 @@ class ObscuraSession:
         await client.__aenter__()
         self._client = client
 
-        # Tool router
+        # Plugin registration via composition. We wrap the already-built
+        # client in an AgentSession so install_plugin_tools can register
+        # plugin specs onto session.registry (and mirror to backend).
+        # The session's capability_resolver is then available to
+        # _wire_tool_router below — eliminating the duplicate PluginLoader
+        # pass that used to live inline.
+        from obscura.composition.blocks.plugins import install_plugin_tools
+        from obscura.composition.session import (
+            AgentSession,
+            SessionConfig as _CompSessionConfig,
+        )
+
+        comp_config = _CompSessionConfig(
+            backend=config.backend,
+            model=config.model,
+            tools_enabled=config.tools_enabled,
+            extras={"compiled_ws": config.compiled_ws}
+            if config.compiled_ws is not None
+            else {},
+        )
+        self._composition_session = AgentSession(
+            session_id=self._sid,
+            surface="repl",
+            config=comp_config,
+            client=client,
+        )
+        await install_plugin_tools(self._composition_session, comp_config)
+
+        # Tool router (reads cap index from self._composition_session)
         self._wire_tool_router(config)
 
         # Session resume
@@ -1257,58 +1278,11 @@ class ObscuraSession:
         except Exception:
             _log.debug("suppressed exception in _assemble_tools", exc_info=True)
 
-        # Builtin plugin tools
-        try:
-            existing_names = {t.name for t in system_tools}
-            _ws_include = (
-                getattr(config.compiled_ws, "plugin_include", None)
-                if config.compiled_ws
-                else None
-            )
-            _ws_exclude = (
-                getattr(config.compiled_ws, "plugin_exclude", None)
-                if config.compiled_ws
-                else None
-            )
-
-            if _ws_include or _ws_exclude:
-                plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
-            else:
-                plugin_tools = get_all_builtin_tool_specs()
-
-            for tool in plugin_tools:
-                if tool.name not in existing_names:
-                    system_tools.append(tool)
-                    existing_names.add(tool.name)
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Backfill capability metadata
-        if system_tools:
-            try:
-                _cap_map = get_capability_map()
-                system_tools = [
-                    _dc_replace(t, capability=_cap_map[t.name])
-                    if not getattr(t, "capability", "") and t.name in _cap_map
-                    else t
-                    for t in system_tools
-                ]
-            except Exception:
-                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Filter by capability grants
-        if system_tools:
-            try:
-                _allowed = resolve_allowed_tools_from_config()
-                if _allowed is not None:
-                    system_tools = [
-                        t
-                        for t in system_tools
-                        if not getattr(t, "capability", "") or t.name in _allowed
-                    ]
-            except Exception:
-                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
+        # Plugin tool registration + capability backfill + grant filtering moved
+        # to obscura.composition.blocks.plugins.install_plugin_tools, which is
+        # invoked from create() after the client is built. This collapses the
+        # duplicate REPL paths in _repl_loop.py + this module onto a single
+        # canonical pipeline. Drift defence lives in tests/composition/.
         return system_tools, len(system_tools)
 
     def _wire_callbacks_and_hooks(
@@ -1503,23 +1477,24 @@ class ObscuraSession:
         return project_hooks
 
     def _wire_tool_router(self, config: SessionConfig) -> None:
-        """Wire eval-driven tool router after client creation."""
+        """Wire eval-driven tool router after client creation.
+
+        Reads the capability index from the AgentSession built by the
+        composition pipeline (set on ``self._composition_session`` during
+        ``create()``) — no duplicate PluginLoader pass.
+        """
         if not config.tools_enabled:
             return
         try:
             _routing_config = ToolRoutingConfig()
             _score_index = ToolScoreIndex()
 
-            _cap_index = CapabilityIndex()
-            _pl = PluginLoader()
-            _all_pspecs: list[Any] = []
-            if _load_plugin_config_flag("load_builtins"):
-                _all_pspecs.extend(_pl.discover_builtins())
-            _all_pspecs.extend(_pl.discover_local())
-            _all_pspecs.extend(_pl.discover_user())
-            for _ps in _all_pspecs:
-                for _cap in _ps.capabilities:
-                    _cap_index.register(_cap, _ps.id)
+            comp_session = getattr(self, "_composition_session", None)
+            if comp_session is not None and comp_session.capability_resolver is not None:
+                _cap_index = comp_session.capability_resolver.capability_index
+            else:
+                # Plugins block opted out — empty index keeps router construction clean
+                _cap_index = CapabilityIndex()
 
             _router = ToolRouter.from_capability_index(
                 config=_routing_config,

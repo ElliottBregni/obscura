@@ -25,7 +25,6 @@ import os
 import subprocess
 import time
 import uuid
-from dataclasses import replace as _dc_replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -90,8 +89,9 @@ from obscura.cli.widgets import (
     confirm_permission,
     render_notification_banner,
 )
+from obscura.composition.repl import build_repl_session
+from obscura.composition.session import SessionConfig
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
-from obscura.core.client import ObscuraClient
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compiler.compiled import ToolRoutingConfig
 from obscura.core.context import load_obscura_memory
@@ -135,15 +135,6 @@ from obscura.memory_channels import (
     load_channels_from_config,
 )
 from obscura.plugins.builtins import list_builtin_plugin_ids
-from obscura.plugins.capabilities import resolve_allowed_tools_from_config
-from obscura.plugins.loader import (
-    PluginLoader,
-    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
-    get_all_builtin_tool_specs,
-    get_capability_map,
-    get_filtered_builtin_tool_specs,
-)
-from obscura.plugins.models import PluginSpec
 from obscura.plugins.registries.capability_index import CapabilityIndex
 from obscura.tools.memory_tools import (
     build_channels_prompt_section,
@@ -332,54 +323,10 @@ async def repl(
             except Exception:
                 _log.debug("suppressed exception in repl", exc_info=True)
 
-        # Load builtin plugin tools
-        try:
-            existing_names = {t.name for t in system_tools}
-            _ws_include = (
-                getattr(compiled_ws, "plugin_include", None) if compiled_ws else None
-            )
-            _ws_exclude = (
-                getattr(compiled_ws, "plugin_exclude", None) if compiled_ws else None
-            )
-
-            if _ws_include or _ws_exclude:
-                plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
-            else:
-                plugin_tools = get_all_builtin_tool_specs()
-
-            for tool in plugin_tools:
-                if tool.name not in existing_names:
-                    system_tools.append(tool)
-                    existing_names.add(tool.name)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Backfill capability field
-    if tools_enabled and system_tools:
-        try:
-            _cap_map = get_capability_map()
-            system_tools = [
-                _dc_replace(t, capability=_cap_map[t.name])
-                if not getattr(t, "capability", "") and t.name in _cap_map
-                else t
-                for t in system_tools
-            ]
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Filter tools by capability grants
-    if tools_enabled and system_tools:
-        try:
-            _allowed = resolve_allowed_tools_from_config()
-            if _allowed is not None:
-                system_tools = [
-                    t
-                    for t in system_tools
-                    if not getattr(t, "capability", "") or t.name in _allowed
-                ]
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
+    # Plugin tool registration + capability backfill + grant filtering moved
+    # to obscura.composition.blocks.plugins.install_plugin_tools, which runs
+    # inside build_repl_session() below. tool_count is computed from the
+    # session's registry after composition.
     tool_count = len(system_tools)
 
     # Wire the ask_user callback
@@ -542,30 +489,42 @@ async def repl(
     except Exception:
         _log.debug("suppressed exception in repl", exc_info=True)
 
-    # Build client
-    async with ObscuraClient(
-        backend,
+    # Build session via composition. install_plugin_tools runs inside,
+    # registering all plugin tool specs onto the session's registry +
+    # backend, building the capability resolver, and storing it on the
+    # session for the tool router below.
+    _session_config = SessionConfig(
+        backend=backend,
         model=model,
         system_prompt=combined_system,
-        tools=system_tools or None,
-        mcp_servers=mcp_configs or None,
-        hooks=project_hooks,
-    ) as client:
-        # Wire eval-driven tool router
+        tools_enabled=tools_enabled,
+        confirm_enabled=confirm,
+        max_turns=max_turns,
+        mcp_servers=mcp_configs,
+        extras={"compiled_ws": compiled_ws} if compiled_ws is not None else {},
+    )
+    _repl_session = await build_repl_session(
+        _session_config,
+        user=cli_user,
+        preregistered_tools=system_tools or None,
+        project_hooks=project_hooks,
+    )
+
+    async with _repl_session as _session:
+        client = _session.client
+        # Wire eval-driven tool router using the capability index built by
+        # install_plugin_tools (no second PluginLoader pass — drift defence).
         if tools_enabled:
             try:
                 _routing_config = ToolRoutingConfig()
                 _score_index = ToolScoreIndex()
-                _cap_index = CapabilityIndex()
-                _pl = PluginLoader()
-                _all_pspecs: list[PluginSpec] = []
-                if _load_plugin_config_flag("load_builtins"):
-                    _all_pspecs.extend(_pl.discover_builtins())
-                _all_pspecs.extend(_pl.discover_local())
-                _all_pspecs.extend(_pl.discover_user())
-                for _ps in _all_pspecs:
-                    for _cap in _ps.capabilities:
-                        _cap_index.register(_cap, _ps.id)
+                if _session.capability_resolver is not None:
+                    _cap_index = _session.capability_resolver.capability_index
+                else:
+                    # Plugins block opted out (tools_enabled=False or
+                    # workspace plugins.load_builtins=false). Build an empty
+                    # index so ToolRouter still constructs cleanly.
+                    _cap_index = CapabilityIndex()
 
                 _router = ToolRouter.from_capability_index(
                     config=_routing_config,

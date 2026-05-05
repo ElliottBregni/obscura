@@ -301,6 +301,9 @@ def create_app(config: ObscuraConfig | None = None) -> FastAPI:
                 name=config.a2a_agent_name,
                 url=f"http://{config.host}:{config.port}",
                 description=config.a2a_agent_description,
+                agent_backend=config.a2a_agent_backend,
+                agent_model=config.a2a_agent_model or config.a2a_agent_backend,
+                agent_system_prompt=config.a2a_agent_system_prompt,
             )
             app.state.a2a_server = a2a_server
 

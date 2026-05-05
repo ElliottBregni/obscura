@@ -9,28 +9,38 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Request
 
 from obscura.auth.models import AuthenticatedUser
-from obscura.core.client import ObscuraClient
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
 
     from obscura.agent.agents import AgentRuntime
+    from obscura.composition.session import AgentSession
     from obscura.core.config import ObscuraConfig
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Client pool / factory
+# Session factory (per-request agent composition)
 # ---------------------------------------------------------------------------
 
 
 class ClientFactory:
-    """Creates and manages per-request ObscuraClient instances."""
+    """Builds per-request `AgentSession`s for API route handlers.
+
+    Each call returns a fully composed session (plugin tools registered,
+    capability resolver attached, etc.). Routes use it via ``async with``
+    so resources are torn down after the request.
+
+    Historical note: this used to return a bare ``ObscuraClient``. The
+    composition refactor moved tool/plugin/hook wiring out of
+    ``ObscuraClient.__init__`` into ``build_api_session``, so the factory
+    now returns the higher-level ``AgentSession``.
+    """
 
     def __init__(self, config: ObscuraConfig) -> None:
         self._config = config
 
-    async def create(
+    async def create_session(
         self,
         backend: str,
         *,
@@ -39,25 +49,34 @@ class ClientFactory:
         model_alias: str | None = None,
         system_prompt: str = "",
         oauth_github_token: str | None = None,
-    ) -> ObscuraClient:
-        """Build an ObscuraClient.
+    ) -> AgentSession:
+        """Build an `AgentSession` for one request.
 
-        ``oauth_github_token`` is the Supabase-forwarded GitHub token from an
-        ``X-GitHub-Token`` header. When set it becomes the "easy path" fallback
-        for Copilot auth — env vars still override.
+        ``oauth_github_token`` is the Supabase-forwarded GitHub token from
+        an ``X-GitHub-Token`` header. When set it becomes the "easy path"
+        fallback for Copilot auth — env vars still override.
 
-        If Copilot has recently 403'd this user's OAuth token, the token is
-        dropped before the resolver runs so we don't waste a round-trip on a
-        known-bad credential.
+        If Copilot has recently 403'd this user's OAuth token, the token
+        is dropped before the resolver runs so we don't waste a round-trip
+        on a known-bad credential. On a Copilot auth failure we retry once
+        without the OAuth fallback so the user's call still succeeds via
+        env/CLI-sourced tokens.
         """
-        from obscura.auth.copilot_403_cache import is_oauth_token_blocked
+        from obscura.auth.copilot_403_cache import (
+            is_oauth_token_blocked,
+            mark_oauth_token_blocked,
+        )
+        from obscura.composition.api import build_api_session
+        from obscura.composition.session import SessionConfig
         from obscura.core.auth import AuthConfig
 
+        if user is None:
+            msg = "API session requires authenticated user"
+            raise RuntimeError(msg)
+
         effective_oauth_token = oauth_github_token
-        if (
-            effective_oauth_token
-            and user is not None
-            and is_oauth_token_blocked(user.user_id, effective_oauth_token)
+        if effective_oauth_token and is_oauth_token_blocked(
+            user.user_id, effective_oauth_token,
         ):
             logger.debug(
                 "Dropping OAuth GitHub token for user %s — Copilot 403 cached",
@@ -70,46 +89,26 @@ class ClientFactory:
             if effective_oauth_token
             else None
         )
-        from obscura.auth.copilot_403_cache import mark_oauth_token_blocked
 
-        client = ObscuraClient(
-            backend,
+        config = SessionConfig(
+            backend=backend,
             model=model,
-            model_alias=model_alias,
             system_prompt=system_prompt,
-            user=user,
-            auth=auth,
+            extras={"model_alias": model_alias} if model_alias else {},
         )
+
         try:
-            await client.start()
+            return await build_api_session(config, user=user, auth=auth)
         except Exception as exc:
-            # If Copilot rejected the Supabase-forwarded OAuth token, cache
-            # that decision so subsequent requests skip it, and retry once
-            # without the OAuth fallback so the user's call still succeeds
-            # via env/CLI-sourced tokens.
-            if (
-                effective_oauth_token
-                and user is not None
-                and _looks_like_copilot_auth_failure(exc)
-            ):
+            if effective_oauth_token and _looks_like_copilot_auth_failure(exc):
                 logger.info(
                     "Copilot rejected Supabase OAuth token for user %s; "
                     "falling back to env/CLI resolver",
                     user.user_id,
                 )
                 mark_oauth_token_blocked(user.user_id, effective_oauth_token)
-                client = ObscuraClient(
-                    backend,
-                    model=model,
-                    model_alias=model_alias,
-                    system_prompt=system_prompt,
-                    user=user,
-                    auth=None,
-                )
-                await client.start()
-            else:
-                raise
-        return client
+                return await build_api_session(config, user=user, auth=None)
+            raise
 
 
 _COPILOT_AUTH_FAILURE_MARKERS = (

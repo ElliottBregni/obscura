@@ -37,91 +37,93 @@ async def send(
 ) -> SendResponse:
     """Send a prompt and receive the full response."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         body.backend,
         user=user,
         model=body.model,
         model_alias=body.model_alias,
         system_prompt=body.system_prompt,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
-        if body.session_id:
-            ref = SessionRef(session_id=body.session_id, backend=Backend(body.backend))
-            await client.resume_session(ref)
-
-        mode = (
-            ExecutionMode(body.mode)
-            if body.mode in ("unified", "native")
-            else ExecutionMode.UNIFIED
-        )
-        native_payload: ProviderNativeRequest | None = None
-        if body.native is not None:
-            native_payload = ProviderNativeRequest(
-                openai=body.native.get("openai")
-                if isinstance(body.native.get("openai"), dict)
-                else None,
-                codex=body.native.get("codex")
-                if isinstance(body.native.get("codex"), dict)
-                else None,
-                claude=body.native.get("claude")
-                if isinstance(body.native.get("claude"), dict)
-                else None,
-                copilot=body.native.get("copilot")
-                if isinstance(body.native.get("copilot"), dict)
-                else None,
-                localllm=body.native.get("localllm")
-                if isinstance(body.native.get("localllm"), dict)
-                else None,
-            )
-        unified_req = UnifiedRequest(
-            prompt=body.prompt,
-            mode=mode,
-            native=native_payload,
-        )
-
-        msg = await client.send(
-            body.prompt,
-            mode=body.mode,
-            api_mode=body.api_mode,
-            native=body.native,
-            request=unified_req,
-        )
-        if body.session_id:
-            with contextlib.suppress(Exception):
-                sync_session_turn(
-                    user=user,
+    ) as _session:
+        client = _session.client
+        try:
+            if body.session_id:
+                ref = SessionRef(
                     session_id=body.session_id,
-                    backend=body.backend,
-                    prompt=body.prompt,
-                    response=msg.text,
-                    mode=body.mode,
+                    backend=Backend(body.backend),
                 )
-        audit(
-            "agent.send",
-            user,
-            f"backend:{body.backend}",
-            "execute",
-            "success",
-            prompt_len=len(body.prompt),
-        )
-        return SendResponse(
-            text=msg.text,
-            backend=body.backend,
-            capability_tier=client.capability_tier,
-        )
-    except Exception:
-        audit(
-            "agent.send",
-            user,
-            f"backend:{body.backend}",
-            "execute",
-            "error",
-            prompt_len=len(body.prompt),
-        )
-        raise
-    finally:
-        await client.stop()
+                await client.resume_session(ref)
+
+            mode = (
+                ExecutionMode(body.mode)
+                if body.mode in ("unified", "native")
+                else ExecutionMode.UNIFIED
+            )
+            native_payload: ProviderNativeRequest | None = None
+            if body.native is not None:
+                native_payload = ProviderNativeRequest(
+                    openai=body.native.get("openai")
+                    if isinstance(body.native.get("openai"), dict)
+                    else None,
+                    codex=body.native.get("codex")
+                    if isinstance(body.native.get("codex"), dict)
+                    else None,
+                    claude=body.native.get("claude")
+                    if isinstance(body.native.get("claude"), dict)
+                    else None,
+                    copilot=body.native.get("copilot")
+                    if isinstance(body.native.get("copilot"), dict)
+                    else None,
+                    localllm=body.native.get("localllm")
+                    if isinstance(body.native.get("localllm"), dict)
+                    else None,
+                )
+            unified_req = UnifiedRequest(
+                prompt=body.prompt,
+                mode=mode,
+                native=native_payload,
+            )
+
+            msg = await client.send(
+                body.prompt,
+                mode=body.mode,
+                api_mode=body.api_mode,
+                native=body.native,
+                request=unified_req,
+            )
+            if body.session_id:
+                with contextlib.suppress(Exception):
+                    sync_session_turn(
+                        user=user,
+                        session_id=body.session_id,
+                        backend=body.backend,
+                        prompt=body.prompt,
+                        response=msg.text,
+                        mode=body.mode,
+                    )
+            audit(
+                "agent.send",
+                user,
+                f"backend:{body.backend}",
+                "execute",
+                "success",
+                prompt_len=len(body.prompt),
+            )
+            return SendResponse(
+                text=msg.text,
+                backend=body.backend,
+                capability_tier=client.capability_tier,
+            )
+        except Exception:
+            audit(
+                "agent.send",
+                user,
+                f"backend:{body.backend}",
+                "execute",
+                "error",
+                prompt_len=len(body.prompt),
+            )
+            raise
 
 
 @router.post("/messages", response_model=SendResponse)
@@ -157,16 +159,16 @@ async def stream(
 
     async def _event_generator() -> AsyncGenerator[dict[str, str]]:
         factory: ClientFactory = request.app.state.client_factory
-        client = await factory.create(
+        async with await factory.create_session(
             body.backend,
             user=user,
             model=body.model,
             model_alias=body.model_alias,
             system_prompt=body.system_prompt,
             oauth_github_token=oauth_gh_token,
-        )
-        response_text_parts: list[str] = []
-        try:
+        ) as _session:
+            client = _session.client
+            response_text_parts: list[str] = []
             if body.session_id:
                 ref = SessionRef(
                     session_id=body.session_id,
@@ -244,7 +246,5 @@ async def stream(
                         response="".join(response_text_parts),
                         mode=body.mode,
                     )
-        finally:
-            await client.stop()
 
     return EventSourceResponse(_event_generator())

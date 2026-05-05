@@ -96,6 +96,21 @@ class CapabilityResolver:
         self._grants: dict[str, list[CapabilityGrant]] = {}  # grantee_id → grants
         self._denials: dict[str, list[CapabilityDenial]] = {}  # grantee_id → denials
 
+    @property
+    def capability_index(self) -> CapabilityIndex:
+        """Read-only access to the underlying capability index.
+
+        Used by the composition tool-router block (and anywhere else that
+        needs to read the capability graph without touching the resolver's
+        grant/denial state).
+        """
+        return self._cap_index
+
+    @property
+    def tool_index(self) -> ToolIndex:
+        """Read-only access to the underlying tool index."""
+        return self._tool_index
+
     # -- Granting ----------------------------------------------------------
 
     def grant(

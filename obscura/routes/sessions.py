@@ -48,12 +48,12 @@ async def create_session(
 ) -> SessionResponse:
     """Create a new session."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         body.backend,
         user=user,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
+    ) as _session:
+        client = _session.client
         ref = await client.create_session()
         audit(
             "session.create",
@@ -86,8 +86,6 @@ async def create_session(
             backend=ref.backend.value,
             source="live",
         )
-    finally:
-        await client.stop()
 
 
 @router.get("/sessions", response_model=list[SessionResponse])
@@ -238,12 +236,12 @@ async def resume_session(
     """Resume an existing session to validate liveness and access."""
     assert user is not None
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         backend,
         user=user,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
+    ) as _session:
+        client = _session.client
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
         await client.resume_session(ref)
         return JSONResponse(
@@ -253,8 +251,6 @@ async def resume_session(
                 "backend": backend,
             },
         )
-    finally:
-        await client.stop()
 
 
 @router.delete("/sessions/{session_id}")
@@ -267,12 +263,12 @@ async def delete_session(
 ) -> JSONResponse:
     """Delete a session by ID."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         backend,
         user=user,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
+    ) as _session:
+        client = _session.client
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
         await client.delete_session(ref)
         audit(
@@ -302,5 +298,3 @@ async def delete_session(
             ),
         )
         return JSONResponse(content={"deleted": True, "session_id": session_id})
-    finally:
-        await client.stop()
