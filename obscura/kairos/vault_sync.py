@@ -45,7 +45,7 @@ import yaml
 
 from obscura.arbiter.store import ArbiterStore
 from obscura.auth.cli_user import current_cli_user
-from obscura.core.kairos.goal_store import GoalStore
+from obscura.core.kairos.goal_store import create_goal_store
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.task_queue import TaskQueue
 from obscura.kairos.goals import GoalBoard
@@ -560,7 +560,7 @@ class VaultSync:
 
             db_path = resolve_obscura_home() / "kairos.db"
             if db_path.exists():
-                store = GoalStore(str(db_path))
+                store = create_goal_store(db_path)
                 try:
                     goals = store.list_goals()
                 finally:

@@ -41,7 +41,7 @@ from obscura.core.kairos.errors import (
     KairosRuntimeError,
     PlanningError,
 )
-from obscura.core.kairos.goal_store import GoalStore
+from obscura.core.kairos.goal_store import GoalStoreProtocol, create_goal_store
 from obscura.core.enums.lifecycle import (
     KAIROS_VALID_GOAL_TRANSITIONS,
     GoalStatus,
@@ -88,7 +88,7 @@ class Kairos:
     ) -> None:
         self._db_path = Path(db_path)
         self._config = config or KairosConfig()
-        self._store = GoalStore(self._db_path)
+        self._store: GoalStoreProtocol = create_goal_store(self._db_path)
         self._agent_loop = agent_loop
         self._backend = backend
         self._task_runner = TaskRunner(agent_loop, self._store, self._config)
@@ -659,7 +659,7 @@ class Kairos:
     # ------------------------------------------------------------------
 
     @property
-    def store(self) -> GoalStore:
+    def store(self) -> GoalStoreProtocol:
         return self._store
 
     @property

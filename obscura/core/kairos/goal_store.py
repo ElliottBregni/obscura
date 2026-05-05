@@ -2,17 +2,24 @@
 
 All writes are synchronous SQLite. The runtime layer is async but calls
 these helpers from a thread executor to avoid blocking the event loop.
+
+This module also exposes :class:`GoalStoreProtocol` (the abstract surface
+both the SQLite impl and any future Postgres impl satisfy) and
+:func:`create_goal_store` (the env-driven factory). KAIROS is currently
+SQLite-only — when ``OBSCURA_DB_TYPE=postgresql`` the factory logs a
+warning and falls back to SQLite until a Postgres impl exists.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from obscura.core.enums.lifecycle import GoalStatus, KairosTaskStatus, PlanStatus
 from obscura.core.kairos.errors import GoalNotFoundError, TaskNotFoundError
@@ -48,6 +55,81 @@ def _dt(s: str | None) -> datetime | None:
     except ValueError:
         logger.debug("suppressed exception in _dt", exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Protocol — abstract surface shared by SQLite (and any future Postgres) impl
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class GoalStoreProtocol(Protocol):
+    """Persistence surface for KAIROS Goals, Plans, Tasks, and friends.
+
+    The SQLite-backed :class:`GoalStore` is currently the only impl.
+    A Postgres impl is not yet implemented — see :func:`create_goal_store`.
+    """
+
+    def close(self) -> None: ...
+
+    # Goals
+    def create_goal(self, goal: Goal) -> None: ...
+    def get_goal(self, goal_id: str) -> Goal: ...
+    def update_goal_status(
+        self,
+        goal_id: str,
+        status: GoalStatus,
+        *,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+    ) -> None: ...
+    def list_goals(
+        self,
+        status: GoalStatus | None = None,
+        owner_id: str = "",
+        limit: int = 100,
+    ) -> list[Goal]: ...
+
+    # Plans
+    def create_plan(self, plan: Plan) -> None: ...
+    def get_active_plan(self, goal_id: str) -> Plan | None: ...
+    def update_plan_status(self, plan_id: str, status: PlanStatus) -> None: ...
+
+    # Tasks
+    def create_task(self, task: Task) -> None: ...
+    def get_task(self, task_id: str) -> Task: ...
+    def list_tasks(self, plan_id: str) -> list[Task]: ...
+    def update_task_status(
+        self,
+        task_id: str,
+        status: KairosTaskStatus,
+        *,
+        retry_count: int | None = None,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+    ) -> None: ...
+    def save_task_result(self, result: TaskResult) -> None: ...
+
+    # Checkpoints
+    def create_checkpoint(self, cp: Checkpoint) -> None: ...
+    def get_latest_checkpoint(self, goal_id: str) -> Checkpoint | None: ...
+
+    # Interventions
+    def create_intervention(self, iv: Intervention) -> None: ...
+    def resolve_intervention(self, intervention_id: str, response: str) -> None: ...
+    def list_pending_interventions(self, goal_id: str) -> list[Intervention]: ...
+
+    # Events
+    def append_event(self, event: KairosEvent) -> None: ...
+
+    # Budget tracking
+    def get_budget_usage(self, goal_id: str) -> BudgetUsage: ...
+    def update_budget_usage(self, goal_id: str, usage: BudgetUsage) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# SQLite implementation
+# ---------------------------------------------------------------------------
 
 
 class GoalStore:
@@ -641,3 +723,33 @@ class GoalStore:
             ),
         )
         self._conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_DB_PATH = Path.home() / ".obscura" / "kairos.db"
+
+
+def create_goal_store(db_path: str | Path | None = None) -> GoalStoreProtocol:
+    """Create a goal store based on configuration.
+
+    Currently always returns a SQLite-backed :class:`GoalStore`. When
+    ``OBSCURA_DB_TYPE=postgresql`` is set, logs a one-time warning that
+    KAIROS is SQLite-only and continues with SQLite — there is no
+    Postgres impl yet. Adding one is a matter of writing a class that
+    satisfies :class:`GoalStoreProtocol` and routing it from here.
+
+    Args:
+        db_path: Override the SQLite path (default ``~/.obscura/kairos.db``).
+    """
+    db_type = os.getenv("OBSCURA_DB_TYPE", "sqlite").lower()
+    if db_type == "postgresql":
+        logger.warning(
+            "OBSCURA_DB_TYPE=postgresql but KAIROS GoalStore has no Postgres "
+            "implementation yet; falling back to SQLite at %s",
+            db_path or _DEFAULT_DB_PATH,
+        )
+    return GoalStore(db_path if db_path is not None else _DEFAULT_DB_PATH)
