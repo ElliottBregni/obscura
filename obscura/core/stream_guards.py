@@ -37,7 +37,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ def refusal_text(payload: dict[str, Any]) -> str:
 
 
 @contextmanager
-def bind_stream_log() -> Iterator[dict[tuple[str, str], int]]:
+def bind_stream_log() -> Generator[dict[tuple[str, str], int], None, None]:
     """Bind a fresh per-task log for the duration of the with-block.
 
     Usage::
