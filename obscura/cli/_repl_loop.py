@@ -52,6 +52,7 @@ from obscura.cli.prompt import (
     RunningAgentInfo,
     StreamingStatus,
     _get_git_branch,  # pyright: ignore[reportPrivateUsage]
+    _sanitize_text,  # pyright: ignore[reportPrivateUsage]
     animate_spinner,
     bordered_prompt,
     create_prompt_session,
