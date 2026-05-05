@@ -163,6 +163,10 @@ include = ["obscura*"]
 exclude = ["tests*", "build*"]
 
 [tool.setuptools.package-data]
+# Wildcard catches any data file shipped alongside Python source.
+# Without this, *.txt/*.toml/*.json/*.yaml under obscura/ are silently
+# dropped from the wheel (e.g. obscura/prompts/subagent.txt).
+"*" = ["*.txt", "*.toml", "*.json", "*.yaml", "*.yml", "*.j2", "*.md", "*.sql"]
 obscura = ["py.typed"]
 "obscura.vault_gen" = [
     "py.typed",
