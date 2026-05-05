@@ -17,6 +17,11 @@ from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
+from obscura.core.stream_guards import (
+    bind_stream_log,
+    check_stream_guards,
+    refusal_text,
+)
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
 from obscura.core.models.content import TextBlock
@@ -441,22 +446,26 @@ class CopilotBackend(BackendToolHostMixin):
         tracer = _get_backend_tracer()
         span = tracer.start_span("copilot.stream")
         _set_span_attr(span, "backend", "copilot")
+        # Bind the per-task tool-call log BEFORE ``self._session.send`` —
+        # any child tasks the SDK spawns to invoke tool handlers inherit the
+        # context at task-creation time, so the shared guards see this dict.
         try:
-            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+            with bind_stream_log():
+                yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
-            msg_options = self._build_message_options(prompt, kwargs)
-            send_prompt = msg_options.pop("prompt")
-            await self._session.send(send_prompt, **msg_options)
+                msg_options = self._build_message_options(prompt, kwargs)
+                send_prompt = msg_options.pop("prompt")
+                await self._session.send(send_prompt, **msg_options)
 
-            # Yield chunks from the bridge
-            try:
-                async for chunk in bridge:
-                    yield chunk
-            finally:
-                # Unsubscribe all handlers
-                for unsub in unsub_fns:
-                    if callable(unsub):
-                        unsub()
+                # Yield chunks from the bridge
+                try:
+                    async for chunk in bridge:
+                        yield chunk
+                finally:
+                    # Unsubscribe all handlers
+                    for unsub in unsub_fns:
+                        if callable(unsub):
+                            unsub()
         finally:
             span.end()
 
@@ -703,6 +712,15 @@ class CopilotBackend(BackendToolHostMixin):
                     try:
                         raw_args = invocation.arguments
                         args = cast("dict[str, Any]", raw_args) if raw_args else {}
+
+                        refusal = check_stream_guards(bound_spec.name, args)
+                        if refusal is not None:
+                            return CopilotToolResult(
+                                text_result_for_llm=refusal_text(refusal),
+                                result_type="failure",
+                                error=cast("str", refusal["error"]),
+                            )
+
                         result: Any = await call_tool_handler(bound_spec, args)
                         # Normalize to SDK ToolResult (snake_case fields in 0.2.0)
                         if isinstance(result, CopilotToolResult):

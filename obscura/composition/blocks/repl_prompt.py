@@ -106,34 +106,6 @@ async def install_repl_prompt_sections(
             "install_repl_prompt_sections: preferences load failed", exc_info=True
         )
 
-    # `user:*` memories (eager — the only namespace prefix loaded at boot;
-    # everything else is lazy via `recall_memory`). Added by feature/wiz.
-    try:
-        from obscura.core.system_prompts import compose_user_memory_section
-
-        user_mem = compose_user_memory_section()
-        if user_mem:
-            custom_sections.append(user_mem)
-    except Exception:
-        logger.debug(
-            "install_repl_prompt_sections: user memory section failed",
-            exc_info=True,
-        )
-
-    # Active goals from the goal board whose `project_root` matches the
-    # current cwd (lazy — read once at session start). Added by feature/wiz.
-    try:
-        from obscura.core.system_prompts import compose_active_goals_section
-
-        goals = compose_active_goals_section()
-        if goals:
-            custom_sections.append(goals)
-    except Exception:
-        logger.debug(
-            "install_repl_prompt_sections: active goals section failed",
-            exc_info=True,
-        )
-
     # Vector memory startup recall (set by install_vector_memory)
     if session.vector_store is not None:
         try:
@@ -196,23 +168,6 @@ async def install_repl_prompt_sections(
     except Exception:
         logger.debug(
             "install_repl_prompt_sections: KAIROS prompt failed",
-            exc_info=True,
-        )
-
-    # Active wizard profile prompts — appended after coordinator so they
-    # have highest precedence (override / augment earlier sections).
-    # Added by feature/wiz.
-    try:
-        from obscura.wizard import WizardService
-
-        wiz = WizardService()
-        profile = wiz.resolve_active_profile()
-        if profile is not None:
-            for text in wiz.load_profile_prompt_text(profile):
-                custom_sections.append(text)
-    except Exception:
-        logger.debug(
-            "install_repl_prompt_sections: wizard profile prompts failed",
             exc_info=True,
         )
 

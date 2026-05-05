@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
+from obscura.core.stream_guards import (
+    bind_stream_log,
+    check_stream_guards,
+)
 from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
@@ -346,19 +350,20 @@ class ClaudeBackend(BackendToolHostMixin):
         with tracer.start_as_current_span("claude.send") as span:
             _set_span_attr(span, "backend", "claude")
 
-            # Drain any pending response before querying
-            async for _ in self._client.receive_response():
-                pass
+            with bind_stream_log():
+                # Drain any pending response before querying
+                async for _ in self._client.receive_response():
+                    pass
 
-            # Use query for a fresh exchange
-            await self._query(prompt, kwargs)
-            messages: list[Any] = []
-            async for msg in self._client.receive_response():
-                messages.append(msg)
-                if isinstance(msg, ResultMessage):
-                    self._last_session_id = msg.session_id
+                # Use query for a fresh exchange
+                await self._query(prompt, kwargs)
+                messages: list[Any] = []
+                async for msg in self._client.receive_response():
+                    messages.append(msg)
+                    if isinstance(msg, ResultMessage):
+                        self._last_session_id = msg.session_id
 
-            return self._to_message(messages)
+                return self._to_message(messages)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks."""
@@ -367,16 +372,17 @@ class ClaudeBackend(BackendToolHostMixin):
         span = tracer.start_span("claude.stream")
         _set_span_attr(span, "backend", "claude")
         try:
-            await self._query(prompt, kwargs)
-            source = self._client.receive_response()
-            adapter = ClaudeIteratorAdapter(source)
+            with bind_stream_log():
+                await self._query(prompt, kwargs)
+                source = self._client.receive_response()
+                adapter = ClaudeIteratorAdapter(source)
 
-            async for chunk in adapter:
-                # Track session ID from done events
-                if chunk.kind == ChunkKind.DONE and chunk.raw is not None:
-                    if hasattr(chunk.raw, "session_id"):
-                        self._last_session_id = chunk.raw.session_id
-                yield chunk
+                async for chunk in adapter:
+                    # Track session ID from done events
+                    if chunk.kind == ChunkKind.DONE and chunk.raw is not None:
+                        if hasattr(chunk.raw, "session_id"):
+                            self._last_session_id = chunk.raw.session_id
+                    yield chunk
         finally:
             span.end()
 
@@ -780,6 +786,16 @@ class ClaudeBackend(BackendToolHostMixin):
                 arguments: dict[str, Any] | None = None, **kwargs: Any
             ) -> dict[str, Any]:
                 merged = {**(arguments or {}), **kwargs}
+                refusal = check_stream_guards(bound_spec.name, merged)
+                if refusal is not None:
+                    import json as _json
+
+                    return {
+                        "content": [
+                            {"type": "text", "text": _json.dumps(refusal)},
+                        ],
+                        "isError": True,
+                    }
                 result = await call_tool_handler(bound_spec, merged)
                 # claude_agent_sdk expects {"content": [{"type": "text", ...}]}.
                 # Returning a bare string makes the SDK do `"content" in result`

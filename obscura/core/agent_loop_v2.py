@@ -361,8 +361,74 @@ class AgentLoopV2:
             Message(role=Role.USER, content=[ContentBlock(kind="text", text=prompt)])
         )
 
-        async for event in self._run_inner(messages, session_id, backend_kwargs):
-            yield event
+        # Bind the per-task tool-call log for the duration of this run.
+        # Same primitive used by Copilot/Claude/Codex backends — applied
+        # here so backends that drive their loop via agent_loop_v2 (OpenAI,
+        # LocalLLM, Moonshot, ...) get the same dedup/budget guards.
+        from obscura.core.stream_guards import bind_stream_log
+
+        with bind_stream_log():
+            # Run preflight to ground environment / URL questions BEFORE
+            # the model is invoked. Preflight prepends a synthetic system
+            # message with tool results so the model has real data in
+            # context and won't fabricate from priors.
+            await self._apply_preflight(prompt, messages)
+
+            async for event in self._run_inner(messages, session_id, backend_kwargs):
+                yield event
+
+    async def _apply_preflight(
+        self,
+        prompt: str,
+        messages: list[Message],
+    ) -> None:
+        """Run preflight rules; mutate ``messages`` to prepend grounded data.
+
+        Best-effort. Any failure is logged and ignored — preflight must
+        not block the user's actual request.
+        """
+        from obscura.core.prompt_preflight import run_preflight
+
+        async def _invoke(name: str, tool_input: dict[str, object]) -> str:
+            spec = self._registry.get(name)
+            if spec is None:
+                msg = f"preflight: tool {name!r} not registered"
+                raise RuntimeError(msg)
+            handler = spec.handler
+            result = handler(**tool_input)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return result if isinstance(result, str) else json.dumps(result, default=str)
+
+        try:
+            results = await run_preflight(prompt, invoke_tool=_invoke)
+        except Exception:
+            logger.debug("preflight: top-level failure swallowed", exc_info=True)
+            return
+
+        if not results:
+            return
+
+        # Build a single grounding system note. Inserted before the user
+        # message so the model reads context first, prompt second.
+        sections: list[str] = ["[Preflight grounding — auto-fetched before this turn]"]
+        for match, output in results:
+            sections.append(
+                f"\n• {match.reason}\n  Result: {output[:2000]}",
+            )
+        sections.append(
+            "\nUse this data for your answer. Do not pre-fabricate based on priors.",
+        )
+        note = Message(
+            role=Role.SYSTEM,
+            content=[ContentBlock(kind="text", text="".join(sections))],
+        )
+
+        # Insert just before the trailing user message we appended above.
+        if messages and messages[-1].role == Role.USER:
+            messages.insert(len(messages) - 1, note)
+        else:
+            messages.append(note)
 
     # -- Internal --------------------------------------------------------------
 
@@ -1044,6 +1110,22 @@ class AgentLoopV2:
                         text=f"tool not found: {node.tool_name}",
                     ),
                 ],
+                is_error=True,
+            )
+
+        # Per-task dedup/budget guard — same primitive used by Copilot,
+        # Claude, Codex (via MCP server), so behavior is uniform across
+        # backends regardless of who drives the loop.
+        from obscura.core.stream_guards import (
+            check_stream_guards,
+            refusal_text,
+        )
+
+        refusal = check_stream_guards(node.tool_name, dict(node.tool_input))
+        if refusal is not None:
+            return _ToolEnvelopeV2(
+                tool_use_id=node.tool_use_id,
+                content=[ContentBlock(kind="text", text=refusal_text(refusal))],
                 is_error=True,
             )
 

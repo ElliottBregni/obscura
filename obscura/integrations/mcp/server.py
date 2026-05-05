@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from obscura.agent.agents import AgentConfig, AgentRuntime
 from obscura.core.enums.protocol import MCPMethod
+from obscura.core.stream_guards import check_stream_guards, refusal_text
 from obscura.core.models.protocol import (
     JSONRPCError,
     JSONRPCRequest,
@@ -932,6 +933,16 @@ class ObscuraMCPServer:
         """Handle MCP tools/call request."""
         if context is None:
             context = ObscuraMCPToolContext(user_id="anonymous")
+
+        # Per-task dedup/budget guard (no-op when no log is bound — e.g.
+        # tools called outside any backend stream lifecycle, like direct
+        # MCP tests). Same primitive used by Copilot/Claude/agent_loop_v2.
+        refusal = check_stream_guards(name, arguments)
+        if refusal is not None:
+            return MCPToolResult(
+                content=[{"type": "text", "text": refusal_text(refusal)}],
+                isError=True,
+            )
 
         return await self._registry.execute(name, context, arguments)
 

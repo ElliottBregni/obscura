@@ -444,7 +444,7 @@ async def send_message(
     if not _session_state["titled"] and len(ctx.message_history) >= 2:
         _session_state["titled"] = True
         try:
-            title = await generate_session_title(text, ctx.client._backend)  # pyright: ignore[reportPrivateUsage]
+            title = await generate_session_title(text, ctx.client._backend)  # noqa: SLF001
             if title:
                 await ctx.store.update_session(ctx.session_id, summary=title)
                 _prompt_status = getattr(ctx, "_prompt_status", None)

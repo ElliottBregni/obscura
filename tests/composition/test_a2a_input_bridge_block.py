@@ -190,6 +190,7 @@ async def test_a2a_service_plan_approval_yes_no() -> None:
     assert await _gate("yes") is True
     # Reset pending state before the second test (previous _resume_task cleared)
     plan_approval2 = svc._make_plan_approval(task.id)
+
     async def _gate2(answer_text: str) -> bool:
         async def _later() -> None:
             await asyncio.sleep(0.05)
@@ -199,6 +200,7 @@ async def test_a2a_service_plan_approval_yes_no() -> None:
                 parts=[TextPart(text=answer_text)],
             )
             await svc._resume_task(task.id, reply)
+
         asyncio.create_task(_later())
         return await plan_approval2(answer_text)
 

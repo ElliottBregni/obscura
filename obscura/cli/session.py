@@ -833,7 +833,7 @@ class ObscuraSession:
             try:
                 title = await generate_session_title(
                     text,
-                    ctx.client._backend,  # pyright: ignore[reportPrivateUsage]
+                    ctx.client._backend,  # noqa: SLF001
                 )
                 if title:
                     await ctx.store.update_session(ctx.session_id, summary=title)
@@ -1454,7 +1454,7 @@ class ObscuraSession:
                 backend=config.backend,
             )
 
-            backend = self._client._backend  # pyright: ignore[reportPrivateUsage]
+            backend = self._client._backend  # noqa: SLF001
             if isinstance(backend, ToolRouterCapable):
                 backend.set_tool_router(_router)
             self._tool_router_ref = _router

@@ -998,7 +998,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
         print_ok("Tools disabled.")
     elif sub == "list":
         try:
-            registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            registry = ctx.client._tool_registry  # noqa: SLF001
             tools = registry.all_including_disabled()
             if not tools:
                 print_info("No tools registered.")
@@ -1025,7 +1025,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
         if not sub_arg:
             print_error("Usage: /tools enable <name>")
             return None
-        registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        registry = ctx.client._tool_registry  # noqa: SLF001
         if registry.enable(sub_arg):
             print_ok(f"Tool enabled: {sub_arg}")
         else:
@@ -1034,7 +1034,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
         if not sub_arg:
             print_error("Usage: /tools disable <name>")
             return None
-        registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        registry = ctx.client._tool_registry  # noqa: SLF001
         if registry.disable(sub_arg):
             print_ok(f"Tool disabled: {sub_arg}")
         else:
@@ -1518,7 +1518,7 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
         # Convert message_history tuples to dicts for compact_history.
         msg_dicts: list[Any] = [{"role": r, "content": t} for r, t in old]
         _backend_obj = (
-            ctx.client._backend  # pyright: ignore[reportPrivateUsage]
+            ctx.client._backend  # noqa: SLF001
             if hasattr(ctx.client, "_backend")
             else None
         )
@@ -5201,7 +5201,7 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
         print_error("Usage: /search-tools <query>")
         return None
 
-    registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    registry = ctx.client._tool_registry  # noqa: SLF001
     tools = registry.all_including_disabled()
     if not tools:
         print_info("No tools registered.")
@@ -8972,19 +8972,19 @@ async def cmd_tool_policy(args: str, ctx: REPLContext) -> str | None:
         return None
 
     if sub == "allow-all":
-        ctx.client._tool_policy = ToolPolicy.allow_all()  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.allow_all()  # noqa: SLF001
         print_ok("Tool policy: all tools allowed (native + custom).")
     elif sub == "custom-only":
-        ctx.client._tool_policy = ToolPolicy.custom_only()  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.custom_only()  # noqa: SLF001
         print_ok("Tool policy: custom tools only.")
     elif sub == "allow" and rest:
-        ctx.client._tool_policy = ToolPolicy.restricted(rest)  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.restricted(rest)  # noqa: SLF001
         print_ok(f"Tool policy: only {', '.join(rest)} allowed.")
     elif sub == "deny" and rest:
-        ctx.client._tool_policy = ToolPolicy.blocked(rest)  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.blocked(rest)  # noqa: SLF001
         print_ok(f"Tool policy: {', '.join(rest)} blocked.")
     elif sub == "reset":
-        ctx.client._tool_policy = None  # type: ignore[attr-defined]
+        ctx.client._tool_policy = None  # noqa: SLF001
         print_ok("Tool policy reset to default.")
     else:
         print_info(

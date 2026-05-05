@@ -158,6 +158,5 @@ def test_no_unsanctioned_callsites(symbol: str) -> None:
         f"surface modules must call composition, not the loader "
         f"directly. If your callsite is legitimate (inspection only, "
         f"not tool registration), add it to ALLOWLIST in this test "
-        f"with a comment explaining why.\n\nViolations:\n  "
-        + "\n  ".join(violations)
+        f"with a comment explaining why.\n\nViolations:\n  " + "\n  ".join(violations)
     )

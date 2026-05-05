@@ -41,7 +41,6 @@ from obscura.cli.bootstrap import (
     _discover_mcp,  # pyright: ignore[reportPrivateUsage]
 )
 from obscura.cli.commands import (
-    COMMANDS,
     COMPLETIONS,
     REPLContext,
     estimate_effective_context_tokens,
@@ -196,18 +195,6 @@ async def repl(
     if compiled_ws is not None:
         _session_extras["compiled_ws"] = compiled_ws
 
-    # Resolve active wizard profile to thread skill_filter through
-    # SessionConfig.extras → install_skill_context (composition path).
-    # Empty / None list disables filtering — load every discovered skill.
-    try:
-        from obscura.wizard import WizardService as _Wiz
-
-        _active_profile = _Wiz().resolve_active_profile()
-        if _active_profile is not None and _active_profile.skills:
-            _session_extras["skill_filter"] = list(_active_profile.skills)
-    except Exception:
-        _log.debug("skill_filter resolution failed", exc_info=True)
-
     _session_config = SessionConfig(
         backend=backend,
         model=model,
@@ -268,20 +255,6 @@ async def repl(
             context_router=_session.context_router,
             turn_classifier=_session.turn_classifier,
         )
-
-        # Install slash-command bridge so agent loop tools can run /init etc.
-        try:
-
-            async def _run_slash(name: str, arguments: str) -> tuple[str, str | None]:
-                handler = COMMANDS.get(name)
-                if handler is None:
-                    raise KeyError(name)
-                with console.capture() as cap:
-                    ret = await handler(arguments, ctx)
-                return cap.get(), ret
-
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
 
         # --- Single-shot mode ---
         if prompt:
@@ -962,13 +935,11 @@ async def repl(
                             )
                             continue
                         _pi(f"@{resolved.name}: {resolved.description}")
-                        # Expand any nested $skill / @command refs in the body
-                        blocks.append(ctx.expand_inline_references(resolved.body))
+                        blocks.append(resolved.body)
                         if resolved.meta.tools_enabled:
                             _cmd_allowed_tools = True
                     elif remaining:
-                        # Expand any inline $skill / @command / *@command refs
-                        blocks.append(ctx.expand_inline_references(remaining))
+                        blocks.append(remaining)
 
                     user_input = "\n\n---\n\n".join(blocks)
 
