@@ -285,17 +285,6 @@ def resolve_allowed_tools_from_config() -> set[str] | None:
         grant_ids: set[str] = set(caps_cfg.get("grant", []))
         deny_ids: set[str] = set(caps_cfg.get("deny", []))
 
-        # Merge in capabilities from the active wizard profile (if any).
-        # Profiles augment the defaults; deny still wins.
-        try:
-            from obscura.wizard import WizardService
-
-            active = WizardService().resolve_active_profile()
-            if active is not None:
-                grant_ids.update(active.capabilities)
-        except Exception:
-            logger.debug("active profile resolution failed", exc_info=True)
-
         # Discover all plugin specs to read default_grant flags
         load_builtins = _load_plugin_config_flag("load_builtins")
         loader = PluginLoader()

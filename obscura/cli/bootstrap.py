@@ -3,8 +3,7 @@
 Canonical home for:
   - MCP server discovery
   - Agent discovery (lazy, metadata-only)
-  - Inline ``!agent`` mention parsing and execution (formerly ``@agent``,
-    moved to ``!`` so it stops conflicting with ``@command`` references)
+  - Inline ``@agent`` mention parsing and execution
   - iMessage daemon lifecycle
 """
 
@@ -90,7 +89,7 @@ def _discover_agent_infos() -> list[AgentInfo]:
 
 
 _INLINE_AGENT_MENTION_RE = re.compile(
-    r"^\s*!(?P<name>[A-Za-z0-9][A-Za-z0-9_-]*)\s+(?P<prompt>.+?)\s*$",
+    r"^\s*@(?P<name>[A-Za-z0-9][A-Za-z0-9_-]*)\s+(?P<prompt>.+?)\s*$",
     re.DOTALL,
 )
 

@@ -1175,12 +1175,12 @@ def print_banner(
                 f"[dim]{ai.model}[/]",
             )
         console.print(
-            "  [dim]!name <prompt> to invoke, /agent spawn <name> to start[/]",
+            "  [dim]@name <prompt> to invoke, /agent spawn <name> to start[/]",
         )
     elif available_agents:
         console.print(
             f"  [bold]agents:[/]    [{ACCENT}]{', '.join(available_agents)}[/]   "
-            "[dim]/agent spawn <name> or !name <prompt>[/]",
+            "[dim]/agent spawn <name> or @name <prompt>[/]",
         )
     console.print()
     console.print(

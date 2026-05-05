@@ -19,7 +19,6 @@ from __future__ import annotations
 import fnmatch
 import json
 import logging
-import re
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -214,88 +213,15 @@ class ContextLoader:
         return "\n\n".join(parts)
 
     def load_project_instructions(self) -> str:
-        """Load project instructions from OBSCURA.md (or AGENTS.md / CLAUDE.md fallback).
-
-        Strips YAML frontmatter from the returned body — the frontmatter is
-        consumed separately by :meth:`load_project_memory_directive`. The
-        textual body of the file (everything after the closing ``---``) is
-        what the agent should read as project instructions.
-        """
-        raw = self._read_project_md()
-        if raw is None:
-            return ""
-        return _strip_frontmatter(raw).strip()
-
-    def load_project_memory_directive(self) -> str:
-        """Build a `## Memory namespaces (this project)` section from frontmatter.
-
-        Reads the YAML frontmatter of ``OBSCURA.md`` / ``AGENTS.md`` / ``CLAUDE.md`` and looks
-        for a top-level ``remember:`` key — a list of ``{namespace, when,
-        examples?}`` entries. Returns a formatted markdown block telling the
-        agent what to save into which namespace, or ``""`` if no frontmatter
-        directive is present. Complements the cross-project guidance in
-        ``SOUL.md``: SOUL says *when generally* to save; this says *what
-        specifically* in this project.
-        """
-        raw = self._read_project_md()
-        if raw is None:
-            return ""
-        meta = _parse_frontmatter_dict(raw)
-        if not meta:
-            return ""
-        directive = meta.get("remember") or meta.get("memory")
-        if not isinstance(directive, list) or not directive:
-            return ""
-        lines: list[str] = ["## Memory namespaces (this project)", ""]
-        lines.append(
-            "Use `remember_memory(content, namespace=...)` to save items "
-            "matching these patterns:",
-        )
-        lines.append("")
-        for entry in directive:
-            if not isinstance(entry, dict):
-                continue
-            ns = str(entry.get("namespace", "default")).strip()
-            when = str(entry.get("when", "")).strip()
-            if not when:
-                continue
-            lines.append(f"- **`{ns}`** — {when}")
-            examples = entry.get("examples")
-            if isinstance(examples, list):
-                for ex in examples:
-                    ex_str = str(ex).strip()
-                    if ex_str:
-                        lines.append(f"  - e.g. {ex_str}")
-        return "\n".join(lines).strip()
-
-    def _read_project_md(self) -> str | None:
-        for name in ("OBSCURA.md", "AGENTS.md", "CLAUDE.md"):
+        """Load project instructions from OBSCURA.md (or CLAUDE.md fallback)."""
+        for name in ("OBSCURA.md", "CLAUDE.md"):
             f = self.agent_dir / name
             if f.is_file():
-                return f.read_text(encoding="utf-8")
-        return None
+                return f.read_text(encoding="utf-8").strip()
+        return ""
 
     # Backwards-compatible alias.
     load_claude_md = load_project_instructions
-
-    def load_persona(self) -> str:
-        """Load optional cross-project persona from ``~/.obscura/SOUL.md``.
-
-        SOUL.md is a complement to OBSCURA.md: where OBSCURA.md captures
-        project-bounded rules and facts, SOUL.md captures persistent
-        agent persona — voice, values, defaults — that should travel
-        across every project.
-
-        Returns the file contents (stripped) or an empty string if missing.
-        Capped at 4096 chars to keep token cost bounded.
-        """
-        path = Path.home() / ".obscura" / "SOUL.md"
-        if not path.is_file():
-            return ""
-        body = path.read_text(encoding="utf-8").strip()
-        if len(body) > 4096:
-            body = body[:4096] + "\n\n[truncated — keep SOUL.md under 4096 chars]"
-        return body
 
     def load_instructions_filtered(self, file_context: str = "") -> str:
         """Load instruction files, filtering by ``applyTo`` frontmatter globs.
@@ -362,29 +288,14 @@ class ContextLoader:
         return results
 
     def load_system_prompt(self, additional: str = "") -> str:
-        """Build a system prompt from SOUL.md + OBSCURA.md + instructions + skills + optional extra.
-
-        Section order (later overrides earlier on conflict — project rules
-        win over cross-project persona):
-
-        1. ``SOUL.md`` (cross-project persona, optional, capped at 4 KB)
-        2. ``OBSCURA.md`` / ``AGENTS.md`` / ``CLAUDE.md`` (project instructions)
-        3. Backend-specific instructions
-        4. Skills (lazy stubs or full bodies)
-        5. ``additional`` extra text passed by caller
+        """Build a system prompt from OBSCURA.md + instructions + skills + optional extra.
 
         If lazy_load_skills is enabled, only includes skill stubs (name + description).
         """
         parts: list[str] = []
-        persona = self.load_persona()
-        if persona:
-            parts.append("## Persona\n\n" + persona)
         project_instructions = self.load_project_instructions()
         if project_instructions:
             parts.append(project_instructions)
-        memory_directive = self.load_project_memory_directive()
-        if memory_directive:
-            parts.append(memory_directive)
         instructions = self.load_instructions()
         if instructions:
             parts.append(instructions)
@@ -404,41 +315,6 @@ class ContextLoader:
         if additional:
             parts.append(additional)
         return "\n\n".join(parts)
-
-
-_FRONTMATTER_RE = re.compile(
-    r"\A---\s*\n(.*?)\n---\s*\n",
-    re.DOTALL,
-)
-
-
-def _strip_frontmatter(raw: str) -> str:
-    """Remove a leading YAML frontmatter block, if present."""
-    match = _FRONTMATTER_RE.match(raw)
-    if match is None:
-        return raw
-    return raw[match.end() :]
-
-
-def _parse_frontmatter_dict(raw: str) -> dict[str, Any]:
-    """Parse the YAML frontmatter at the top of *raw* into a dict.
-
-    Returns an empty dict if no frontmatter is present, parsing fails, or
-    the parsed value isn't a mapping.
-    """
-    match = _FRONTMATTER_RE.match(raw)
-    if match is None:
-        return {}
-    try:
-        import yaml
-
-        loaded: Any = yaml.safe_load(match.group(1))
-    except Exception:
-        logger.debug("frontmatter parse failed", exc_info=True)
-        return {}
-    if isinstance(loaded, dict):
-        return {str(k): v for k, v in loaded.items()}
-    return {}
 
 
 def load_obscura_memory(session_id: str, db_path: Path, max_events: int = 50) -> str:
