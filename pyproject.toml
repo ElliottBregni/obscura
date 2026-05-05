@@ -9,11 +9,8 @@ description = "Obscura - Multi-agent context management with TUI"
 requires-python = ">=3.13"
 dependencies = [
     "github-copilot-sdk>=0.2.1",
-    "claude-agent-sdk>=0.1.0",
-    # Official OpenAI Codex Python SDK — not published to PyPI; installed
-    # from source in the openai/codex monorepo.
-    # See https://developers.openai.com/codex/sdk
-    "openai-codex-app-server-sdk",
+     "claude-agent-sdk>=0.1.0",
+    "openai-codex-app-server-sdk @ git+https://github.com/openai/codex.git@0.128.0#subdirectory=sdk/python",
     "openai>=1.0.0",
     "httpx>=0.27.0",
     "numpy>=2.1.0",
@@ -436,7 +433,3 @@ ignore_decorators = [
     "@property",
 ]
 
-[tool.uv.sources]
-# Pin to openai/codex monorepo — the third-party "codex-app-server-sdk" on
-# PyPI is unrelated. See https://github.com/openai/codex/tree/main/sdk/python
-openai-codex-app-server-sdk = { git = "https://github.com/openai/codex.git", subdirectory = "sdk/python" }

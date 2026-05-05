@@ -1784,7 +1784,6 @@ dependencies = [
     { name = "keyring" },
     { name = "numpy" },
     { name = "openai" },
-    { name = "openai-codex-app-server-sdk" },
     { name = "prompt-toolkit" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
@@ -1808,6 +1807,9 @@ a2a = [
 ]
 anthropic = [
     { name = "anthropic" },
+]
+codex = [
+    { name = "openai-codex-app-server-sdk" },
 ]
 coingecko = [
     { name = "pycoingecko" },
@@ -1993,7 +1995,7 @@ requires-dist = [
     { name = "obscura", extras = ["server", "telemetry", "a2a", "metrics", "voice", "anthropic", "plugins-all"], marker = "extra == 'full'" },
     { name = "obscura", extras = ["x-twitter"], marker = "extra == 'plugins-social'" },
     { name = "openai", specifier = ">=1.0.0" },
-    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
+    { name = "openai-codex-app-server-sdk", marker = "extra == 'codex'", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
     { name = "openai-whisper", marker = "extra == 'voice'", specifier = ">=20240930" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
@@ -2029,7 +2031,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'voice'", specifier = ">=12.0" },
     { name = "xdk", marker = "extra == 'x-twitter'", specifier = ">=0.4.5" },
 ]
-provides-extras = ["voice", "dev", "server", "telemetry", "a2a", "metrics", "yaml", "toml", "anthropic", "duckdb", "datafusion", "huggingface", "x-twitter", "notion", "coingecko", "datadog", "msgraph", "gws", "plugins-data", "plugins-finance", "plugins-productivity", "plugins-observability", "plugins-social", "plugins-ml", "plugins-all", "full", "providers"]
+provides-extras = ["voice", "dev", "server", "telemetry", "a2a", "metrics", "yaml", "toml", "codex", "anthropic", "duckdb", "datafusion", "huggingface", "x-twitter", "notion", "coingecko", "datadog", "msgraph", "gws", "plugins-data", "plugins-finance", "plugins-productivity", "plugins-observability", "plugins-social", "plugins-ml", "plugins-all", "full", "providers"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2096,7 +2098,7 @@ wheels = [
 [[package]]
 name = "openai-codex-app-server-sdk"
 version = "0.116.0a1"
-source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#67849d950d843c954102adb0db0e11f993aefdb7" }
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#4950e7d8a67aaca5afac87a36987a31e83d516b6" }
 dependencies = [
     { name = "pydantic" },
 ]

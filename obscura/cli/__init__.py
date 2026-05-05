@@ -154,7 +154,7 @@ def _ensure_cli_auth_for_startup(
 @click.option(
     "--log-level",
     "log_level",
-    default="WARNING",
+    default="DEBUG",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
     help="Console log level.",
 )
@@ -189,7 +189,7 @@ def main(
     import logging as _logging
 
     cli_logger = _logging.getLogger("obscura")
-    level = getattr(_logging, log_level.upper(), _logging.WARNING)
+    level = getattr(_logging, log_level.upper(), _logging.DEBUG)
     for h in cli_logger.handlers:
         if h.__class__.__name__ == "InfoHandler":
             h.setLevel(level)
