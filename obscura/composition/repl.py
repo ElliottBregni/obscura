@@ -39,6 +39,7 @@ from obscura.composition.blocks import (
     install_browser_bridge,
     install_imessage_daemon,
     install_kairos_engine,
+    install_mcp_servers,
     install_plugin_tools,
     install_project_hooks,
     install_repl_callbacks,
@@ -116,6 +117,7 @@ async def build_repl_session(
         session_id=session_id,
         preregistered_tools=preregistered_tools,
     )
+    await install_mcp_servers(session, config)
     await install_plugin_tools(session, config)
     await install_vector_memory(session, config)
     await install_system_tools(session, config)

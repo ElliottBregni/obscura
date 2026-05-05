@@ -24,6 +24,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from obscura.composition.blocks import (
+    install_mcp_servers,
     install_plugin_tools,
     install_project_hooks,
     install_skill_context,
@@ -53,6 +54,7 @@ async def build_api_session(
         user=user,
         auth=auth,
     )
+    await install_mcp_servers(session, config)
     await install_plugin_tools(session, config)
     await install_vector_memory(session, config)
     await install_system_tools(session, config)
