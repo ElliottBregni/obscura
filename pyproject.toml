@@ -3,7 +3,10 @@ requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "obscura"
+# Renamed from `obscura` to `obscura-agent` to avoid the PyPI name collision
+# with an unrelated file-encryption tool also called `obscura`. The CLI
+# binary stays `obscura` (see [project.scripts] below).
+name = "obscura-agent"
 version = "0.5.3"
 description = "Obscura - Multi-agent context management with TUI"
 requires-python = ">=3.13"
@@ -104,29 +107,29 @@ gws = ["gws-cli"]
 # ---------------------------------------------------------------------------
 # Category bundles — install a themed group of plugins in one shot.
 # ---------------------------------------------------------------------------
-plugins-data = ["obscura[duckdb,datafusion]"]
-plugins-finance = ["obscura[coingecko]"]
-plugins-productivity = ["obscura[notion,gws,msgraph]"]
-plugins-observability = ["obscura[datadog]"]
-plugins-social = ["obscura[x-twitter]"]
-plugins-ml = ["obscura[huggingface]"]
+plugins-data = ["obscura-agent[duckdb,datafusion]"]
+plugins-finance = ["obscura-agent[coingecko]"]
+plugins-productivity = ["obscura-agent[notion,gws,msgraph]"]
+plugins-observability = ["obscura-agent[datadog]"]
+plugins-social = ["obscura-agent[x-twitter]"]
+plugins-ml = ["obscura-agent[huggingface]"]
 
 # ---------------------------------------------------------------------------
 # Meta bundles
 # ---------------------------------------------------------------------------
 # Every plugin extra rolled up — pairs with the Dockerfile.full runtime image.
 plugins-all = [
-    "obscura[duckdb,datafusion,huggingface,x-twitter,notion,coingecko,datadog,msgraph,gws]",
+    "obscura-agent[duckdb,datafusion,huggingface,x-twitter,notion,coingecko,datadog,msgraph,gws]",
 ]
 # The "batteries included" target for pip users — server + telemetry + every
 # plugin + every provider. Binary plugin deps (jq, rg, playwright, …) still
 # need the runtime bootstrapper or the Dockerfile.full image.
-full = ["obscura[server,telemetry,a2a,metrics,voice,anthropic,plugins-all]"]
+full = ["obscura-agent[server,telemetry,a2a,metrics,voice,anthropic,plugins-all]"]
 
 # Back-compat alias — older docs and CI jobs reference `--extra providers`.
 # Kept lean; prefer the per-provider / per-plugin extras above.
 providers = [
-    "obscura[anthropic,msgraph,coingecko,notion,datadog,x-twitter]",
+    "obscura-agent[anthropic,msgraph,coingecko,notion,datadog,x-twitter]",
 ]
 
 [project.scripts]
