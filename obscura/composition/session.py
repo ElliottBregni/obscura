@@ -179,6 +179,9 @@ class AgentSession:
     project_hooks: Any = None
     tool_router: Any = None
     browser_bridge: Any = None
+    supervisor: Any = None
+    supervisor_task: Any = None  # asyncio.Task[None] | None
+    kairos_engine: Any = None
 
     # Resource teardown queue (LIFO)
     _resources: list[_Closer] = field(default_factory=_empty_resources)

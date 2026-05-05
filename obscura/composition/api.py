@@ -27,6 +27,7 @@ from obscura.composition.blocks import (
     install_plugin_tools,
     install_project_hooks,
     install_system_tools,
+    install_tool_router,
     install_vector_memory,
 )
 from obscura.composition.core import build_core_session
@@ -55,4 +56,5 @@ async def build_api_session(
     await install_vector_memory(session, config)
     await install_system_tools(session, config)
     await install_project_hooks(session, config)
+    await install_tool_router(session, config)
     return session

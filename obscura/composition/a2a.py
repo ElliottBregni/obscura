@@ -28,7 +28,11 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from obscura.composition.blocks import install_plugin_tools, install_system_tools
+from obscura.composition.blocks import (
+    install_plugin_tools,
+    install_system_tools,
+    install_tool_router,
+)
 from obscura.composition.core import build_core_session
 from obscura.composition.session import AgentSession, SessionConfig
 
@@ -71,6 +75,7 @@ async def build_a2a_session(
     )
     await install_plugin_tools(session, config_with_task)
     await install_system_tools(session, config_with_task)
+    await install_tool_router(session, config_with_task)
 
     if on_confirm is not None:
         # Stash for the caller to forward to stream_loop. Not threaded

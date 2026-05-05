@@ -42,6 +42,10 @@ DRIFT_SYMBOLS = (
     "make_memory_tool_specs",
     # Browser bridge block (composition/blocks/browser_bridge.py)
     "attach_if_running",
+    # Supervisor block (composition/blocks/supervisor.py)
+    "AgentSupervisor",
+    # KAIROS block (composition/blocks/kairos.py)
+    "register_kairos_hooks",
 )
 
 # Files that legitimately use these symbols and are NOT in violation.
@@ -84,6 +88,13 @@ ALLOWLIST = frozenset(
         "obscura/integrations/browser/client.py",
         # Agent.start() builds its own resolver; tracked for migration
         "obscura/agent/agents.py",
+        # AgentSupervisor is defined in this module
+        "obscura/agent/supervisor.py",
+        # register_kairos_hooks is defined in this module
+        "obscura/kairos/supervisor_hooks.py",
+        # Composition supervisor + kairos blocks
+        "obscura/composition/blocks/supervisor.py",
+        "obscura/composition/blocks/kairos.py",
     },
 )
 
