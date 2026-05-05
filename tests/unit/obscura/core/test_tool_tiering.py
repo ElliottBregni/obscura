@@ -1,9 +1,8 @@
 """Tests for obscura.core.tool_tiering.
 
-Verifies the core/deferred split, ordering preservation, and the
-``deferred_listing`` rendering. Backend ``_build_tool_listing`` methods
-import these primitives lazily; integration is covered by the existing
-backend test suites.
+Verifies the core/deferred split, ordering preservation, the
+``deferred_listing`` rendering, and the per-task discovery set used by
+backends to filter their per-turn tool payloads.
 """
 
 from __future__ import annotations
@@ -12,8 +11,13 @@ from typing import Any
 
 from obscura.core.tool_tiering import (
     CORE_TOOL_NAMES,
+    DISCOVERED_TOOLS,
+    bind_discovered_tools,
     deferred_listing,
+    filter_visible,
     is_core,
+    is_visible,
+    mark_discovered,
     split_by_tier,
 )
 from obscura.core.types import ToolSpec
@@ -118,3 +122,87 @@ def test_deferred_listing_uses_first_line_only() -> None:
 
 def test_deferred_listing_empty_input() -> None:
     assert deferred_listing([]) == ""
+
+
+# ---------------------------------------------------------------------------
+# Per-task discovery (DISCOVERED_TOOLS / mark_discovered / is_visible)
+# ---------------------------------------------------------------------------
+
+
+def _reset_discovered() -> None:
+    """Tests start with no discovery context bound."""
+    DISCOVERED_TOOLS.set(None)
+
+
+def test_is_visible_no_context_passes_everything() -> None:
+    """Outside ``bind_discovered_tools``, every tool is treated as visible."""
+    _reset_discovered()
+    assert is_visible("read_text_file") is True  # core
+    assert is_visible("jira_create_issue") is True  # deferred — but no ctx → visible
+
+
+def test_is_visible_inside_context_filters_deferred() -> None:
+    _reset_discovered()
+    with bind_discovered_tools():
+        assert is_visible("read_text_file") is True  # core stays visible
+        assert is_visible("jira_create_issue") is False  # deferred + undiscovered
+
+
+def test_mark_discovered_makes_deferred_visible() -> None:
+    _reset_discovered()
+    with bind_discovered_tools() as discovered:
+        assert is_visible("jira_create_issue") is False
+        mark_discovered("jira_create_issue")
+        assert is_visible("jira_create_issue") is True
+        assert "jira_create_issue" in discovered
+
+
+def test_mark_discovered_outside_context_is_noop() -> None:
+    _reset_discovered()
+    mark_discovered("jira_create_issue")
+    # No exception, and the tool isn't suddenly stored anywhere.
+    assert DISCOVERED_TOOLS.get() is None
+
+
+def test_bind_discovered_tools_isolates_each_block() -> None:
+    _reset_discovered()
+    with bind_discovered_tools():
+        mark_discovered("foo")
+    # After exit, nothing is bound and a fresh bind starts empty.
+    assert DISCOVERED_TOOLS.get() is None
+    with bind_discovered_tools() as second:
+        assert second == set()
+
+
+def test_filter_visible_drops_deferred_keeps_core() -> None:
+    _reset_discovered()
+    tools = [
+        _spec("read_text_file"),       # core — stays
+        _spec("jira_create_issue"),    # deferred — drops
+        _spec("write_text_file"),      # core — stays
+        _spec("postman_run"),          # deferred — drops
+    ]
+    with bind_discovered_tools():
+        visible = filter_visible(tools)
+    assert [t.name for t in visible] == ["read_text_file", "write_text_file"]
+
+
+def test_filter_visible_includes_discovered_deferred() -> None:
+    _reset_discovered()
+    tools = [
+        _spec("read_text_file"),
+        _spec("jira_create_issue"),
+        _spec("postman_run"),
+    ]
+    with bind_discovered_tools():
+        mark_discovered("jira_create_issue")
+        visible = filter_visible(tools)
+    assert [t.name for t in visible] == ["read_text_file", "jira_create_issue"]
+
+
+def test_filter_visible_no_context_returns_all() -> None:
+    """When no discovery context is bound (e.g. tests, direct calls), don't filter."""
+    _reset_discovered()
+    tools = [_spec("read_text_file"), _spec("jira_create_issue")]
+    visible = filter_visible(tools)
+    assert len(visible) == 2

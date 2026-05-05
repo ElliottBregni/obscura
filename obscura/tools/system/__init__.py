@@ -674,14 +674,25 @@ class Registry:
             max_results = 5
         cap = max(1, min(max_results, 50))
 
+        # ``select:`` returns FULL schemas — the model needs ``parameters``
+        # to actually call a deferred tool. Each hit is also marked
+        # discovered so subsequent per-turn tool lists include the tool
+        # for backends that filter by tier.
         if query.startswith("select:"):
+            from obscura.core.tool_tiering import mark_discovered
+
             names = [n.strip() for n in query[7:].split(",") if n.strip()]
-            found: list[dict[str, str]] = []
+            found: list[dict[str, Any]] = []
             for name in names:
                 spec = registry.get(name)
                 if spec is not None:
+                    mark_discovered(str(spec.name))
                     found.append(
-                        {"name": str(spec.name), "description": str(spec.description)},
+                        {
+                            "name": str(spec.name),
+                            "description": str(spec.description),
+                            "parameters": spec.parameters,
+                        },
                     )
             return json.dumps(
                 {
@@ -689,6 +700,11 @@ class Registry:
                     "query": query,
                     "matches": found,
                     "total_tools": len(all_specs),
+                    "hint": (
+                        "Schemas loaded — call the tool by its exact name."
+                        if found
+                        else "No tools matched. Try fuzzy search without 'select:'."
+                    ),
                 },
             )
 
@@ -719,6 +735,13 @@ class Registry:
                 "query": query,
                 "matches": matches,
                 "total_tools": len(all_specs),
+                "hint": (
+                    "These are discovery previews. To actually call a tool, "
+                    "follow up with `tool_search(query='select:<name>')` to "
+                    "load its full schema."
+                    if matches
+                    else "No tools matched."
+                ),
             },
         )
 

@@ -323,13 +323,15 @@ class AgentLoopV2:
             Message(role=Role.USER, content=[ContentBlock(kind="text", text=prompt)])
         )
 
-        # Bind the per-task tool-call log for the duration of this run.
-        # Same primitive used by Copilot/Claude/Codex backends — applied
-        # here so backends that drive their loop via agent_loop_v2 (OpenAI,
-        # LocalLLM, Moonshot, ...) get the same dedup/budget guards.
+        # Bind two per-task ContextVars for the duration of this run:
+        # 1. Stream guards (dedup/budget) — same primitive every backend uses
+        # 2. Discovery set — backends that filter the per-turn tool list
+        #    by tier consult this set so deferred tools surfaced via
+        #    ``tool_search`` become visible in subsequent turns.
         from obscura.core.stream_guards import bind_stream_log
+        from obscura.core.tool_tiering import bind_discovered_tools
 
-        with bind_stream_log():
+        with bind_stream_log(), bind_discovered_tools():
             # Run preflight to ground environment / URL questions BEFORE
             # the model is invoked. Preflight prepends a synthetic system
             # message with tool results so the model has real data in

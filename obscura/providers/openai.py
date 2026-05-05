@@ -795,12 +795,20 @@ class OpenAIBackend(BackendToolHostMixin):
         if self._system_prompt and "instructions" not in req:
             req["instructions"] = self._system_prompt
         if self._tools and "tools" not in req:
+            from obscura.core.tool_tiering import filter_visible
+
             tools_to_send = list(self._tools)
 
             # Apply eval-driven tool routing if a router is configured.
             if self._tool_router is not None:
                 result: RoutingResult = self._tool_router.select(prompt, tools_to_send)
                 tools_to_send = result.tools
+
+            # Phase-2 tier filter: drop deferred-and-undiscovered tools
+            # from the per-turn payload. ``tool_search(select:<name>)``
+            # marks deferred tools discovered, so subsequent turns include
+            # them. No-op when no discovery context is bound.
+            tools_to_send = filter_visible(tools_to_send)
 
             req["tools"] = [
                 ToolCallDefinition(
@@ -936,11 +944,19 @@ class OpenAIBackend(BackendToolHostMixin):
 
         # Register tools as OpenAI function calling format
         if self._tools:
+            from obscura.core.tool_tiering import filter_visible
+
             tools_to_send = list(self._tools)
 
             if self._tool_router is not None:
                 routed: RoutingResult = self._tool_router.select("", tools_to_send)
                 tools_to_send = routed.tools
+
+            # Phase-2 tier filter: drop deferred-and-undiscovered tools
+            # from the per-turn payload. ``tool_search(select:<name>)``
+            # marks deferred tools discovered, so subsequent turns include
+            # them. No-op when no discovery context is bound.
+            tools_to_send = filter_visible(tools_to_send)
 
             tool_defs = [
                 ToolCallDefinition(
