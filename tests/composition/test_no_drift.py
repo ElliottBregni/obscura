@@ -88,8 +88,6 @@ ALLOWLIST = frozenset(
         "obscura/cli/eval_commands.py",
         # Browser bridge module: attach_if_running is defined here
         "obscura/integrations/browser/client.py",
-        # Agent.start() builds its own resolver; tracked for migration
-        "obscura/agent/agents.py",
         # AgentSupervisor is defined in this module
         "obscura/agent/supervisor.py",
         # register_kairos_hooks is defined in this module

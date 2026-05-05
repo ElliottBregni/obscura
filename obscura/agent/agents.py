@@ -428,7 +428,10 @@ class Agent:
             message="Starting backend client and tool providers.",
         )
 
-        # Pre-discover plugin specs for capability resolution BEFORE client
+        # PluginLoader is also needed downstream for ToolBroker scoped/
+        # lazy loading (load_scoped / load_lazy / load_all_enabled) — it's
+        # a separate concern from capability resolution. Capability
+        # discovery itself goes through the shared composition helper.
         plugin_loader = None
         try:
             from obscura.plugins.loader import PluginLoader
@@ -437,42 +440,28 @@ class Agent:
         except Exception:
             logger.debug("suppressed exception in start", exc_info=True)
 
-        # Build capability resolver from discovered specs (before client creation
-        # so skill gating is active when the system prompt is assembled)
-        capability_resolver = None
+        # Discover capabilities + build resolver via the shared helper.
+        # Same logic as obscura.composition.blocks.install_plugin_tools
+        # uses, eliminating the historical drift between the two paths.
+        # We need the resolver BEFORE client creation so skill gating is
+        # active when the system prompt is assembled (ContextLoader reads
+        # capability_resolver to filter skills).
+        from obscura.composition.capabilities import discover_capabilities
+
+        resolver = discover_capabilities(grantee_id=self.id)
+        capability_resolver = resolver
         allowed_tools: set[str] | None = None
         cap_index: Any = None
-        try:
-            from obscura.plugins.capabilities import CapabilityResolver
-            from obscura.plugins.registries.capability_index import CapabilityIndex
-            from obscura.plugins.registries.tool_index import ToolIndex
 
-            cap_index = CapabilityIndex()
-            tool_idx = ToolIndex()
-
-            if plugin_loader is not None:
-                for spec in (
-                    plugin_loader.discover_builtins() + plugin_loader.discover_local()
-                ):
-                    for cap in spec.capabilities:
-                        cap_index.register(cap, spec.id)
-                    for tool_contrib in spec.tools:
-                        tool_idx.register(tool_contrib, spec.id)
-
-            resolver = CapabilityResolver(cap_index, tool_idx)
-            resolver.grant_defaults(self.id)
-
+        if resolver is not None:
             for cap_id in self.config.capabilities.get("grant", []):
                 resolver.grant(self.id, cap_id, granted_by="manifest")
             for cap_id in self.config.capabilities.get("deny", []):
                 resolver.deny(self.id, cap_id, denied_by="manifest")
-
             allowed_tools = resolver.resolve_tool_names(self.id)
+            cap_index = resolver.capability_index
             self._capability_resolver = resolver
-            capability_resolver = resolver
-        except Exception as exc:
-            logger.debug("Capability resolver not available: %s", exc)
-            allowed_tools = None
+        else:
             self._capability_resolver = None
 
         self._client = ObscuraClient(

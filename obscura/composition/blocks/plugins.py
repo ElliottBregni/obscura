@@ -74,28 +74,11 @@ async def install_plugin_tools(
         return
 
     # ── 1. Build capability resolver (used by tool router + system tools) ──
-    try:
-        from obscura.plugins.capabilities import CapabilityResolver
-        from obscura.plugins.loader import PluginLoader
-        from obscura.plugins.registries.capability_index import CapabilityIndex
-        from obscura.plugins.registries.tool_index import ToolIndex
+    from obscura.composition.capabilities import discover_capabilities
 
-        loader = PluginLoader()
-        cap_index = CapabilityIndex()
-        tool_idx = ToolIndex()
-
-        for spec in loader.discover_builtins() + loader.discover_local():
-            for cap in spec.capabilities:
-                cap_index.register(cap, spec.id)
-            for tool_contrib in spec.tools:
-                tool_idx.register(tool_contrib, spec.id)
-
-        resolver = CapabilityResolver(cap_index, tool_idx)
-        resolver.grant_defaults(session.session_id)
+    resolver = discover_capabilities(grantee_id=session.session_id)
+    if resolver is not None:
         session.capability_resolver = resolver
-    except Exception:
-        logger.exception("install_plugin_tools: capability resolver build failed")
-        # Continue without resolver — plugin tools still register
 
     # ── 2. Discover + filter plugin tool specs ─────────────────────────
     compiled_ws = config.extras.get("compiled_ws")
