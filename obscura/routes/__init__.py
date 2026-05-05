@@ -20,6 +20,7 @@ from obscura.routes.vector_memory import router as vector_memory_router
 from obscura.routes.webhooks import router as webhooks_router
 from obscura.routes.websockets import router as websockets_router
 from obscura.routes.goals import router as goals_router
+from obscura.routes.wizard import router as wizard_router
 from obscura.routes.workflows import router as workflows_router
 
 all_routers = [
@@ -44,4 +45,5 @@ all_routers = [
     capabilities_router,
     models_router,
     skills_router,
+    wizard_router,
 ]

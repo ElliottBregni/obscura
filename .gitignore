@@ -136,4 +136,5 @@ statrt_a2a.sh
 CLAUDE.md
 README.playwright.md
 SETUP.md
-docker-compose.yml
+docker-compose.ymlbuild/
+obscura_agent.egg-info/

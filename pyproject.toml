@@ -56,6 +56,7 @@ dev = [
     "ruff>=0.8.0",
     "pytest-cov>=6.0",
 ]
+web = ["playwright>=1.50.0"]
 server = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -137,6 +138,7 @@ providers = [
 obscura = "obscura.cli:main"
 obscura-mcp = "obscura.mcp_server.__main__:main"
 obscura-auth = "obscura.cli.auth_commands:auth_group"
+obscura-scrape = "obscura.cli.scrape_cli:main"
 vault-gen = "obscura.vault_gen.cli:main"
 
 [dependency-groups]
@@ -153,6 +155,7 @@ dev = [
     "pytest-cov>=6.0",
     "tomli-w>=1.0",
     "respx>=0.21",
+    "testcontainers[postgres]>=4.0",
 ]
 
 # Package discovery — auto-find every `obscura.*` package with __init__.py.

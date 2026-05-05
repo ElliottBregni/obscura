@@ -1,11 +1,12 @@
 """obscura.cli._guide_sync — Startup workspace-guide file sync.
 
-Keeps OBSCURA.md <-> CLAUDE.md in sync and writes provider-local permission
-bypass settings so Obscura's policy engine is the single source of truth.
+Keeps OBSCURA.md <-> AGENTS.md in sync (cross-tool standard used by Codex,
+Cursor, Aider, etc.) and writes provider-local permission bypass settings
+so Obscura's policy engine is the single source of truth.
 
 Public API
 ----------
-sync_guide_files()        -- OBSCURA.md <-> CLAUDE.md bi-directional sync
+sync_guide_files()        -- OBSCURA.md <-> AGENTS.md bi-directional sync
 sync_provider_settings()  -- Write .claude/settings.local.json bypass file
 """
 
@@ -19,29 +20,39 @@ _log = logging.getLogger("obscura.cli")
 
 
 def sync_guide_files() -> None:
-    """Keep OBSCURA.md and CLAUDE.md in sync at startup.
+    """Keep OBSCURA.md and AGENTS.md in sync at startup.
 
-    Rules:
-      - OBSCURA.md exists -> overwrite CLAUDE.md with its content.
-      - OBSCURA.md missing, CLAUDE.md exists -> create OBSCURA.md from CLAUDE.md.
-      - Neither exists -> no-op.
+    AGENTS.md is the cross-tool standard (Codex, Cursor, Aider, etc.) that
+    pairs with OBSCURA.md. Rules:
+      - OBSCURA.md exists -> overwrite AGENTS.md with its content.
+      - OBSCURA.md missing, AGENTS.md exists -> create OBSCURA.md from it.
+      - Both missing, legacy CLAUDE.md exists -> bootstrap OBSCURA.md +
+        AGENTS.md from CLAUDE.md (one-time migration; CLAUDE.md is left
+        untouched for tools that still consume it).
+      - Nothing exists -> no-op.
 
     Only operates on the current working directory.  Failures are
     silently logged -- this must never block startup.
     """
     cwd = Path.cwd()
     obscura_md = cwd / "OBSCURA.md"
+    agents_md = cwd / "AGENTS.md"
     claude_md = cwd / "CLAUDE.md"
 
     try:
         if obscura_md.is_file():
             content = obscura_md.read_text(encoding="utf-8")
-            claude_md.write_text(content, encoding="utf-8")
-            _log.debug("Synced CLAUDE.md <- OBSCURA.md")
+            agents_md.write_text(content, encoding="utf-8")
+            _log.debug("Synced AGENTS.md <- OBSCURA.md")
+        elif agents_md.is_file():
+            content = agents_md.read_text(encoding="utf-8")
+            obscura_md.write_text(content, encoding="utf-8")
+            _log.debug("Created OBSCURA.md <- AGENTS.md")
         elif claude_md.is_file():
             content = claude_md.read_text(encoding="utf-8")
             obscura_md.write_text(content, encoding="utf-8")
-            _log.debug("Created OBSCURA.md <- CLAUDE.md")
+            agents_md.write_text(content, encoding="utf-8")
+            _log.debug("Bootstrapped OBSCURA.md + AGENTS.md from legacy CLAUDE.md")
     except OSError as exc:
         _log.debug("Guide file sync failed: %s", exc)
 

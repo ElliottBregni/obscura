@@ -41,6 +41,7 @@ from obscura.cli.bootstrap import (
     _discover_mcp,  # pyright: ignore[reportPrivateUsage]
 )
 from obscura.cli.commands import (
+    COMMANDS,
     COMPLETIONS,
     REPLContext,
     estimate_effective_context_tokens,
@@ -85,6 +86,7 @@ from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summar
 from obscura.kairos.engine import is_kairos_enabled
 from obscura.kairos.frustration import FrustrationDetector
 from obscura.tools.system import Session
+from obscura.tools.system._repl_commands import SlashBridge
 from obscura.voice.session import VoiceSession
 
 _log = logging.getLogger("obscura.cli")
@@ -153,6 +155,15 @@ async def repl(
     # which runs inside build_repl_session. permission_mode is wired
     # inline below because its handler must mutate REPLContext (built
     # only after the session is constructed).
+    #
+    # Prompt composition (memory + preferences + user_memory + active
+    # goals + channels + KAIROS + coordinator + WIZARD profile) moved to
+    # obscura.composition.blocks.repl_prompt.install_repl_prompt_sections.
+    # Tool gathering (system_tools + memory_tools + worktree/task/goal/
+    # profile/lsp/browser/plugins) moved to
+    # obscura.composition.blocks.system_tools.install_system_tools and
+    # obscura.composition.blocks.plugins.install_plugin_tools. All run
+    # inside build_repl_session() below.
     if tools_enabled:
         try:
 
@@ -183,6 +194,18 @@ async def repl(
     }
     if compiled_ws is not None:
         _session_extras["compiled_ws"] = compiled_ws
+
+    # Resolve active wizard profile to thread skill_filter through
+    # SessionConfig.extras → install_skill_context (composition path).
+    # Empty / None list disables filtering — load every discovered skill.
+    try:
+        from obscura.wizard import WizardService as _Wiz
+
+        _active_profile = _Wiz().resolve_active_profile()
+        if _active_profile is not None and _active_profile.skills:
+            _session_extras["skill_filter"] = list(_active_profile.skills)
+    except Exception:
+        _log.debug("skill_filter resolution failed", exc_info=True)
 
     _session_config = SessionConfig(
         backend=backend,
@@ -244,6 +267,21 @@ async def repl(
             context_router=_session.context_router,
             turn_classifier=_session.turn_classifier,
         )
+
+        # Install slash-command bridge so agent loop tools can run /init etc.
+        try:
+
+            async def _run_slash(name: str, arguments: str) -> tuple[str, str | None]:
+                handler = COMMANDS.get(name)
+                if handler is None:
+                    raise KeyError(name)
+                with console.capture() as cap:
+                    ret = await handler(arguments, ctx)
+                return cap.get(), ret
+
+            SlashBridge.set_callback(_run_slash)
+        except Exception:
+            _log.debug("suppressed exception in repl", exc_info=True)
 
         # --- Single-shot mode ---
         if prompt:
@@ -919,11 +957,13 @@ async def repl(
                             )
                             continue
                         _pi(f"@{resolved.name}: {resolved.description}")
-                        blocks.append(resolved.body)
+                        # Expand any nested $skill / @command refs in the body
+                        blocks.append(ctx.expand_inline_references(resolved.body))
                         if resolved.meta.tools_enabled:
                             _cmd_allowed_tools = True
                     elif remaining:
-                        blocks.append(remaining)
+                        # Expand any inline $skill / @command / *@command refs
+                        blocks.append(ctx.expand_inline_references(remaining))
 
                     user_input = "\n\n---\n\n".join(blocks)
 

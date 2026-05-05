@@ -21,10 +21,8 @@ import copy
 import logging
 import tomllib
 import warnings
-from typing import TYPE_CHECKING, Any, cast
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +188,7 @@ def load_merged_agents(
         if not name:
             continue
         entry.setdefault("enabled", False)
+        _resolve_prompt_path(entry, home)
         merged[name] = entry
 
     # Primary agents override catalog; enabled defaults to True.
@@ -198,12 +197,58 @@ def load_merged_agents(
         if not name:
             continue
         entry.setdefault("enabled", True)
+        _resolve_prompt_path(entry, home)
         merged[name] = entry
 
     if not include_disabled:
         merged = {n: c for n, c in merged.items() if c.get("enabled", True)}
 
     return merged
+
+
+_PROMPT_PATH_EXTENSIONS = (".md", ".markdown", ".txt")
+
+
+def _resolve_prompt_path(entry: dict[str, Any], home: Path) -> None:
+    """If ``entry['system_prompt']`` points to a markdown file, replace it with the file's contents.
+
+    Detection: the value is a single-line string ending in ``.md`` /
+    ``.markdown`` / ``.txt`` and the file (resolved relative to *home*, or
+    absolute) exists. Anything else is left untouched as inline prompt text.
+
+    On read failure or missing file, the original string is preserved so the
+    user can see "/path/to/missing.md" in the agent card and figure out the
+    typo themselves; we log a warning rather than silently swallowing it.
+    """
+    raw = entry.get("system_prompt")
+    if not isinstance(raw, str):
+        return
+    candidate = raw.strip()
+    if not candidate or "\n" in candidate:
+        return
+    if not candidate.lower().endswith(_PROMPT_PATH_EXTENSIONS):
+        return
+
+    path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = (home / path).resolve()
+
+    if not path.is_file():
+        logger.warning(
+            "agent %r system_prompt looks like a path but file not found: %s",
+            entry.get("name", "<unknown>"),
+            path,
+        )
+        return
+    try:
+        entry["system_prompt"] = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logger.warning(
+            "agent %r system_prompt path %s could not be read: %s",
+            entry.get("name", "<unknown>"),
+            path,
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------

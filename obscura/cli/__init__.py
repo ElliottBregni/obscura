@@ -21,7 +21,7 @@ The bulk of the logic lives in focused sub-modules that can be imported and
 tested independently:
 
   _env_loader.py   -- .env / secrets materialisation
-  _guide_sync.py   -- OBSCURA.md <-> CLAUDE.md sync + provider settings
+  _guide_sync.py   -- OBSCURA.md <-> AGENTS.md sync + provider settings
   _tool_confirm.py -- TUI tool-confirm, file-change tracking, plan parsing
   _daemon.py       -- iMessage daemon lifecycle
   _send.py         -- send_message (streaming + retry)
@@ -194,7 +194,7 @@ def main(
         if h.__class__.__name__ == "InfoHandler":
             h.setLevel(level)
 
-    # Sync OBSCURA.md <-> CLAUDE.md before anything else touches the workspace.
+    # Sync OBSCURA.md <-> AGENTS.md before anything else touches the workspace.
     sync_guide_files()
 
     # Disable provider permission layers.
@@ -521,6 +521,128 @@ def template_inspect(name: str) -> None:
 from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E402
 
 main.add_command(_kairos_group)
+
+
+# ---------------------------------------------------------------------------
+# Wizard CLI — registered as `obscura wizard [show|run]`
+# ---------------------------------------------------------------------------
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def wizard(ctx: click.Context) -> None:
+    """Interactive config wizard (profiles, plugins, MCP, capabilities)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from obscura.wizard.tui import run as _run_wizard
+
+    raise SystemExit(_run_wizard())
+
+
+@wizard.command("show")
+@click.option("--json", "as_json", is_flag=True, help="Emit the snapshot as JSON.")
+def wizard_show(as_json: bool) -> None:
+    """Print the current wizard snapshot to stdout (no interaction)."""
+    from obscura.wizard.service import WizardService
+
+    snap = WizardService().snapshot()
+    if as_json:
+        click.echo(snap.model_dump_json(indent=2))
+        return
+    click.echo(f"Active profile: {snap.active.profile}")
+    click.echo(f"Profiles ({len(snap.profiles)}):")
+    for p in snap.profiles:
+        marker = "*" if p.name == snap.active.profile else " "
+        click.echo(
+            f"  {marker} {p.name:20s} backend={p.backend or '-'} "
+            f"prompts={len(p.prompts)} caps={len(p.capabilities)}",
+        )
+    if snap.workspaces:
+        click.echo(f"Workspace bindings ({len(snap.workspaces)}):")
+        for w in snap.workspaces:
+            click.echo(f"  {w.path} -> {w.profile}")
+
+
+# ---------------------------------------------------------------------------
+# Scrape external configs — `obscura scrape-configs`
+# ---------------------------------------------------------------------------
+
+
+@main.command("scrape-configs")
+@click.option(
+    "--apply",
+    "do_apply",
+    is_flag=True,
+    default=False,
+    help="Actually copy/merge. Without this flag, only previews.",
+)
+@click.option(
+    "--source",
+    "source_name",
+    default=None,
+    help="Limit to one source label (e.g. 'claude', 'kiro', 'codex-toml').",
+)
+def scrape_configs(do_apply: bool, source_name: str | None) -> None:
+    """Scrape skills + MCPs from external agent configs into ~/.obscura.
+
+    Sources scanned: ~/.claude, ~/.copilot, ~/.codex, ~/.config/opencode,
+    ~/.kiro, and Claude Desktop. Duplicates by name are skipped.
+
+    By default this runs in preview mode — pass --apply to make changes.
+    """
+    from obscura.core.scrape_configs import apply as _apply, known_sources, scan
+
+    sources = known_sources()
+    if source_name:
+        sources = [s for s in sources if s.label == source_name]
+        if not sources:
+            click.echo(
+                f"No source labelled '{source_name}'. Known: "
+                + ", ".join(s.label for s in known_sources()),
+                err=True,
+            )
+            raise SystemExit(1)
+
+    report = scan(sources=sources)
+
+    click.echo("=== Skills ===")
+    if report.skills_new:
+        for src, entry, target in report.skills_new:
+            click.echo(f"  + {target:30s}  ← {src.label} ({entry})")
+    else:
+        click.echo("  (none new)")
+    if report.skills_skipped:
+        click.echo(f"  skipped {len(report.skills_skipped)} duplicate(s)")
+
+    click.echo("\n=== MCPs ===")
+    if report.mcps_new:
+        for src, name, cfg in report.mcps_new:
+            transport = cfg.get("transport", "?")
+            click.echo(f"  + {name:20s}  [{transport}]  ← {src.label}")
+    else:
+        click.echo("  (none new)")
+    if report.mcps_skipped:
+        click.echo(f"  skipped {len(report.mcps_skipped)} duplicate(s)")
+
+    if report.sources_missing:
+        click.echo(
+            "\n(missing: " + ", ".join(s.label for s in report.sources_missing) + ")",
+        )
+    if report.errors:
+        click.echo("\nErrors:")
+        for src, msg in report.errors:
+            click.echo(f"  ! {src.label}: {msg}", err=True)
+
+    if not report.has_changes:
+        click.echo("\nNothing to import.")
+        return
+
+    if not do_apply:
+        click.echo("\nPreview only. Re-run with --apply to import.")
+        return
+
+    skills_added, mcps_added = _apply(report)
+    click.echo(f"\nImported: {skills_added} skill(s), {mcps_added} MCP server(s).")
 
 
 # Backwards-compat aliases added by test harness

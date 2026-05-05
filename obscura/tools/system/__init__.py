@@ -32,8 +32,35 @@ from obscura.tools.system._git import Git
 from obscura.tools.system._grep import Grep
 from obscura.tools.system._http import Http
 from obscura.tools.system._mcp import Mcp
+from obscura.tools.system._memory import (
+    list_memory_namespaces as list_memory_namespaces,
+)
+from obscura.tools.system._memory import (
+    recall_memory as recall_memory,
+)
+from obscura.tools.system._memory import (
+    recall_semantic as recall_semantic,
+)
+from obscura.tools.system._memory import (
+    remember_memory as remember_memory,
+)
+from obscura.tools.system._memory import (
+    vector_health as vector_health,
+)
 from obscura.tools.system._policy import Policy
 from obscura.tools.system._process import Process
+from obscura.tools.system._repl_commands import (
+    SlashBridge as SlashBridge,
+)
+from obscura.tools.system._repl_commands import (
+    list_commands as list_commands,
+)
+from obscura.tools.system._repl_commands import (
+    run_at_command as run_at_command,
+)
+from obscura.tools.system._repl_commands import (
+    run_slash_command as run_slash_command,
+)
 from obscura.tools.system._sandbox import Sandbox
 from obscura.tools.system._session import Session
 from obscura.tools.system._shared import (
@@ -810,6 +837,18 @@ def _aggregate_tool_specs() -> list[ToolSpec]:
         # Sleep & Config
         cast("ToolSpec", cast("Any", Session.sleep).spec),
         cast("ToolSpec", cast("Any", config_tool).spec),
+        # Slash + @ command bridges (REPL-only for slash; @command works anywhere)
+        cast("ToolSpec", cast("Any", run_slash_command).spec),
+        cast("ToolSpec", cast("Any", run_at_command).spec),
+        cast("ToolSpec", cast("Any", list_commands).spec),
+        # Lazy memory: keyword (FTS5) + semantic (vector) recall, both
+        # on-demand. Writes via remember_memory. vector_health probes the
+        # configured Qdrant / pgvector / sqlite-vss backend.
+        cast("ToolSpec", cast("Any", recall_memory).spec),
+        cast("ToolSpec", cast("Any", remember_memory).spec),
+        cast("ToolSpec", cast("Any", list_memory_namespaces).spec),
+        cast("ToolSpec", cast("Any", recall_semantic).spec),
+        cast("ToolSpec", cast("Any", vector_health).spec),
     ]
     # Append any dynamically created tools
     for spec in Sandbox.dynamic_tools.values():
