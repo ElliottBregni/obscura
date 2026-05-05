@@ -1993,7 +1993,7 @@ requires-dist = [
     { name = "obscura", extras = ["server", "telemetry", "a2a", "metrics", "voice", "anthropic", "plugins-all"], marker = "extra == 'full'" },
     { name = "obscura", extras = ["x-twitter"], marker = "extra == 'plugins-social'" },
     { name = "openai", specifier = ">=1.0.0" },
-    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&rev=rust-v0.128.0" },
+    { name = "openai-codex-app-server-sdk", git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython" },
     { name = "openai-whisper", marker = "extra == 'voice'", specifier = ">=20240930" },
     { name = "opentelemetry-api", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'telemetry'", specifier = ">=1.20.0" },
@@ -2096,7 +2096,7 @@ wheels = [
 [[package]]
 name = "openai-codex-app-server-sdk"
 version = "0.116.0a1"
-source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython&rev=rust-v0.128.0#e4310be51f617f5e60382038fa9cbf53a2429ca4" }
+source = { git = "https://github.com/openai/codex.git?subdirectory=sdk%2Fpython#67849d950d843c954102adb0db0e11f993aefdb7" }
 dependencies = [
     { name = "pydantic" },
 ]

@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
@@ -976,12 +977,12 @@ class CodexBackend(BackendToolHostMixin):
         try:
             mod = importlib.import_module(_SDK_MODULE)
         except ImportError as exc:
+            py_exe = sys.executable
             msg = (
-                "Official OpenAI Codex SDK not found. Install the `codex` extra "
-                "to enable this backend: `pipx install 'obscura[codex]'` "
-                "(or `pipx inject obscura "
-                "'openai-codex-app-server-sdk @ git+https://github.com/openai/codex.git#subdirectory=sdk/python'` "
-                "into an existing install). See https://developers.openai.com/codex/sdk. "
+                "Official OpenAI Codex SDK not found. Install with: "
+                f"`{py_exe} -m pip install "
+                "openai-codex-app-server-sdk @ git+https://github.com/openai/codex.git#subdirectory=sdk/python`. "
+                "See https://developers.openai.com/codex/sdk for details. "
                 f"Import error: {exc}"
             )
             raise RuntimeError(msg) from exc
