@@ -25,7 +25,7 @@ from obscura.core.enums.protocol import MCPTransport
 from obscura.core.llm_cache import LLMCache
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.retry import with_retry
-from obscura.core.throttle import ThrottledBackend, wrap_if_enabled
+from obscura.core.throttle import ThrottledBackend
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
 from obscura.core.enums.agent import AgentEventKind
@@ -43,13 +43,7 @@ from obscura.core.types import (
     ToolSpec,
 )
 from obscura.integrations.mcp.types import MCPConnectionConfig
-from obscura.providers.claude import ClaudeBackend
-from obscura.providers.codex import CodexBackend
-from obscura.providers.copilot import CopilotBackend
-from obscura.providers.localllm import LocalLLMBackend
 from obscura.providers.mcp_backend import MCPBackend
-from obscura.providers.moonshot import MoonshotBackend
-from obscura.providers.openai import OpenAIBackend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -820,68 +814,26 @@ class ObscuraClient:
         streaming: bool,
         tool_policy: ToolPolicy | None = None,
     ) -> BackendProtocol:
-        """Instantiate the appropriate backend, wrapped in the throttle gate."""
-        instance: BackendProtocol
-        backend_name: str
+        """Instantiate the appropriate backend, wrapped in the throttle gate.
 
-        if backend == Backend.COPILOT:
-            instance = CopilotBackend(
-                auth=auth,
-                model=model,
-                system_prompt=system_prompt,
-                mcp_servers=mcp_servers,
-                streaming=streaming,
-                tool_policy=tool_policy,
-            )
-            backend_name = "copilot"
-        elif backend == Backend.CLAUDE:
-            instance = ClaudeBackend(
-                auth=auth,
-                model=model,
-                system_prompt=system_prompt,
-                mcp_servers=mcp_servers,
-                permission_mode=permission_mode,
-                cwd=cwd,
-                tool_policy=tool_policy,
-            )
-            backend_name = "claude"
-        elif backend == Backend.LOCALLLM:
-            instance = LocalLLMBackend(
-                auth=auth,
-                model=model,
-                system_prompt=system_prompt,
-                mcp_servers=mcp_servers,
-            )
-            backend_name = "localllm"
-        elif backend == Backend.OPENAI:
-            instance = OpenAIBackend(
-                auth=auth,
-                model=model,
-                system_prompt=system_prompt,
-                mcp_servers=mcp_servers,
-            )
-            backend_name = "openai"
-        elif backend == Backend.CODEX:
-            instance = CodexBackend(
-                auth=auth,
-                model=model,
-                system_prompt=system_prompt,
-                mcp_servers=mcp_servers,
-            )
-            backend_name = "codex"
-        elif backend == Backend.MOONSHOT:
-            instance = MoonshotBackend(
-                auth=auth,
-                model=model,
-                system_prompt=system_prompt,
-                mcp_servers=mcp_servers,
-            )
-            backend_name = "moonshot"
-        else:
-            msg = f"Unknown backend: {backend}"
-            raise ValueError(msg)
+        Backwards-compat wrapper. The real implementation now lives in
+        ``obscura.composition.backend_factory.create_backend`` so the
+        composition layer can build backends without going through
+        ObscuraClient.
+        """
+        from obscura.composition.backend_factory import create_backend
 
-        return wrap_if_enabled(instance, backend_name=backend_name, auth=auth)
+        return create_backend(
+            backend=backend,
+            auth=auth,
+            model=model,
+            system_prompt=system_prompt,
+            mcp_servers=mcp_servers,
+            permission_mode=permission_mode,
+            cwd=cwd,
+            streaming=streaming,
+            tool_policy=tool_policy,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 from obscura.composition.blocks import (
     install_a2a_input_bridge,
     install_plugin_tools,
+    install_skill_context,
     install_system_tools,
     install_tool_router,
 )
@@ -83,6 +84,7 @@ async def build_a2a_session(
     )
     await install_plugin_tools(session, config_with_task)
     await install_system_tools(session, config_with_task)
+    await install_skill_context(session, config_with_task)
     await install_a2a_input_bridge(
         session,
         ask_user=ask_user,

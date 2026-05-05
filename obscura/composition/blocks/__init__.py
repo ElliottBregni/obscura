@@ -22,6 +22,7 @@ from obscura.composition.blocks.project_hooks import install_project_hooks
 from obscura.composition.blocks.repl_callbacks import install_repl_callbacks
 from obscura.composition.blocks.repl_prompt import install_repl_prompt_sections
 from obscura.composition.blocks.session_registration import install_session_registration
+from obscura.composition.blocks.skill_context import install_skill_context
 from obscura.composition.blocks.supervisor import install_supervisor
 from obscura.composition.blocks.system_tools import install_system_tools
 from obscura.composition.blocks.tool_router import install_tool_router
@@ -38,6 +39,7 @@ __all__ = [
     "install_repl_callbacks",
     "install_repl_prompt_sections",
     "install_session_registration",
+    "install_skill_context",
     "install_supervisor",
     "install_system_tools",
     "install_tool_router",

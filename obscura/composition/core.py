@@ -98,7 +98,12 @@ async def build_core_session(
         auth=auth,
         host_callbacks=callbacks,
         hooks=hooks,
-        inject_claude_context=config.inject_claude_context,
+        # Composition surfaces install skill context via the
+        # install_skill_context block AFTER core build (so
+        # capability_resolver from install_plugin_tools is available).
+        # ObscuraClient's own inject path stays for non-composition
+        # callers (Agent.start, direct SDK use).
+        inject_claude_context=False,
     )
 
     # 3. Start the client (connects MCP servers, prepares backend)
