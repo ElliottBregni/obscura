@@ -78,8 +78,7 @@ async def install_mcp_servers(
 
     if not mcp_tools:
         logger.warning(
-            "MCP servers configured but no tools registered. "
-            "Connection errors: %s",
+            "MCP servers configured but no tools registered. Connection errors: %s",
             mcp_backend.connection_errors,
         )
 

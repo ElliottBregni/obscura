@@ -123,7 +123,9 @@ async def build_repl_session(
     await install_system_tools(session, config)
     await install_project_hooks(session, config)
     await install_repl_prompt_sections(session, config)
-    await install_skill_context(session, config)  # after prompt_sections: wraps composed prompt
+    await install_skill_context(
+        session, config
+    )  # after prompt_sections: wraps composed prompt
     await install_repl_callbacks(session, config)
     await install_browser_bridge(session, config)
     await install_supervisor(session, config)

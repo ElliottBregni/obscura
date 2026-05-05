@@ -91,6 +91,7 @@ async def install_kairos_engine(
 
     # Register teardown — the engine has stop() (sync or async)
     if hasattr(engine, "stop"):
+
         async def _stop_engine() -> None:
             res = engine.stop()
             if hasattr(res, "__await__"):

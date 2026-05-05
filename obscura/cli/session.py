@@ -1438,7 +1438,10 @@ class ObscuraSession:
             _score_index = ToolScoreIndex()
 
             comp_session = getattr(self, "_composition_session", None)
-            if comp_session is not None and comp_session.capability_resolver is not None:
+            if (
+                comp_session is not None
+                and comp_session.capability_resolver is not None
+            ):
                 _cap_index = comp_session.capability_resolver.capability_index
             else:
                 # Plugins block opted out — empty index keeps router construction clean

@@ -432,7 +432,9 @@ class AgentSession:
             try:
                 db_path = resolve_obscura_home() / "events.db"
                 initial_messages = load_session_messages(
-                    sid, db_path, max_turns=5,
+                    sid,
+                    db_path,
+                    max_turns=5,
                 )
             except Exception:
                 logger.debug("stream_loop: history load failed", exc_info=True)
@@ -441,6 +443,7 @@ class AgentSession:
         backend = self.backend
         loop_confirm = on_confirm
         if on_confirm is not None and isinstance(backend, ConfirmationCapable):
+
             def _wrap_confirm(name: str, inp: dict[str, Any]) -> bool:
                 result = on_confirm(
                     ToolCallInfo(tool_use_id="", name=name, input=inp),
@@ -524,7 +527,10 @@ class AgentSession:
             from obscura.core.llm_cache import LLMCache
 
             cache_key = LLMCache.make_key(
-                backend_name, model, sys_prompt, prompt,
+                backend_name,
+                model,
+                sys_prompt,
+                prompt,
             )
             cached = cache.get(cache_key)
             if cached is not None:
@@ -571,7 +577,8 @@ class AgentSession:
             circuit = self._circuit_registry.get(backend_name)
             if not circuit.allow_request():
                 raise CircuitOpenError(
-                    circuit.name, circuit.time_until_half_open(),
+                    circuit.name,
+                    circuit.time_until_half_open(),
                 )
             try:
                 async for chunk in backend.stream(prompt, **kwargs):

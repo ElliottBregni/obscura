@@ -167,7 +167,8 @@ async def build_core_session(
     # 3. Identity / capability token (drives capability gate + tier prompt)
     capability_token = generate_identity_token(user, sid)
     effective_prompt = maybe_inject_tier_prompt(
-        capability_token, config.system_prompt,
+        capability_token,
+        config.system_prompt,
     )
 
     # 4. Build tool registry, pre-register caller-supplied tools

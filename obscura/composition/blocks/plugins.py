@@ -93,7 +93,8 @@ async def install_plugin_tools(
 
         if ws_include or ws_exclude:
             plugin_specs: list[Any] = get_filtered_builtin_tool_specs(
-                ws_include, ws_exclude,
+                ws_include,
+                ws_exclude,
             )
         else:
             plugin_specs = get_all_builtin_tool_specs()

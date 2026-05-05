@@ -75,8 +75,13 @@ async def install_browser_bridge(
     session.browser_bridge = bridge_client
 
     # Register for teardown so the Unix socket closes on session exit
-    if hasattr(bridge_client, "aclose") or hasattr(bridge_client, "close") or hasattr(
-        bridge_client, "__aexit__",
+    if (
+        hasattr(bridge_client, "aclose")
+        or hasattr(bridge_client, "close")
+        or hasattr(
+            bridge_client,
+            "__aexit__",
+        )
     ):
         session.register_resource(bridge_client, name="browser_bridge")
 

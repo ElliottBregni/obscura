@@ -82,7 +82,9 @@ async def install_system_tools(
             else:
                 skipped += 1
     except Exception:
-        logger.debug("install_system_tools: get_system_tool_specs failed", exc_info=True)
+        logger.debug(
+            "install_system_tools: get_system_tool_specs failed", exc_info=True
+        )
 
     # Memory tools — only if vector_store is configured AND user is set
     if session.vector_store is not None:

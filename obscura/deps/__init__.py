@@ -76,7 +76,8 @@ class ClientFactory:
 
         effective_oauth_token = oauth_github_token
         if effective_oauth_token and is_oauth_token_blocked(
-            user.user_id, effective_oauth_token,
+            user.user_id,
+            effective_oauth_token,
         ):
             logger.debug(
                 "Dropping OAuth GitHub token for user %s — Copilot 403 cached",

@@ -77,7 +77,9 @@ async def install_project_hooks(
                 context_router.update_signals_from_event(event)
                 tool_router = session.tool_router
                 if tool_router is not None and context_router.signals.file_paths:
-                    tool_router.set_file_context(list(context_router.signals.file_paths))
+                    tool_router.set_file_context(
+                        list(context_router.signals.file_paths)
+                    )
             except Exception:
                 logger.debug("channel_tool_signal hook failed", exc_info=True)
 

@@ -1002,7 +1002,9 @@ async def repl(
                     try:
                         exc = t.exception()
                     except Exception:
-                        _log.debug("suppressed exception in repl task callback", exc_info=True)
+                        _log.debug(
+                            "suppressed exception in repl task callback", exc_info=True
+                        )
                         return
                     if exc is not None:
                         _log.error("chat turn failed", exc_info=exc)

@@ -90,7 +90,9 @@ async def install_repl_prompt_sections(
         if memory_context:
             custom_sections.append(memory_context)
     except Exception:
-        logger.debug("install_repl_prompt_sections: load_obscura_memory failed", exc_info=True)
+        logger.debug(
+            "install_repl_prompt_sections: load_obscura_memory failed", exc_info=True
+        )
 
     # User identity & preferences
     try:
@@ -100,7 +102,9 @@ async def install_repl_prompt_sections(
             if prefs_text:
                 custom_sections.append(f"# User Identity & Preferences\n\n{prefs_text}")
     except Exception:
-        logger.debug("install_repl_prompt_sections: preferences load failed", exc_info=True)
+        logger.debug(
+            "install_repl_prompt_sections: preferences load failed", exc_info=True
+        )
 
     # `user:*` memories (eager — the only namespace prefix loaded at boot;
     # everything else is lazy via `recall_memory`). Added by feature/wiz.
@@ -145,7 +149,9 @@ async def install_repl_prompt_sections(
     # Memory channel documentation (set by install_vector_memory)
     if session.context_router is not None:
         try:
-            channels_doc = build_channels_prompt_section(session.context_router.channels)
+            channels_doc = build_channels_prompt_section(
+                session.context_router.channels
+            )
             if channels_doc:
                 custom_sections.append(channels_doc)
             sys_channel_ctx = session.context_router.get_system_channels()
