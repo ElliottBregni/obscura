@@ -26,10 +26,10 @@ class MemoryStore(Protocol):
     :func:`obscura.data.memory.factory.get_memory_store`.
     """
 
-    def set(  # noqa: ANN401  # arbitrary JSON-serialisable value
+    def set(
         self,
         key: str | MemoryKey,
-        value: Any,
+        value: Any,  # noqa: ANN401  # arbitrary JSON-serialisable value
         namespace: str = "default",
         ttl: timedelta | None = None,
         source: str = "manual",
@@ -37,11 +37,11 @@ class MemoryStore(Protocol):
         """Insert or replace a value at ``(namespace, key)``."""
         ...
 
-    def get(  # noqa: ANN401  # returns the stored value, shape unknown
+    def get(
         self,
         key: str | MemoryKey,
         namespace: str = "default",
-    ) -> Any:
+    ) -> Any:  # noqa: ANN401  # returns the stored value, shape unknown
         """Return the value at ``(namespace, key)`` or None if missing/expired."""
         ...
 

@@ -168,6 +168,11 @@ def _existing_mcp_names(mcp_path: Path) -> set[str]:
     try:
         data = json.loads(mcp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        _logger.debug(
+            "scrape: skipping unreadable mcp config %s",
+            mcp_path,
+            exc_info=True,
+        )
         return set()
     if not isinstance(data, dict):
         return set()
