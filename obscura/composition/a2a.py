@@ -29,6 +29,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from obscura.composition.blocks import (
+    install_a2a_input_bridge,
     install_plugin_tools,
     install_system_tools,
     install_tool_router,
@@ -47,11 +48,18 @@ async def build_a2a_session(
     *,
     task_id: str,
     on_confirm: Callable[[ToolCallInfo], Awaitable[bool]] | None = None,
+    ask_user: Callable[..., Awaitable[str]] | None = None,
+    plan_approval: Callable[[str], Awaitable[bool]] | None = None,
 ) -> AgentSession:
     """Build a session for one A2A task.
 
-    The ``on_confirm`` callback, if provided, is forwarded to
-    ``session.stream_loop(on_confirm=...)`` by the caller (A2AService).
+    The ``on_confirm`` callback (binary y/n tool gate) is stashed on
+    ``host_callbacks['a2a_on_confirm']`` for the caller to forward to
+    ``session.stream_loop(on_confirm=...)``. ``ask_user`` and
+    ``plan_approval`` are wired via ``install_a2a_input_bridge`` into
+    the agent's ToolContext so tools that read those callbacks
+    (e.g. ``ask_user``, ``exit_plan_mode``) drive the same A2A
+    INPUT_REQUIRED state machine.
     """
     extras: dict[str, Any] = dict(config.extras)
     extras["a2a_task_id"] = task_id
@@ -75,12 +83,18 @@ async def build_a2a_session(
     )
     await install_plugin_tools(session, config_with_task)
     await install_system_tools(session, config_with_task)
+    await install_a2a_input_bridge(
+        session,
+        ask_user=ask_user,
+        plan_approval=plan_approval,
+    )
     await install_tool_router(session, config_with_task)
 
     if on_confirm is not None:
-        # Stash for the caller to forward to stream_loop. Not threaded
-        # into host_callbacks — the A2A confirm bridge has different
-        # semantics (INPUT_REQUIRED state transition, not just gate).
+        # Stash for the caller to forward to stream_loop. Tool-call
+        # confirmation goes through the loop's on_confirm gate, not
+        # host_callbacks (different semantics — gate vs. interactive
+        # input).
         session.host_callbacks["a2a_on_confirm"] = on_confirm
 
     return session

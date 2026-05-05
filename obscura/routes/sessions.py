@@ -53,8 +53,7 @@ async def create_session(
         user=user,
         oauth_github_token=oauth_gh_token,
     ) as _session:
-        client = _session.client
-        ref = await client.create_session()
+        ref = await _session.create_backend_session()
         audit(
             "session.create",
             user,
@@ -241,9 +240,8 @@ async def resume_session(
         user=user,
         oauth_github_token=oauth_gh_token,
     ) as _session:
-        client = _session.client
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
-        await client.resume_session(ref)
+        await _session.resume_session(ref)
         return JSONResponse(
             content={
                 "ok": True,
@@ -268,9 +266,8 @@ async def delete_session(
         user=user,
         oauth_github_token=oauth_gh_token,
     ) as _session:
-        client = _session.client
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
-        await client.delete_session(ref)
+        await _session.delete_session(ref)
         audit(
             "session.delete",
             user,

@@ -45,14 +45,13 @@ async def send(
         system_prompt=body.system_prompt,
         oauth_github_token=oauth_gh_token,
     ) as _session:
-        client = _session.client
         try:
             if body.session_id:
                 ref = SessionRef(
                     session_id=body.session_id,
                     backend=Backend(body.backend),
                 )
-                await client.resume_session(ref)
+                await _session.resume_session(ref)
 
             mode = (
                 ExecutionMode(body.mode)
@@ -84,7 +83,7 @@ async def send(
                 native=native_payload,
             )
 
-            msg = await client.send(
+            msg = await _session.send(
                 body.prompt,
                 mode=body.mode,
                 api_mode=body.api_mode,
@@ -112,7 +111,7 @@ async def send(
             return SendResponse(
                 text=msg.text,
                 backend=body.backend,
-                capability_tier=client.capability_tier,
+                capability_tier=_session.capability_tier,
             )
         except Exception:
             audit(
@@ -167,14 +166,13 @@ async def stream(
             system_prompt=body.system_prompt,
             oauth_github_token=oauth_gh_token,
         ) as _session:
-            client = _session.client
             response_text_parts: list[str] = []
             if body.session_id:
                 ref = SessionRef(
                     session_id=body.session_id,
                     backend=Backend(body.backend),
                 )
-                await client.resume_session(ref)
+                await _session.resume_session(ref)
 
             mode = (
                 ExecutionMode(body.mode)
@@ -206,7 +204,7 @@ async def stream(
                 native=native_payload,
             )
 
-            async for chunk in client.stream(
+            async for chunk in _session.stream(
                 body.prompt,
                 mode=body.mode,
                 api_mode=body.api_mode,

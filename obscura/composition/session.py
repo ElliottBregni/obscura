@@ -319,6 +319,42 @@ class AgentSession:
             **kwargs,
         )
 
+    # ── Client surface forwarding ─────────────────────────────────────
+    # These wrappers let surfaces use `session.X(...)` instead of
+    # `session.client.X(...)`. Step 1 of the eventual ObscuraClient
+    # absorption: callers depend only on AgentSession, not on the
+    # specific client type underneath.
+
+    async def send(self, prompt: str, **kwargs: Any) -> Any:
+        """Non-streaming single-turn request. Forwards to client.send."""
+        return await self.client.send(prompt, **kwargs)
+
+    def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[Any]:
+        """Streaming single-turn request. Forwards to client.stream."""
+        return self.client.stream(prompt, **kwargs)
+
+    async def resume_session(self, ref: Any) -> None:
+        """Resume a prior backend session. Forwards to client.resume_session."""
+        await self.client.resume_session(ref)
+
+    async def delete_session(self, ref: Any) -> None:
+        """Delete a backend session. Forwards to client.delete_session."""
+        await self.client.delete_session(ref)
+
+    async def create_backend_session(self) -> Any:
+        """Create a fresh backend session ref. Forwards to client.create_session.
+
+        Renamed from ``create_session`` to avoid colliding with the
+        composition-layer concept of "session" (which is *this* object,
+        ``AgentSession``).
+        """
+        return await self.client.create_session()
+
+    @property
+    def capability_tier(self) -> str:
+        """Resolved capability tier (from the underlying client)."""
+        return self.client.capability_tier or ""
+
     async def run_loop_to_text(
         self,
         prompt: str,
