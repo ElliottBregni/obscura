@@ -94,7 +94,8 @@ from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
 from obscura.core.enums.agent import AgentEventKind, Backend
 from obscura.core.enums.lifecycle import SessionStatus
-from obscura.core.event_store import SQLiteEventStore
+from obscura.core.db_factory import DatabaseFactory
+from obscura.core.event_store import EventStoreProtocol
 from obscura.core.paths import resolve_obscura_global_home, resolve_obscura_home
 from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
 from obscura.core.session_utils import generate_session_title
@@ -252,7 +253,7 @@ class ObscuraSession:
 
     # Populated by create()
     _config: SessionConfig
-    _store: SQLiteEventStore
+    _store: EventStoreProtocol
     _sid: str
     _ctx: REPLContext
     _client: Any  # AgentSession (was ObscuraClient pre-absorption)
@@ -294,7 +295,7 @@ class ObscuraSession:
         self._tip_scheduler = None
         self._background_tasks = set()
 
-        self._store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        self._store = DatabaseFactory.create_event_store()
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
@@ -411,7 +412,7 @@ class ObscuraSession:
         return self._sid
 
     @property
-    def store(self) -> SQLiteEventStore:
+    def store(self) -> EventStoreProtocol:
         return self._store
 
     @property

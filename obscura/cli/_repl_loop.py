@@ -74,8 +74,7 @@ from obscura.core.deep_log import dlog
 from obscura.core.context_window import get_context_window
 from obscura.core.enums.agent import Backend
 from obscura.core.enums.lifecycle import SessionStatus
-from obscura.core.event_store import SQLiteEventStore
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.db_factory import DatabaseFactory
 from obscura.core.prompt_cache import PromptCacheManager
 from obscura.core.types import (
     SessionRef,
@@ -112,9 +111,8 @@ async def repl(
     compiled_ws: Any | None = None,
 ) -> None:
     """Core async loop -- runs the interactive REPL or single-shot."""
-    # Event store
-    db_path = resolve_obscura_home() / "events.db"
-    store = SQLiteEventStore(db_path)
+    # Event store — backend chosen via OBSCURA_DB_TYPE.
+    store = DatabaseFactory.create_event_store()
     sid = session_id or uuid.uuid4().hex
 
     # Resolve backend/model names from arguments or environment defaults

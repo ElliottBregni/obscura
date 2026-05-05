@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -11,9 +12,9 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
+from obscura.core.db_factory import DatabaseFactory
 from obscura.core.enums.lifecycle import SessionStatus
-from obscura.core.event_store import SQLiteEventStore
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.event_store import EventStoreProtocol
 
 from obscura.auth.models import AuthenticatedUser
 import logging
@@ -103,8 +104,8 @@ def _load_index_entries(agent: str | None = None) -> list[dict[str, Any]]:
     return entries
 
 
-def _ingest_entries(
-    store: SQLiteEventStore,
+async def _ingest_entries(
+    store: EventStoreProtocol,
     entries: list[dict[str, Any]],
     *,
     force: bool = False,
@@ -123,8 +124,7 @@ def _ingest_entries(
         if not session_id or not agent:
             continue
 
-        # Check if already ingested (sync call — this runs in a thread)
-        existing = store._get_session_sync(session_id)  # pyright: ignore[reportPrivateUsage]
+        existing = await store.get_session(session_id)
         if existing is not None and not force:
             skipped += 1
             continue
@@ -150,16 +150,14 @@ def _ingest_entries(
         message_count = int(entry.get("message_count", 0))
 
         if existing is not None and force:
-            # Update existing session
-            store._update_session_sync(  # pyright: ignore[reportPrivateUsage]
+            await store.update_session(
                 session_id,
                 summary=summary,
                 message_count=message_count,
                 metadata=metadata,
             )
         else:
-            # Create new session as 'ingested' + 'completed'
-            store._create_session_sync(  # pyright: ignore[reportPrivateUsage]
+            await store.create_session(
                 session_id,
                 agent,
                 backend=agent,
@@ -171,7 +169,7 @@ def _ingest_entries(
             )
             # Mark completed (ingested sessions aren't running)
             with contextlib.suppress(ValueError):
-                store._update_status_sync(session_id, SessionStatus.COMPLETED)  # pyright: ignore[reportPrivateUsage]
+                await store.update_status(session_id, SessionStatus.COMPLETED)
 
         # Index into VectorMemoryStore for semantic search
         if user is not None:
@@ -247,7 +245,7 @@ def sync_and_ingest_system_sessions(
     force: bool = False,
     copy_to_pwd: bool = False,
     copy_overwrite: bool = True,
-    store: SQLiteEventStore | None = None,
+    store: EventStoreProtocol | None = None,
 ) -> dict[str, Any]:
     """Run agent session sync from ~/.obscura, then ingest into unified event store."""
     copy_result: dict[str, Any] | None = None
@@ -272,14 +270,11 @@ def sync_and_ingest_system_sessions(
 
     # Use provided store or create one at the default location
     if store is None:
-        store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        store = DatabaseFactory.create_event_store()
 
     entries = _load_index_entries(agent=agent)
-    ingested, skipped = _ingest_entries(
-        store,
-        entries,
-        force=force,
-        user=user,
+    ingested, skipped = asyncio.run(
+        _ingest_entries(store, entries, force=force, user=user)
     )
 
     return {

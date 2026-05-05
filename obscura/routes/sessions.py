@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import require_role
-from obscura.core.event_store import SQLiteEventStore
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.db_factory import DatabaseFactory
+from obscura.core.event_store import EventStoreProtocol
 from obscura.core.enums.agent import Backend
 from obscura.core.types import SessionRef
 from obscura.deps import ClientFactory, audit, get_oauth_github_token
@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
 
-def _get_event_store(request: Request) -> SQLiteEventStore:
+def _get_event_store(request: Request) -> EventStoreProtocol:
     """Get the shared event store from app state."""
-    store: SQLiteEventStore | None = getattr(request.app.state, "event_store", None)
+    store: EventStoreProtocol | None = getattr(request.app.state, "event_store", None)
     if store is None:
-        store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        store = DatabaseFactory.create_event_store()
         request.app.state.event_store = store
     return store
 

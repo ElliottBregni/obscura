@@ -84,7 +84,7 @@ from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.enums.ui import TUIMode
-from obscura.core.event_store import SQLiteEventStore
+from obscura.core.event_store import EventStoreProtocol
 from obscura.core.paths import (
     resolve_all_commands_dirs,
     resolve_all_skills_dirs,
@@ -308,7 +308,7 @@ class REPLContext:
     """Mutable state for the REPL session."""
 
     client: Any  # ObscuraClient | AgentSession — duck-typed handle
-    store: SQLiteEventStore
+    store: EventStoreProtocol
     session_id: str
     backend: str
     model: str | None
