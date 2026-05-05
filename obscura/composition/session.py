@@ -190,6 +190,17 @@ class AgentSession:
     uds_inbox: Any = None
     imessage_daemon_task: Any = None  # asyncio.Task[None] | None
 
+    # ── Reliability state (set by composition/core.py during build) ──
+    # These mirror what ObscuraClient holds today. Once Stage 4 lands,
+    # composition builds the backend directly and these are the
+    # canonical source — ObscuraClient delegates to the session.
+    _capability_token: Any = None
+    _circuit_registry: Any = None
+    _cache: Any = None
+    _current_loop: Any = None
+    _max_retries: int = 2
+    _retry_initial_backoff: float = 0.5
+
     # Resource teardown queue (LIFO)
     _resources: list[_Closer] = field(default_factory=_empty_resources)
     _closed: bool = False
@@ -346,28 +357,179 @@ class AgentSession:
         session_id: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[AgentEvent]:
-        """Stream agent events for a prompt. Forwards to `client.run_loop`."""
-        return self.client.run_loop(
-            prompt,
+        """Stream agent events for a prompt.
+
+        Constructs ``make_agent_loop`` directly using session state
+        (capability_token, hooks, host_callbacks). Mirror of the legacy
+        ``ObscuraClient.run_loop`` body. For Claude SDK backends,
+        on_confirm is rerouted to the backend's PreToolUse hook (Claude
+        executes tools internally via MCP, so the loop's confirmation
+        gate is never reached).
+        """
+        from obscura.core.agent_loop_factory import make_agent_loop
+        from obscura.core.context import load_session_messages
+        from obscura.core.paths import resolve_obscura_home
+        from obscura.core.types import ConfirmationCapable, ToolCallInfo
+
+        sid = session_id or self.session_id
+
+        load_history = bool(kwargs.pop("load_session_history", True))
+        initial_messages = kwargs.pop("initial_messages", None)
+        if load_history and initial_messages is None and sid:
+            try:
+                db_path = resolve_obscura_home() / "events.db"
+                initial_messages = load_session_messages(
+                    sid, db_path, max_turns=5,
+                )
+            except Exception:
+                logger.debug("stream_loop: history load failed", exc_info=True)
+                initial_messages = None
+
+        backend = self.backend
+        loop_confirm = on_confirm
+        if on_confirm is not None and isinstance(backend, ConfirmationCapable):
+            def _wrap_confirm(name: str, inp: dict[str, Any]) -> bool:
+                result = on_confirm(
+                    ToolCallInfo(tool_use_id="", name=name, input=inp),
+                )
+                return bool(result)
+
+            backend.enable_confirmation(_wrap_confirm)
+            loop_confirm = None
+            # Cast back to BackendProtocol for make_agent_loop typing
+            from typing import cast as _cast
+
+            from obscura.core.types import BackendProtocol
+
+            backend = _cast(BackendProtocol, backend)
+
+        ctx_window = getattr(backend, "context_window", 0) or 0
+        context_budget = kwargs.pop("context_budget", 0)
+        if not context_budget and ctx_window:
+            context_budget = int(ctx_window * 0.50 * 4)
+
+        backend_type = getattr(backend, "backend_type", None)
+        backend_name = getattr(backend_type, "value", "") or self.config.backend
+        model = getattr(backend, "model", None) or self.config.model or ""
+
+        event_store = kwargs.pop("event_store", None)
+        auto_complete = kwargs.pop("auto_complete", True)
+        tool_allowlist = kwargs.pop("tool_allowlist", None)
+
+        loop = make_agent_loop(
+            backend,
+            self.registry,
             max_turns=max_turns or self.config.max_turns,
-            on_confirm=on_confirm,
-            session_id=session_id or self.session_id,
+            on_confirm=loop_confirm,
+            capability_token=self._capability_token,
+            hooks=self.hooks,
+            event_store=event_store,
+            auto_complete=auto_complete,
+            backend_name=backend_name,
+            model_name=model,
+            context_budget=context_budget,
+            tool_allowlist=tool_allowlist,
+            host_callbacks=self.host_callbacks,
+        )
+        self._current_loop = loop
+        return loop.run(
+            prompt,
+            session_id=sid or "",
+            initial_messages=initial_messages,
             **kwargs,
         )
 
-    # ── Client surface forwarding ─────────────────────────────────────
-    # These wrappers let surfaces use `session.X(...)` instead of
-    # `session.client.X(...)`. Step 1 of the eventual ObscuraClient
-    # absorption: callers depend only on AgentSession, not on the
-    # specific client type underneath.
+    # ── Client surface — direct implementation (Stage 3) ─────────────
+    # send / stream now own their bodies (cache + retry + circuit
+    # breaker + telemetry) using session state instead of forwarding
+    # to client. The session is the authority; ObscuraClient becomes a
+    # back-compat shim around the session.
 
     async def send(self, prompt: str, **kwargs: Any) -> Any:
-        """Non-streaming single-turn request. Forwards to client.send."""
-        return await self.client.send(prompt, **kwargs)
+        """Non-streaming single-turn request.
 
-    def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[Any]:
-        """Streaming single-turn request. Forwards to client.stream."""
-        return self.client.stream(prompt, **kwargs)
+        Cache → circuit breaker → retry → backend.send. Mirror of the
+        legacy ``ObscuraClient.send`` body. When ``self._cache`` is set
+        (opt-in), a hit short-circuits the backend call. The
+        ``_circuit_registry`` per-backend gate prevents thundering-herd
+        when a provider is degraded.
+        """
+        from obscura.core.enums.agent import Role
+        from obscura.core.retry import with_retry
+        from obscura.core.types import ContentBlock, Message
+
+        backend = self.backend
+        backend_type = getattr(backend, "backend_type", None)
+        backend_name = getattr(backend_type, "value", "") or self.config.backend
+        model = getattr(backend, "model", None) or self.config.model or ""
+        sys_prompt = self.system_prompt or self.config.system_prompt
+
+        # Cache (opt-in, set via configure_cache or composition core)
+        cache = self._cache
+        cache_key = ""
+        if cache is not None:
+            from obscura.core.llm_cache import LLMCache
+
+            cache_key = LLMCache.make_key(
+                backend_name, model, sys_prompt, prompt,
+            )
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return Message(
+                    role=Role.ASSISTANT,
+                    content=[ContentBlock(kind="text", text=cached.response_text)],
+                )
+
+        circuit = (
+            self._circuit_registry.get(backend_name)
+            if self._circuit_registry is not None
+            else None
+        )
+
+        result = await with_retry(
+            backend.send,
+            prompt,
+            max_retries=self._max_retries,
+            initial_backoff=self._retry_initial_backoff,
+            circuit=circuit,
+            **kwargs,
+        )
+
+        if cache is not None and cache_key:
+            text = getattr(result, "text", "")
+            if text:
+                cache.put(cache_key, text, backend=backend_name, model=model)
+
+        return result
+
+    async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[Any]:
+        """Streaming single-turn request.
+
+        Circuit breaker gate (no retry on streams; the chunks have
+        already started). Mirror of legacy ``ObscuraClient.stream``.
+        """
+        from obscura.core.circuit_breaker import CircuitOpenError
+
+        backend = self.backend
+        backend_type = getattr(backend, "backend_type", None)
+        backend_name = getattr(backend_type, "value", "") or self.config.backend
+
+        if self._circuit_registry is not None:
+            circuit = self._circuit_registry.get(backend_name)
+            if not circuit.allow_request():
+                raise CircuitOpenError(
+                    circuit.name, circuit.time_until_half_open(),
+                )
+            try:
+                async for chunk in backend.stream(prompt, **kwargs):
+                    yield chunk
+                circuit.record_success()
+            except Exception:
+                circuit.record_failure()
+                raise
+        else:
+            async for chunk in backend.stream(prompt, **kwargs):
+                yield chunk
 
     async def resume_session(self, ref: Any) -> None:
         """Resume a prior backend session. Forwards to client.resume_session."""

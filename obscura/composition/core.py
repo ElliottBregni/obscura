@@ -113,10 +113,23 @@ async def build_core_session(
         logger.exception("build_core_session: client start failed")
         raise
 
-    return AgentSession(
+    session = AgentSession(
         session_id=sid,
         surface=surface,
         config=config,
         client=client,
         host_callbacks=dict(callbacks),
+        system_prompt=config.system_prompt,
     )
+    # Mirror reliability state from the freshly-built client so the
+    # session's own send/stream/run_loop methods can use them directly
+    # (Stage 3 of ObscuraClient absorption — session methods stop
+    # forwarding through client.X).
+    session._capability_token = getattr(client, "_capability_token", None)
+    session._circuit_registry = getattr(client, "_circuit_registry", None)
+    session._cache = getattr(client, "_cache", None)
+    session._max_retries = getattr(client, "_max_retries", 2)
+    session._retry_initial_backoff = getattr(
+        client, "_retry_initial_backoff", 0.5,
+    )
+    return session
