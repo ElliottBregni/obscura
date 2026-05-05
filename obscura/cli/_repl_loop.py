@@ -71,6 +71,7 @@ from obscura.composition.session import SessionConfig
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.deep_log import dlog
+from obscura.core.context_window import get_context_window
 from obscura.core.enums.agent import Backend
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.event_store import SQLiteEventStore
@@ -86,7 +87,6 @@ from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summar
 from obscura.kairos.engine import is_kairos_enabled
 from obscura.kairos.frustration import FrustrationDetector
 from obscura.tools.system import Session
-from obscura.tools.system._repl_commands import SlashBridge
 from obscura.voice.session import VoiceSession
 
 _log = logging.getLogger("obscura.cli")
@@ -223,7 +223,7 @@ async def repl(
     )
 
     async with _repl_session as _session:
-        client = _session.client
+        client = _session
         tool_count = len(_session.registry.all())
         # Tool router wiring moved to obscura.composition.blocks.tool_router.
         # _tool_router_ref is preserved as a back-compat name for the
@@ -279,7 +279,6 @@ async def repl(
                     ret = await handler(arguments, ctx)
                 return cap.get(), ret
 
-            SlashBridge.set_callback(_run_slash)
         except Exception:
             _log.debug("suppressed exception in repl", exc_info=True)
 
@@ -416,7 +415,9 @@ async def repl(
                 task_count += 1
             prompt_status.task_count = task_count
             tokens = estimate_effective_context_tokens(ctx)
-            window = ctx.client.context_window
+            window = (
+                getattr(ctx.client, "context_window", 0) if ctx.client else 0
+            ) or get_context_window(ctx.model or ctx.backend)
             prompt_status.ctx_tokens = tokens
             prompt_status.ctx_window = window
             prompt_status.ctx_pct = int(tokens / window * 100) if window else 0
@@ -576,6 +577,9 @@ async def repl(
                     _log.debug("suppressed exception in repl", exc_info=True)
                     console.print()
                     break
+                if not user_input:
+                    continue
+                user_input = _sanitize_text(user_input).strip()
                 if not user_input:
                     continue
 
@@ -992,6 +996,15 @@ async def repl(
                 def _on_done(t: asyncio.Task[str]) -> None:
                     background_tasks.discard(t)
                     ss.reset()
+                    if t.cancelled():
+                        return
+                    try:
+                        exc = t.exception()
+                    except Exception:
+                        _log.debug("suppressed exception in repl task callback", exc_info=True)
+                        return
+                    if exc is not None:
+                        _log.error("chat turn failed", exc_info=exc)
 
                 task.add_done_callback(_on_done)
 

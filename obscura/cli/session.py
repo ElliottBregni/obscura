@@ -88,6 +88,7 @@ from obscura.cli.widgets import (
 from obscura.core.cleanup import run_cleanup
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compaction import should_auto_compact
+from obscura.core.context_window import get_context_window
 from obscura.core.context import load_obscura_memory
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
@@ -505,9 +506,13 @@ class ObscuraSession:
             return True
 
         # ── Token-aware auto-compact ──────────────────────────────────────
-        _context_window = ctx.client.context_window
+        _context_window = (
+            getattr(ctx.client, "context_window", 0) if ctx.client else 0
+        ) or get_context_window(ctx.model or ctx.backend)
         _compact_threshold = int(_context_window * 0.60)
-        _warn_threshold = ctx.client.context_warn_threshold
+        _warn_threshold = (
+            getattr(ctx.client, "context_warn_threshold", 0) if ctx.client else 0
+        )
 
         # ── Vector memory pre-search ──────────────────────────────────────
         augmented_text = text
