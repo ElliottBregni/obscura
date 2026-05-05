@@ -46,6 +46,8 @@ DRIFT_SYMBOLS = (
     "AgentSupervisor",
     # KAIROS block (composition/blocks/kairos.py)
     "register_kairos_hooks",
+    # UDS inbox block (composition/blocks/uds_inbox.py)
+    "UDSInbox",
 )
 
 # Files that legitimately use these symbols and are NOT in violation.
@@ -95,6 +97,10 @@ ALLOWLIST = frozenset(
         # Composition supervisor + kairos blocks
         "obscura/composition/blocks/supervisor.py",
         "obscura/composition/blocks/kairos.py",
+        # UDSInbox is defined here
+        "obscura/kairos/uds_messaging.py",
+        # Composition uds_inbox block
+        "obscura/composition/blocks/uds_inbox.py",
     },
 )
 

@@ -35,12 +35,15 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.composition.blocks import (
     install_browser_bridge,
+    install_imessage_daemon,
     install_kairos_engine,
     install_plugin_tools,
     install_repl_callbacks,
+    install_session_registration,
     install_supervisor,
     install_system_tools,
     install_tool_router,
+    install_uds_inbox,
 )
 from obscura.composition.core import build_core_session
 from obscura.composition.session import AgentSession, SessionConfig
@@ -95,7 +98,10 @@ async def build_repl_session(
     await install_system_tools(session, config)
     await install_repl_callbacks(session, config)
     await install_browser_bridge(session, config)
-    await install_supervisor(session, config)  # before kairos: kairos reads session.supervisor
+    await install_supervisor(session, config)  # before kairos + imessage: they read session.supervisor
     await install_kairos_engine(session, config)
+    await install_imessage_daemon(session, config)  # after supervisor (skips if supervisor present)
+    await install_uds_inbox(session, config)
+    await install_session_registration(session, config)
     await install_tool_router(session, config)  # last: needs final tool registry
     return session

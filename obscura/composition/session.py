@@ -182,6 +182,8 @@ class AgentSession:
     supervisor: Any = None
     supervisor_task: Any = None  # asyncio.Task[None] | None
     kairos_engine: Any = None
+    uds_inbox: Any = None
+    imessage_daemon_task: Any = None  # asyncio.Task[None] | None
 
     # Resource teardown queue (LIFO)
     _resources: list[_Closer] = field(default_factory=_empty_resources)

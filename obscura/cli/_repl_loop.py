@@ -36,7 +36,6 @@ from obscura.agent.coordinator import (
 )
 from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
 from obscura.auth.cli_user import current_cli_user
-from obscura.cli._daemon import start_imessage_daemon
 from obscura.cli._env_loader import bootstrap_env
 from obscura.cli._send import (
     _session_state,  # pyright: ignore[reportPrivateUsage]
@@ -88,13 +87,6 @@ from obscura.core.event_store import SQLiteEventStore
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.prompt_cache import PromptCacheManager
-from obscura.core.session_utils import (
-    check_concurrent_sessions,
-    install_signal_handlers,
-    register_session,
-    register_shutdown_handler,
-    unregister_session,
-)
 from obscura.core.settings import load_all_hooks
 from obscura.core.system_prompts import (
     compose_environment_context,
@@ -109,7 +101,6 @@ from obscura.eval.store import EvalResultStore
 from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summary
 from obscura.kairos.engine import KairosEngine, is_kairos_enabled
 from obscura.kairos.frustration import FrustrationDetector
-from obscura.kairos.uds_messaging import UDSInbox
 from obscura.memory_channels import (
     ContextRouter,
     TurnClassifier,
@@ -468,15 +459,10 @@ async def repl(
         if supervisor is not None and agent_infos:
             print_ok(f"Supervisor started -- {len(agent_infos)} agent(s) launching")
 
-        # Start iMessage daemon (only when supervisor is NOT running)
-        daemon_task: asyncio.Task[None] | None = None
+        # iMessage daemon spawn moved to obscura.composition.blocks.imessage_daemon.
+        # Read post-build state for downstream code that polls the task.
+        daemon_task: asyncio.Task[None] | None = _session.imessage_daemon_task
         _daemon_client: Any = None
-        if supervisor_task is None:
-            try:
-                daemon_task = await start_imessage_daemon(ctx.client)
-            except Exception as exc:
-                _log.debug("suppressed exception in repl", exc_info=True)
-                print_warning(f"iMessage daemon failed to start: {exc}")
         daemon_restart_count = 0
         daemon_last_restart_at = 0.0
 
@@ -645,18 +631,9 @@ async def repl(
             _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("cleanup_init", _e)
 
-        # --- Concurrent session detection ---
-        try:
-            register_session(sid, backend=backend_name, model=model_name or "")
-            register_shutdown_handler(lambda: unregister_session(sid))
-            install_signal_handlers()
-            concurrent = check_concurrent_sessions(sid)
-            if concurrent:
-                console.print(
-                    f"[yellow]Note: {len(concurrent)} other session(s) running in this workspace[/]",
-                )
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
+        # Session registration (PID lock + signal handlers) moved to
+        # obscura.composition.blocks.session_registration. Concurrent-
+        # session warning is logged at INFO by the block.
 
         # --- Deep log session start ---
         try:
@@ -669,21 +646,9 @@ async def repl(
         except Exception:
             _log.debug("suppressed exception in repl", exc_info=True)
 
-        # --- UDS inbox for cross-session messaging ---
-        _uds_inbox = None
-        try:
-            _uds_inbox = UDSInbox(sid)
-
-            def _on_peer_message(msg: dict[str, Any]) -> None:
-                sender = msg.get("from", "?")
-                text = msg.get("text", "")
-                console.print(f"\n[bold cyan]Message from {sender}:[/] {text}")
-
-            await _uds_inbox.start(on_message=_on_peer_message)
-        except Exception as _e:
-            _log.debug("suppressed exception in repl", exc_info=True)
-            _swallow("uds_init", _e)
-            _uds_inbox = None
+        # UDS inbox spawn moved to obscura.composition.blocks.uds_inbox.
+        # Reference for downstream slash commands.
+        _uds_inbox = _session.uds_inbox
 
         # Reset session title tracker
         _session_state["titled"] = False
@@ -716,6 +681,10 @@ async def repl(
                                 + (f": {exc}" if exc else ""),
                             )
                             try:
+                                from obscura.cli._daemon import (
+                                    start_imessage_daemon,
+                                )
+
                                 daemon_task = await start_imessage_daemon(ctx.client)
                             except Exception as restart_exc:
                                 _log.debug(
