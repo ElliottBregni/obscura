@@ -747,10 +747,10 @@ class ObscuraClient:
             return prompt
         try:
             from obscura.auth.models import AuthenticatedUser as _AuthUser
-            from obscura.memory import MemoryStore
+            from obscura.memory import create_memory_store
 
             if isinstance(self._user, _AuthUser):
-                mem = MemoryStore.for_user(self._user)
+                mem = create_memory_store(self._user)
                 hits = mem.search(prompt)
                 if hits:
                     lines = [f"- {key}: {str(val)[:200]}" for key, val in hits[:3]]

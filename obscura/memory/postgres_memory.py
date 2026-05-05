@@ -101,7 +101,7 @@ class PostgreSQLMemoryStore:
 
     def set(
         self,
-        key: str,
+        key: str | MemoryKey,
         value: Any,
         namespace: str = "default",
         ttl: timedelta | None = None,
@@ -135,7 +135,7 @@ class PostgreSQLMemoryStore:
 
     def get(
         self,
-        key: str,
+        key: str | MemoryKey,
         namespace: str = "default",
         default: Any = None,
     ) -> Any:
@@ -168,7 +168,7 @@ class PostgreSQLMemoryStore:
             return cast(Any, value_raw)
         return json.loads(value_raw)
 
-    def delete(self, key: str, namespace: str = "default") -> bool:
+    def delete(self, key: str | MemoryKey, namespace: str = "default") -> bool:
         """Delete a key. Returns True if deleted."""
         if isinstance(key, MemoryKey):
             namespace = key.namespace
@@ -187,62 +187,60 @@ class PostgreSQLMemoryStore:
         finally:
             self._put_conn(conn)
 
-    def list_keys(self, namespace: str | None = None) -> list[str]:
+    def list_keys(self, namespace: str | None = None) -> list[MemoryKey]:
         """List all keys, optionally filtered by namespace."""
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
                 if namespace:
                     cur.execute(
-                        "SELECT key FROM memory.entries "
+                        "SELECT namespace, key FROM memory.entries "
                         "WHERE user_id = %s AND namespace = %s "
                         "ORDER BY key",
                         (self.user_id, namespace),
                     )
                 else:
                     cur.execute(
-                        "SELECT key FROM memory.entries "
+                        "SELECT namespace, key FROM memory.entries "
                         "WHERE user_id = %s ORDER BY key",
                         (self.user_id,),
                     )
-                return [row["key"] for row in cur.fetchall()]
+                return [
+                    MemoryKey(namespace=row["namespace"], key=row["key"])
+                    for row in cur.fetchall()
+                ]
         finally:
             self._put_conn(conn)
 
-    def search(self, query: str, namespace: str | None = None) -> list[dict[str, Any]]:
-        """Search memory by key or value content (simple ILIKE)."""
+    def search(self, query: str) -> list[tuple[MemoryKey, Any]]:
+        """Search memory by key or value content (simple ILIKE).
+
+        Returns matches as ``(MemoryKey, value)`` pairs to mirror
+        :meth:`MemoryStore.search`.
+        """
         pattern = f"%{query}%"
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                if namespace:
-                    cur.execute(
-                        "SELECT namespace, key, value FROM memory.entries "
-                        "WHERE user_id = %s AND namespace = %s "
-                        "AND (key ILIKE %s OR value::text ILIKE %s) "
-                        "ORDER BY updated_at DESC",
-                        (self.user_id, namespace, pattern, pattern),
-                    )
-                else:
-                    cur.execute(
-                        "SELECT namespace, key, value FROM memory.entries "
-                        "WHERE user_id = %s "
-                        "AND (key ILIKE %s OR value::text ILIKE %s) "
-                        "ORDER BY updated_at DESC",
-                        (self.user_id, pattern, pattern),
-                    )
-                results: list[dict[str, Any]] = []
+                cur.execute(
+                    "SELECT namespace, key, value FROM memory.entries "
+                    "WHERE user_id = %s "
+                    "AND (key ILIKE %s OR value::text ILIKE %s) "
+                    "ORDER BY updated_at DESC",
+                    (self.user_id, pattern, pattern),
+                )
+                results: list[tuple[MemoryKey, Any]] = []
                 for row in cur.fetchall():
                     val: Any = row["value"]
                     if isinstance(val, str):
-                        val = json.loads(val)
-                    results.append(
-                        {
-                            "namespace": row["namespace"],
-                            "key": row["key"],
-                            "value": val,
-                        }
-                    )
+                        try:
+                            val = json.loads(val)
+                        except json.JSONDecodeError:
+                            logger.debug(
+                                "suppressed exception in search", exc_info=True
+                            )
+                    key = MemoryKey(namespace=row["namespace"], key=row["key"])
+                    results.append((key, val))
                 return results
         finally:
             self._put_conn(conn)

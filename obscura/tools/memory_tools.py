@@ -10,7 +10,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from obscura.core.types import ToolSpec
-from obscura.memory import MemoryStore
+from obscura.memory import create_memory_store
 from obscura.vector_memory import VectorMemoryEntry, VectorMemoryStore
 import logging
 
@@ -89,7 +89,7 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
 
     def store_memory_impl(namespace: str, key: str, value: dict[str, Any]) -> str:
         """Store key-value data in agent memory."""
-        store = MemoryStore.for_user(user)
+        store = create_memory_store(user)
         store.set(namespace=namespace, key=key, value=value)
         return json.dumps(
             {
@@ -103,7 +103,7 @@ def make_memory_tool_specs(user: AuthenticatedUser) -> list[ToolSpec]:
 
     def recall_memory_impl(namespace: str, key: str) -> str:
         """Retrieve data from agent memory."""
-        store = MemoryStore.for_user(user)
+        store = create_memory_store(user)
         result = store.get(namespace=namespace, key=key)
         if result is None:
             return json.dumps(

@@ -32,12 +32,13 @@ from obscura.memory.store import (
     MemoryStore,
     create_memory_store,
 )
-from obscura.memory.types import MemoryEntry, MemoryKey
+from obscura.memory.types import MemoryEntry, MemoryKey, MemoryStoreProtocol
 
 __all__ = [
     "GlobalMemoryStore",
     "MemoryEntry",
     "MemoryKey",
     "MemoryStore",
+    "MemoryStoreProtocol",
     "create_memory_store",
 ]

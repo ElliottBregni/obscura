@@ -55,7 +55,7 @@ from obscura.integrations.mcp.types import (
     ObscuraMCPConfig,
     ObscuraMCPToolContext,
 )
-from obscura.memory import MemoryStore
+from obscura.memory import create_memory_store
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -488,7 +488,7 @@ class ObscuraMCPServer:
         key = arguments["key"]
         namespace = arguments.get("namespace", "default")
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
         value = memory.get(key, namespace=namespace)
 
         if value is None:
@@ -521,7 +521,7 @@ class ObscuraMCPServer:
             logger.debug("suppressed exception in _handle_set_memory", exc_info=True)
             value = value_str
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
         memory.set(key, value, namespace=namespace)
 
         return {
@@ -542,7 +542,7 @@ class ObscuraMCPServer:
         key = arguments["key"]
         namespace = arguments.get("namespace", "default")
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
         deleted = memory.delete(key, namespace=namespace)
 
         return {
@@ -563,7 +563,7 @@ class ObscuraMCPServer:
         query = arguments["query"]
         namespace = arguments.get("namespace")
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
 
         if namespace:
             # Search within specific namespace
@@ -753,7 +753,7 @@ class ObscuraMCPServer:
         role = arguments["role"]
         content = arguments["content"]
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
 
         # Transcript stored as a JSON array under namespace "transcript"
         transcript_key = f"transcript:{session_id}"
@@ -791,7 +791,7 @@ class ObscuraMCPServer:
         session_id = arguments["session_id"]
         limit = arguments.get("limit", 50)
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
         transcript_key = f"transcript:{session_id}"
         raw = memory.get(transcript_key, namespace="transcript")
 
@@ -837,7 +837,7 @@ class ObscuraMCPServer:
             logger.debug("suppressed exception in _handle_memory_upsert", exc_info=True)
             data = data_str
 
-        memory = MemoryStore.for_user(self.user)
+        memory = create_memory_store(self.user)
 
         # Store under namespace "entity:<type>" with key "<entity_id>"
         namespace = f"entity:{entity_type}"
@@ -952,7 +952,7 @@ class ObscuraMCPServer:
         resources: list[dict[str, Any]] = []
 
         if self.user:
-            memory = MemoryStore.for_user(self.user)
+            memory = create_memory_store(self.user)
             namespaces: set[str] = set()
             for key in memory.list_keys():
                 namespaces.add(key.namespace)
@@ -981,7 +981,7 @@ class ObscuraMCPServer:
                     message="User not authenticated",
                 )
 
-            memory = MemoryStore.for_user(self.user)
+            memory = create_memory_store(self.user)
 
             if key:
                 value = memory.get(key, namespace=namespace)

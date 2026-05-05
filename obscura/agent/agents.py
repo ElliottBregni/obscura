@@ -64,7 +64,7 @@ from obscura.integrations.mcp.config_loader import (
 )
 from obscura.integrations.mcp.types import MCPConnectionConfig
 from obscura.manifest.lazy import LazyManifestProxy
-from obscura.memory import MemoryStore
+from obscura.memory import MemoryStoreProtocol, create_memory_store
 from obscura.plugins.broker import ToolBroker
 from obscura.plugins.policy import PluginPolicyEngine
 from obscura.tools.providers import (
@@ -416,9 +416,9 @@ class Agent:
         return self._broker
 
     @property
-    def memory(self) -> MemoryStore:
-        """Get the agent's memory store."""
-        return MemoryStore.for_user(self.user)
+    def memory(self) -> MemoryStoreProtocol:
+        """Get the agent's memory store (SQLite or Postgres per OBSCURA_DB_TYPE)."""
+        return create_memory_store(self.user)
 
     def list_registered_tools(self) -> list[ToolSpec]:
         """Return all tools currently registered on the session."""
@@ -1846,7 +1846,7 @@ class AgentRuntime:
 
         # Try to load from memory (agent may have crashed/restarted)
         if self.user:
-            memory = MemoryStore.for_user(self.user)
+            memory = create_memory_store(self.user)
             state_data = memory.get(
                 f"agent_state_{agent_id}",
                 namespace="agent:runtime",

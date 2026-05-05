@@ -31,7 +31,7 @@ from obscura.memory.events import (
     make_event,
 )
 from obscura.memory.postgres_memory import PostgreSQLMemoryStore
-from obscura.memory.types import MemoryEntry, MemoryKey
+from obscura.memory.types import MemoryEntry, MemoryKey, MemoryStoreProtocol
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -401,13 +401,14 @@ class GlobalMemoryStore(MemoryStore):
         super().set(*args, **kwargs)
 
 
-def create_memory_store(user: AuthenticatedUser) -> MemoryStore:
+def create_memory_store(user: AuthenticatedUser) -> MemoryStoreProtocol:
     """Factory: return a PostgreSQL or SQLite memory store based on config.
 
     When ``OBSCURA_DB_TYPE=postgresql``, returns a
     :class:`~obscura.memory.postgres_memory.PostgreSQLMemoryStore`.
     Otherwise returns the default SQLite-backed :class:`MemoryStore`.
+    Both impls satisfy :class:`MemoryStoreProtocol`.
     """
     if is_pg_configured():
-        return PostgreSQLMemoryStore.for_user(user)  # type: ignore[return-value]
+        return PostgreSQLMemoryStore.for_user(user)
     return MemoryStore.for_user(user)
