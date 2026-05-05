@@ -18,6 +18,7 @@ from obscura.composition.blocks.browser_bridge import install_browser_bridge
 from obscura.composition.blocks.imessage_daemon import install_imessage_daemon
 from obscura.composition.blocks.kairos import install_kairos_engine
 from obscura.composition.blocks.mcp_servers import install_mcp_servers
+from obscura.composition.blocks.memory_tools import install_memory_tools
 from obscura.composition.blocks.plugins import install_plugin_tools
 from obscura.composition.blocks.project_hooks import install_project_hooks
 from obscura.composition.blocks.repl_callbacks import install_repl_callbacks
@@ -36,6 +37,7 @@ __all__ = [
     "install_imessage_daemon",
     "install_kairos_engine",
     "install_mcp_servers",
+    "install_memory_tools",
     "install_plugin_tools",
     "install_project_hooks",
     "install_repl_callbacks",

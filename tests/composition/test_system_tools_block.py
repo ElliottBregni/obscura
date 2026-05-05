@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -13,7 +12,6 @@ from obscura.composition.session import (
     SessionConfig,
     new_session_id,
 )
-from obscura.core.types import ToolSpec
 
 
 class _StubClient:
@@ -27,7 +25,7 @@ class _StubClient:
         self._user = user
         self._registered: list[str] = []
 
-    def register_tool(self, spec: ToolSpec) -> None:
+    def register_tool(self, spec: Any) -> None:
         if spec.name in self._registered:
             return
         self._registered.append(spec.name)
@@ -70,49 +68,13 @@ async def test_registers_core_system_tools() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_memory_tools_skipped_without_vector_store() -> None:
-    """make_memory_tool_specs should NOT be called when vector_store is None."""
-    session = _make_session(vector_store=None)
-
-    with patch(
-        "obscura.tools.memory_tools.make_memory_tool_specs",
-    ) as mock_make:
-        await install_system_tools(session, SessionConfig(tools_enabled=True))
-
-    mock_make.assert_not_called()
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_memory_tools_registered_when_vector_store_and_user_present() -> None:
-    """When session.vector_store + client._user are both set, memory tools register."""
-    from unittest.mock import MagicMock
+async def test_does_not_touch_memory_tools_regardless_of_vector_store() -> None:
+    """Memory tool registration moved to install_memory_tools; this block
+    must not register them even when vector_store and user are present."""
+    from unittest.mock import MagicMock, patch
 
     fake_vector_store = object()
     session = _make_session(vector_store=fake_vector_store, user=MagicMock())
-
-    fake_memory_tool = ToolSpec(
-        name="fake_memory_tool",
-        description="...",
-        parameters={"type": "object", "properties": {}},
-        handler=lambda _args: None,
-    )
-    with patch(
-        "obscura.tools.memory_tools.make_memory_tool_specs",
-        return_value=[fake_memory_tool],
-    ) as mock_make:
-        await install_system_tools(session, SessionConfig(tools_enabled=True))
-
-    mock_make.assert_called_once()
-    assert "fake_memory_tool" in {t.name for t in session.registry.all()}
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_memory_tools_skipped_when_user_missing() -> None:
-    """vector_store set but no user → memory tools still skipped."""
-    fake_vector_store = object()
-    session = _make_session(vector_store=fake_vector_store, user=None)
 
     with patch(
         "obscura.tools.memory_tools.make_memory_tool_specs",

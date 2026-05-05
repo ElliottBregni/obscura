@@ -7,8 +7,9 @@ block.
 
 Currently extracted into build_repl_session:
 - install_plugin_tools         (capability-gated builtin plugins)
-- install_system_tools         (system / memory / worktree / etc tool specs)
+- install_system_tools         (system / worktree / etc tool specs)
 - install_vector_memory        (Qdrant store + channel router)
+- install_memory_tools         (memory tool specs; depends on vector_store)
 - install_project_hooks        (.obscura/hooks/ + memory channel + KAIROS)
 - install_repl_prompt_sections (REPL system prompt enrichment with
                                  memory/channels/env/KAIROS sections;
@@ -40,6 +41,7 @@ from obscura.composition.blocks import (
     install_imessage_daemon,
     install_kairos_engine,
     install_mcp_servers,
+    install_memory_tools,
     install_plugin_tools,
     install_project_hooks,
     install_repl_callbacks,
@@ -76,38 +78,26 @@ async def build_repl_session(
             install_repl_prompt_sections enriches it post-build)
       extras:
         1. install_plugin_tools     — capability resolver + plugin specs
-        2. install_system_tools     — @tool-decorated specs (no memory yet)
-        3. install_vector_memory    — vector_store + context_router (REPL
-                                       passes user via core; block is
-                                       idempotent)
-        4. install_project_hooks    — .obscura/hooks + channel hook
+        2. install_system_tools     — @tool-decorated specs (no memory)
+        3. install_vector_memory    — vector_store + context_router
+        4. install_memory_tools     — memory tool specs (reads
+                                       session.vector_store; skipped when
+                                       vector_memory opted out)
+        5. install_project_hooks    — .obscura/hooks + channel hook
                                        (closes over session.context_router)
-        5. install_repl_prompt_sections — composes the full REPL prompt
+        6. install_repl_prompt_sections — composes the full REPL prompt
                                        (memory + channels + env + kairos +
                                        coordinator + wizard) and mutates
                                        backend._system_prompt
-        6. install_repl_callbacks   — ask_user / plan_approval / user_interact
-        7. install_browser_bridge   — Chrome extension (best-effort)
-        8. install_supervisor       — multi-agent supervisor (--supervise)
-        9. install_kairos_engine    — KAIROS daemon
-       10. install_imessage_daemon  — iMessage daemon (skipped if supervisor)
-       11. install_uds_inbox        — cross-session UDS messaging
-       12. install_session_registration — PID lock + signal handlers
-       13. install_tool_router      — eval-driven tool router (last:
+        7. install_repl_callbacks   — ask_user / plan_approval / user_interact
+        8. install_browser_bridge   — Chrome extension (best-effort)
+        9. install_supervisor       — multi-agent supervisor (--supervise)
+       10. install_kairos_engine    — KAIROS daemon
+       11. install_imessage_daemon  — iMessage daemon (skipped if supervisor)
+       12. install_uds_inbox        — cross-session UDS messaging
+       13. install_session_registration — PID lock + signal handlers
+       14. install_tool_router      — eval-driven tool router (last:
                                        sees full registry)
-
-    NOTE: Memory tools registered by install_system_tools require
-    session.vector_store. Order is deliberately
-    plugins → system_tools → vector_memory in the API surface (where
-    vector_memory must run first), but in REPL, system_tools registers
-    BEFORE vector_memory. Memory tools therefore re-register on the
-    repeat call when vector_memory is set... but install_system_tools
-    is idempotent (add_tool de-dupes by name) so the second call to
-    install_system_tools (post-vector_memory) would register memory
-    tools that didn't register the first time.
-
-    To get memory tools registered without re-running system_tools, we
-    swap order: vector_memory BEFORE system_tools (matches API).
     """
     session = await build_core_session(
         config,
@@ -119,8 +109,9 @@ async def build_repl_session(
     )
     await install_mcp_servers(session, config)
     await install_plugin_tools(session, config)
-    await install_vector_memory(session, config)
     await install_system_tools(session, config)
+    await install_vector_memory(session, config)
+    await install_memory_tools(session, config)
     await install_project_hooks(session, config)
     await install_repl_prompt_sections(session, config)
     await install_skill_context(

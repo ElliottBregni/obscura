@@ -2,13 +2,15 @@
 
 Registers the system tool surface that lives in `obscura/tools/`:
 - `get_system_tool_specs()` — core system tools (shell, file, ui, etc.)
-- `make_memory_tool_specs(user)` — memory tools, only if `session.vector_store` is set
 - Lazy modules: worktree, task, goal, profile, arbiter, lsp, browser
+
+Memory tools are registered by the separate `install_memory_tools` block
+(it depends on `session.vector_store`, which is set by
+`install_vector_memory`). Splitting them keeps this block free of
+ordering coupling with `install_vector_memory`.
 
 Reads:
     config.tools_enabled
-    session.vector_store (optional — gates memory tool registration)
-    session.client._user (optional — passed to make_memory_tool_specs)
 
 Writes:
     session.registry — adds tool specs via session.add_tool() (idempotent)
@@ -85,24 +87,6 @@ async def install_system_tools(
         logger.debug(
             "install_system_tools: get_system_tool_specs failed", exc_info=True
         )
-
-    # Memory tools — only if vector_store is configured AND user is set
-    if session.vector_store is not None:
-        user = getattr(session.client, "_user", None)
-        if user is not None:
-            try:
-                from obscura.tools.memory_tools import make_memory_tool_specs
-
-                for spec in make_memory_tool_specs(user):
-                    if session.add_tool(spec):
-                        registered += 1
-                    else:
-                        skipped += 1
-            except Exception:
-                logger.debug(
-                    "install_system_tools: make_memory_tool_specs failed",
-                    exc_info=True,
-                )
 
     # Optional lazy-imported tool modules
     for getter_name, module_path in _LAZY_TOOL_GETTERS:

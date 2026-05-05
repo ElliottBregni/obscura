@@ -39,6 +39,7 @@ DRIFT_SYMBOLS = (
     "resolve_allowed_tools_from_config",
     # System tools block (composition/blocks/system_tools.py)
     "get_system_tool_specs",
+    # Memory tools block (composition/blocks/memory_tools.py)
     "make_memory_tool_specs",
     # Browser bridge block (composition/blocks/browser_bridge.py)
     "attach_if_running",
@@ -57,6 +58,7 @@ ALLOWLIST = frozenset(
         # Composition blocks themselves
         "obscura/composition/blocks/plugins.py",
         "obscura/composition/blocks/system_tools.py",
+        "obscura/composition/blocks/memory_tools.py",
         "obscura/composition/blocks/browser_bridge.py",
         # /plugins slash commands inspect plugins; do not register tools
         "obscura/cli/commands.py",

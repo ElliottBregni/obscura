@@ -6,16 +6,16 @@ as REPL, plus optional vector memory and project hooks. This brings the
 API to feature parity with REPL (previously API had ZERO plugin/system
 tools registered — agents could only call MCP tools).
 
-Pipeline (order matters: vector_memory must run BEFORE system_tools so
-that memory_tools see session.vector_store and register):
+Pipeline:
     core: ObscuraClient + backend.start() (with MCP servers from config)
     extras:
         1. install_plugin_tools    (SAME block as REPL/A2A)
-        2. install_vector_memory   (sets session.vector_store; skipped if
+        2. install_system_tools    (SAME block as REPL/A2A)
+        3. install_vector_memory   (sets session.vector_store; skipped if
                                     no Qdrant configured for user)
-        3. install_system_tools    (registers memory_tools iff
-                                    session.vector_store is set)
-        4. install_project_hooks   (server-side audit/telemetry hooks)
+        4. install_memory_tools    (memory tool specs; depends on
+                                    session.vector_store)
+        5. install_project_hooks   (server-side audit/telemetry hooks)
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.composition.blocks import (
     install_mcp_servers,
+    install_memory_tools,
     install_plugin_tools,
     install_project_hooks,
     install_skill_context,
@@ -56,8 +57,9 @@ async def build_api_session(
     )
     await install_mcp_servers(session, config)
     await install_plugin_tools(session, config)
-    await install_vector_memory(session, config)
     await install_system_tools(session, config)
+    await install_vector_memory(session, config)
+    await install_memory_tools(session, config)
     await install_project_hooks(session, config)
     await install_skill_context(session, config)
     await install_tool_router(session, config)
