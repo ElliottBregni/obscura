@@ -142,4 +142,11 @@ def bind_stream_log() -> Generator[dict[tuple[str, str], int]]:
     try:
         yield log
     finally:
-        STREAM_TOOL_LOG.reset(token)
+        # See note in ``tool_tiering.bind_discovered_tools`` — async
+        # generator finalisation can happen in a different Context than
+        # entry. ``ContextVar.reset`` then raises ValueError; the
+        # original context's binding is already gone with its frame.
+        try:
+            STREAM_TOOL_LOG.reset(token)
+        except ValueError:
+            pass

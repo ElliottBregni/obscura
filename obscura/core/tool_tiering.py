@@ -251,7 +251,18 @@ def bind_discovered_tools() -> Iterator[set[str]]:
     try:
         yield discovered
     finally:
-        DISCOVERED_TOOLS.reset(token)
+        # Async generators that yield while a ContextVar is bound can be
+        # finalised in a different asyncio Context than the one that
+        # entered this manager (e.g. when the consumer task is cancelled
+        # and Python invokes ``aclose`` on the generator from a cleanup
+        # context). ``ContextVar.reset`` raises ValueError in that case.
+        # The token simply doesn't apply in the closing context, so it's
+        # safe to swallow — the original context's binding is gone with
+        # its frame anyway.
+        try:
+            DISCOVERED_TOOLS.reset(token)
+        except ValueError:
+            pass
 
 
 def filter_visible(tools: list[ToolSpec]) -> list[ToolSpec]:
