@@ -6,13 +6,17 @@ name: Browser Extension Tests
 
 on:
   push:
-    branches: [main]
+    # Push validation runs on the long-lived branches so a regression
+    # gets caught even when extension work lands without a PR. PRs
+    # against either branch follow the same path gate below.
+    branches: [main, dev/experimental]
     paths:
       - 'packages/browser-extension/**'
       - 'tests/browser_extension/**'
       - 'obscura/integrations/browser/**'
       - '.github/workflows/browser-extension.yml'
   pull_request:
+    branches: [main, dev/experimental]
     paths:
       - 'packages/browser-extension/**'
       - 'tests/browser_extension/**'
