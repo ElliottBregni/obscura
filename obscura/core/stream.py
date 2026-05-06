@@ -49,6 +49,14 @@ class EventToIteratorBridge:
         # used to backfill an end-event tool_name when the SDK omits it.
         self._active_tool_id: str = ""
         self._active_tool_name: str = ""
+        # Cumulative text we've already emitted for this turn. Used to
+        # detect providers that misuse delta events to send cumulative
+        # content (Copilot's `assistant.message_delta` has been observed
+        # to do this on certain message shapes). When the next "delta"
+        # is a prefix-extension of what we've sent, we slice off the
+        # duplicate and emit only the new tail.
+        self._emitted_text: str = ""
+        self._emitted_thinking: str = ""
 
     # -- Push methods (called from Copilot event handlers) ------------------
 
@@ -57,27 +65,55 @@ class EventToIteratorBridge:
         self._queue.put_nowait(chunk)
 
     def on_text_delta(self, event: Any) -> None:
-        """Map Copilot ``assistant.message_delta`` event."""
-        delta = ""
+        """Map Copilot ``assistant.message_delta`` event.
+
+        A delta event MUST carry incremental new chars, not cumulative
+        content. We accept (in priority order) ``delta_content`` →
+        ``delta`` → bare-string events. The legacy ``content`` field
+        was a cumulative-snapshot fallback that double-printed assistant
+        text whenever Copilot's SDK shipped a delta event without a
+        proper ``delta_content`` field; we now log and drop those.
+
+        As defense in depth, _normalize_delta detects when the
+        incoming delta is a prefix-extension of what we've already
+        emitted (i.e. a provider misusing delta semantics to send
+        cumulative content) and trims it down to just the new tail.
+        """
+        raw_delta = ""
         if (
             hasattr(event, "data")
             and hasattr(event.data, "delta_content")
             and event.data.delta_content
         ):
-            delta = event.data.delta_content
-        elif (
-            hasattr(event, "data")
-            and hasattr(event.data, "content")
-            and event.data.content
-        ):
-            delta = event.data.content
+            raw_delta = event.data.delta_content
         elif (
             hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta
         ):
-            delta = event.data.delta
+            raw_delta = event.data.delta
         elif isinstance(event, str):
-            delta = event
+            raw_delta = event
+        else:
+            # Some Copilot SDK builds emit assistant.message_delta with
+            # only `content` (cumulative) and no `delta_content`. Don't
+            # silently treat that as an incremental delta — it's the bug
+            # that caused the duplicate-render symptom. Log loudly so
+            # we can spot any new provider regression.
+            if (
+                hasattr(event, "data")
+                and hasattr(event.data, "content")
+                and event.data.content
+            ):
+                logger.warning(
+                    "assistant.message_delta missing delta_content; "
+                    "ignoring cumulative `content` field to avoid "
+                    "double-print (data=%r)",
+                    type(event.data).__name__,
+                )
+            return
+
+        delta = self._normalize_delta(raw_delta, kind="text")
         if delta:
+            self._emitted_text += delta
             self.push(
                 StreamChunk(
                     kind=ChunkKind.TEXT_DELTA,
@@ -87,35 +123,63 @@ class EventToIteratorBridge:
                 ),
             )
 
+    def _normalize_delta(self, raw_delta: str, *, kind: str) -> str:
+        """Strip the prefix-overlap when a provider sends cumulative content.
+
+        If ``raw_delta`` starts with everything we've already emitted in
+        this turn, the provider sent the full message-so-far instead of
+        just the new chars. Slice the overlap and return only the tail.
+        Logs a warning the first time it triggers per turn so the
+        regression is visible.
+        """
+        if not raw_delta:
+            return ""
+        emitted = self._emitted_text if kind == "text" else self._emitted_thinking
+        if emitted and raw_delta.startswith(emitted):
+            tail = raw_delta[len(emitted):]
+            logger.warning(
+                "%s delta arrived as cumulative snapshot (len=%d, "
+                "overlap=%d, tail=%d); emitting tail only",
+                kind, len(raw_delta), len(emitted), len(tail),
+            )
+            return tail
+        return raw_delta
+
     def on_thinking_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.reasoning_delta`` event."""
-        delta = ""
+        raw_delta = ""
         if (
             hasattr(event, "data")
             and hasattr(event.data, "delta_content")
             and event.data.delta_content
         ):
-            delta = event.data.delta_content
+            raw_delta = event.data.delta_content
         elif (
             hasattr(event, "data")
             and hasattr(event.data, "reasoning_text")
             and event.data.reasoning_text
         ):
-            delta = event.data.reasoning_text
+            # reasoning_text is the cumulative-snapshot variant; let
+            # _normalize_delta strip the overlap when used as a fallback.
+            raw_delta = event.data.reasoning_text
         elif (
             hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta
         ):
-            delta = event.data.delta
+            raw_delta = event.data.delta
         elif isinstance(event, str):
-            delta = event
-        self.push(
-            StreamChunk(
-                kind=ChunkKind.THINKING_DELTA,
-                text=delta,
-                raw=event,
-                native_event=event,
-            ),
-        )
+            raw_delta = event
+
+        delta = self._normalize_delta(raw_delta, kind="thinking")
+        if delta:
+            self._emitted_thinking += delta
+            self.push(
+                StreamChunk(
+                    kind=ChunkKind.THINKING_DELTA,
+                    text=delta,
+                    raw=event,
+                    native_event=event,
+                ),
+            )
 
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
@@ -261,6 +325,10 @@ class EventToIteratorBridge:
             ),
         )
         self._queue.put_nowait(None)
+        # Reset cumulative-detection state for the next stream lifecycle —
+        # bridges are sometimes reused across turns by the same backend.
+        self._emitted_text = ""
+        self._emitted_thinking = ""
 
     def error(
         self,
