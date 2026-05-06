@@ -102,7 +102,39 @@ def _ensure_cli_auth_for_startup(
 # ---------------------------------------------------------------------------
 
 
-@click.group(invoke_without_command=True)
+class _SubcommandAwareGroup(click.Group):
+    """Click group that prefers subcommand dispatch over positional capture.
+
+    The root group has both ``invoke_without_command=True`` and a
+    positional ``prompt`` argument so ``obscura "explain this"`` works
+    as a single-shot. But Click's default parsing then greedily eats
+    the next positional token — including subcommand names like
+    ``init``, ``kairos``, ``tui`` — so ``obscura tui`` would launch
+    the REPL with prompt="tui" instead of dispatching the ``tui``
+    subcommand.
+
+    This subclass intercepts ``parse_args`` and, when the first
+    non-option token matches a registered subcommand, drops the
+    positional ``prompt`` argument so Click routes to the subcommand
+    cleanly.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        for tok in args:
+            if tok.startswith("-"):
+                continue
+            if tok in self.commands:
+                # Pop the prompt argument so it doesn't consume `tok`.
+                self.params = [
+                    p for p in self.params if not (
+                        isinstance(p, click.Argument) and p.name == "prompt"
+                    )
+                ]
+            break
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=_SubcommandAwareGroup, invoke_without_command=True)
 @click.argument("prompt", required=False, default=None)
 @click.option(
     "-b",
@@ -166,20 +198,20 @@ def _ensure_cli_auth_for_startup(
 @click.pass_context
 def main(
     ctx: click.Context,
-    prompt: str | None,
-    backend: str,
-    model: str | None,
-    system: str,
-    session: str | None,
-    resume_last: bool,
-    resume: str | None,
-    max_turns: int,
-    tools: str,
-    confirm: bool,
-    no_default_prompt: bool,
-    workspace_name: str | None,
-    log_level: str,
-    supervise: bool,
+    prompt: str | None = None,
+    backend: str = "copilot",
+    model: str | None = None,
+    system: str = "",
+    session: str | None = None,
+    resume_last: bool = False,
+    resume: str | None = None,
+    max_turns: int = 10,
+    tools: str = "on",
+    confirm: bool = False,
+    no_default_prompt: bool = False,
+    workspace_name: str | None = None,
+    log_level: str = "WARNING",
+    supervise: bool = True,
 ) -> None:
     """Obscura -- AI agent REPL."""
     # If a subcommand was invoked, let Click handle it
@@ -521,6 +553,112 @@ def template_inspect(name: str) -> None:
 from obscura.cli.kairos_commands import kairos_group as _kairos_group  # noqa: E402
 
 main.add_command(_kairos_group)
+
+
+# ---------------------------------------------------------------------------
+# Full-screen TUI subcommand — `obscura tui`
+# ---------------------------------------------------------------------------
+
+
+@main.command(name="tui")
+@click.option(
+    "-b",
+    "--backend",
+    default="copilot",
+    type=click.Choice([b.value for b in Backend]),
+    help="Backend to use.",
+)
+@click.option("-m", "--model", default=None, help="Model ID override.")
+@click.option("-s", "--system", default="", help="System prompt.")
+@click.option("--session", "session_id", default=None, help="Resume session by ID.")
+@click.option("--max-turns", default=10, type=int, help="Max agent loop turns.")
+@click.option(
+    "--tools",
+    default="on",
+    type=click.Choice(["on", "off"]),
+    help="Enable/disable tool calling.",
+)
+@click.option(
+    "--confirm/--no-confirm",
+    default=False,
+    help="Require approval before each tool call.",
+)
+@click.option(
+    "--no-default-prompt",
+    is_flag=True,
+    default=False,
+    help="Skip the default Obscura system prompt.",
+)
+@click.option(
+    "--supervise/--no-supervise",
+    default=True,
+    help="Launch the agent fleet from agents.yaml (default: on).",
+)
+@click.option(
+    "--full-screen/--no-full-screen",
+    default=True,
+    help="Use the full-screen Application; --no-full-screen falls back "
+    "to the legacy bordered REPL (useful for dumb terminals / CI).",
+)
+@click.option(
+    "--show-thinking/--hide-thinking",
+    default=True,
+    help="Render THINKING_DELTA blocks inline (Ctrl-T still expands them when hidden).",
+)
+@click.option(
+    "--log-level",
+    "log_level",
+    default="WARNING",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Console log level.",
+)
+def tui(  # noqa: PLR0913 — Click options are individual params on purpose.
+    backend: str,
+    model: str | None,
+    system: str,
+    session_id: str | None,
+    max_turns: int,
+    tools: str,
+    confirm: bool,
+    no_default_prompt: bool,
+    supervise: bool,
+    full_screen: bool,
+    show_thinking: bool,
+    log_level: str,
+) -> None:
+    """Launch the full-screen prompt-toolkit TUI.
+
+    Same engine as the bordered REPL (``obscura``), different surface:
+    persistent input box at the bottom, scrollback above, dedicated
+    rows for live status, notifications, and sticky banners. Tool
+    approvals appear as modal floats. Slash commands work as in the
+    REPL — output is captured into the transcript.
+    """
+    from obscura.cli.tui.engine_adapter import TUIEngineConfig
+    from obscura.cli.tui.runtime import run_tui
+
+    sync_guide_files()
+    sync_provider_settings()
+
+    cfg = TUIEngineConfig(
+        backend=backend,
+        model=model,
+        system=system,
+        session_id=session_id,
+        max_turns=max_turns,
+        tools_enabled=(tools == "on"),
+        confirm_enabled=confirm,
+        no_default_prompt=no_default_prompt,
+        supervise=supervise,
+        full_screen=full_screen,
+        show_thinking=show_thinking,
+        log_level=log_level,
+    )
+    try:
+        exit_code = asyncio.run(run_tui(cfg))
+    except KeyboardInterrupt:
+        exit_code = 130
+    raise SystemExit(exit_code)
 
 
 # Backwards-compat aliases added by test harness

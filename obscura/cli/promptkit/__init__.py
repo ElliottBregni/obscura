@@ -1,18 +1,20 @@
-"""obscura.cli.prompt — back-compat shim for the prompt-toolkit widget kit.
+"""obscura.cli.promptkit — shared prompt_toolkit widget kit.
 
-The widgets that used to live here are now in ``obscura.cli.promptkit``.
-This module remains as a thin re-exporter so existing call sites
-(``obscura.cli._repl_loop``, ``obscura.cli._send``, ``obscura.cli.widgets``,
-``packages/browser-extension/native-host/obscura_native_host.py``) keep
-importing from ``obscura.cli.prompt`` without change.
+This package holds the prompt_toolkit-based widget building blocks that
+power both:
 
-The native-host bridge monkey-patches
-``obscura.cli.prompt.confirm_prompt_async`` at runtime to round-trip
-prompts through the browser side panel; that mechanism continues to
-work because we expose ``confirm_prompt_async`` here as a regular
-module attribute.
+  * the legacy bordered REPL (``obscura.cli.prompt`` is a back-compat
+    shim re-exporting from this package), and
+  * the new full-screen Textual TUI under construction in
+    ``obscura.cli.tui``.
 
-New code should prefer importing from ``obscura.cli.promptkit`` directly.
+Splitting the widgets out of ``prompt.py`` lets both consumers share one
+implementation without code duplication.  No behaviour change vs. the
+pre-split ``prompt.py``.
+
+Public API exported here mirrors what ``obscura.cli.prompt`` historically
+exposed; consumers should prefer importing from this package directly,
+but the legacy ``obscura.cli.prompt`` module continues to work.
 """
 
 from __future__ import annotations
@@ -58,12 +60,6 @@ from obscura.cli.promptkit.style import (
     print_turn_separator,
 )
 
-# Legacy re-exports that historically lived in this module — the renderer
-# owns the canonical implementation; keep them importable from here for
-# call sites that haven't migrated.
-from obscura.cli.render import _sanitize_text  # pyright: ignore[reportPrivateUsage]
-from obscura.cli.ui_primitives import random_thinking_message
-
 __all__ = [
     "PROMPT_STYLE",
     "KeywordHighlighter",
@@ -86,7 +82,6 @@ __all__ = [
     "_make_prompt_message",
     "_render_menu_line",
     "_render_model_status_line",
-    "_sanitize_text",
     "animate_spinner",
     "bordered_prompt",
     "confirm_prompt_async",
@@ -96,5 +91,4 @@ __all__ = [
     "print_separator",
     "print_status_banner",
     "print_turn_separator",
-    "random_thinking_message",
 ]
