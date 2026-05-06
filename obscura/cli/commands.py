@@ -9810,6 +9810,79 @@ async def _interview_input() -> str:
     return await loop.run_in_executor(None, _read)
 
 
+async def cmd_vault(args: str, _ctx: REPLContext) -> str | None:
+    """/vault — vault sync controls.
+
+    Subcommands::
+
+        /vault sync              # Run a full ingest + export cycle
+        /vault dump-sessions     # Just refresh shared/sessions/ pages
+        /vault status            # Show zone file counts
+
+    With no args, prints the help block above.
+    """
+    tokens = [t for t in args.strip().split(None, 1) if t]
+    sub = tokens[0].lower() if tokens else "help"
+
+    try:
+        from obscura.kairos.vault_sync import VaultSync
+
+        vs = VaultSync()
+    except Exception as exc:
+        logger.debug("suppressed exception in cmd_vault VaultSync()", exc_info=True)
+        print_error(f"vault unavailable: {exc}")
+        return None
+
+    if sub in ("help", "?"):
+        print_info(
+            "Subcommands: sync, dump-sessions, status. "
+            "See `/vault sync` to run the full pipeline.",
+        )
+        return None
+
+    if sub == "status":
+        info = vs.status()
+        print_info(json.dumps(info, indent=2, default=str))
+        return None
+
+    if sub == "sync":
+        if not vs.vault_dir.is_dir():
+            print_warning(
+                f"Vault dir does not exist: {vs.vault_dir}. "
+                "Run `vs.bootstrap()` or just create the dir first.",
+            )
+            return None
+        try:
+            report = await vs.sync()
+            print_ok(f"Vault synced: {report}")
+        except Exception as exc:
+            logger.debug("suppressed exception in cmd_vault sync", exc_info=True)
+            print_error(f"sync failed: {exc}")
+        return None
+
+    if sub == "dump-sessions":
+        if not vs.vault_dir.is_dir():
+            print_warning(
+                f"Vault dir does not exist: {vs.vault_dir}. Create it first.",
+            )
+            return None
+        try:
+            written = await asyncio.to_thread(vs.export_session_logs)
+            print_ok(
+                f"Wrote {written} session log file(s) to "
+                f"{vs.vault_dir / 'shared' / 'sessions'}",
+            )
+        except Exception as exc:
+            logger.debug(
+                "suppressed exception in cmd_vault dump-sessions", exc_info=True
+            )
+            print_error(f"dump-sessions failed: {exc}")
+        return None
+
+    print_warning(f"Unknown /vault subcommand: {sub!r}. Try `/vault help`.")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -9848,6 +9921,7 @@ COMMANDS: dict[str, CommandHandler] = {
     "attention": cmd_attention,
     # Session / discovery
     "session": cmd_session,
+    "vault": cmd_vault,
     "discover": cmd_discover,
     "mcp": cmd_mcp,
     "plugin": cmd_plugin,

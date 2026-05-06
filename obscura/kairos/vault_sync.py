@@ -30,6 +30,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -113,7 +114,16 @@ _ZONE_DIRS = (
     "shared/decisions",
     "shared/context",
     "shared/runbooks",
+    "shared/sessions",
 )
+
+
+# Caps for the session-log export. Tunable per-deployment without a
+# code change because the sync runs unattended and a runaway session
+# table shouldn't blow up the vault.
+_SESSION_PAGE_CAP = 50  # per-session pages kept on disk
+_DIGEST_RECENT_SESSIONS = 20  # rows shown in the digest body
+_DIGEST_LOG_TAIL = 500  # deep-log lines scanned for the digest stats
 
 
 # ---------------------------------------------------------------------------
@@ -602,13 +612,19 @@ class VaultSync:
     # ------------------------------------------------------------------
 
     def _export_all(self) -> int:
-        """Export Obscura state to the agent/ zone. Returns file count."""
+        """Export Obscura state to the agent/ + shared/ zones.
+
+        Returns total file count written. Each step is wrapped in
+        :func:`_retry` so a single transient I/O failure (e.g. fsync on
+        a busy disk) doesn't kill the whole export cycle.
+        """
         count = 0
         for fn, label in (
             (self._export_goals, "export_goals"),
             (self._export_queue_snapshot, "export_queue_snapshot"),
             (self._export_arbiter_verdicts, "export_arbiter_verdicts"),
             (self._export_profile_summary, "export_profile_summary"),
+            (self.export_session_logs, "export_session_logs"),
         ):
             try:
                 count += _retry(fn, label=label)
@@ -953,6 +969,374 @@ class VaultSync:
         # Write outside the data-fetch try/except so transient I/O errors can be retried.
         out.write_text(content, encoding="utf-8")
         return 1
+
+    # ------------------------------------------------------------------
+    # Session log export — per-session pages + rolling digest
+    # ------------------------------------------------------------------
+
+    def export_session_logs(self) -> int:
+        """Public entry point: dump session logs to vault/shared/sessions/.
+
+        Writes up to ``_SESSION_PAGE_CAP`` per-session pages PLUS one
+        rolling ``recent-activity.md`` digest. Both run on every sync
+        tick and on-demand via the ``/vault dump-sessions`` slash
+        command.
+
+        Returns the total number of files written (per-session + digest).
+        """
+        return self._export_session_pages() + self._export_session_digest()
+
+    def _export_session_pages(self) -> int:
+        """Write one markdown page per session into vault/shared/sessions/.
+
+        Source: event store's :meth:`list_sessions` (most recently
+        updated first). Per-session pages contain frontmatter with
+        backend / model / project / status / message_count / metadata
+        scalars, plus a body that summarizes turn count, tools used
+        (from event store events), and a backlink to the linked goal
+        page when the session metadata records a goal_id.
+
+        Stale per-session pages (sessions evicted from the cap window
+        or removed from the store) are swept AFTER writes so backlinks
+        from the digest stay valid mid-export.
+        """
+        sessions_dir = self.vault_dir / "shared" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from obscura.core.db_factory import DatabaseFactory
+
+            store = DatabaseFactory.create_event_store()
+        except Exception:
+            logger.debug("Session-log export: event store unavailable", exc_info=True)
+            return 0
+
+        try:
+            sessions = asyncio.run(store.list_sessions())
+        except Exception:
+            logger.debug("Session-log export: list_sessions failed", exc_info=True)
+            return 0
+        finally:
+            with contextlib.suppress(Exception):
+                store.close()
+
+        # Most recent first; cap so the directory stays bounded.
+        try:
+            sessions.sort(
+                key=lambda s: getattr(s, "updated_at", None)
+                or getattr(s, "created_at", None)
+                or datetime.min.replace(tzinfo=UTC),
+                reverse=True,
+            )
+        except Exception:
+            logger.debug(
+                "Session-log export: sort failed; using natural order", exc_info=True
+            )
+        live_ids: set[str] = set()
+        count = 0
+        for sess in sessions[:_SESSION_PAGE_CAP]:
+            try:
+                page = self._render_session_page(sess)
+                if page is None:
+                    continue
+                page_id, content = page
+                (sessions_dir / f"{page_id}.md").write_text(content, encoding="utf-8")
+                live_ids.add(page_id)
+                count += 1
+            except Exception:
+                logger.debug(
+                    "Session-log export: render failed for session %s",
+                    getattr(sess, "id", "?"),
+                    exc_info=True,
+                )
+
+        # Sweep stale per-session pages — anything not in live_ids and not
+        # the digest itself.
+        for old in sessions_dir.glob("*.md"):
+            if old.stem in live_ids or old.name == "recent-activity.md":
+                continue
+            with contextlib.suppress(OSError):
+                old.unlink()
+
+        return count
+
+    def _render_session_page(
+        self, sess: Any
+    ) -> tuple[str, str] | None:
+        """Render a single session into (page_id, file_content)."""
+        sid = getattr(sess, "id", "") or ""
+        if not sid:
+            return None
+
+        # Pull events to summarize tools used + turn count. Best-effort —
+        # if the per-session query fails we still emit the metadata page.
+        tool_counts: dict[str, int] = {}
+        turn_count = 0
+        try:
+            from obscura.core.db_factory import DatabaseFactory
+            from obscura.core.enums.agent import AgentEventKind
+
+            store = DatabaseFactory.create_event_store()
+            try:
+                events = asyncio.run(store.get_events(sid))
+            finally:
+                with contextlib.suppress(Exception):
+                    store.close()
+            for ev in events:
+                if ev.kind == AgentEventKind.TURN_COMPLETE:
+                    turn_count += 1
+                elif ev.kind == AgentEventKind.TOOL_CALL:
+                    name = str(ev.payload.get("tool_name", "")).strip() or "?"
+                    tool_counts[name] = tool_counts.get(name, 0) + 1
+        except Exception:
+            logger.debug(
+                "Session-log export: event scan failed for %s", sid, exc_info=True
+            )
+
+        metadata = dict(getattr(sess, "metadata", {}) or {})
+        goal_id = str(metadata.get("goal_id", "")).strip()
+        status = getattr(sess, "status", None)
+        status_val = (
+            getattr(status, "value", None) or str(status or "")
+        )
+        created = getattr(sess, "created_at", None)
+        updated = getattr(sess, "updated_at", None)
+        created_iso = (
+            created.isoformat() if created is not None and hasattr(created, "isoformat")
+            else ""
+        )
+        updated_iso = (
+            updated.isoformat() if updated is not None and hasattr(updated, "isoformat")
+            else ""
+        )
+
+        body_lines: list[str] = []
+        title = (
+            (getattr(sess, "summary", "") or "").strip()
+            or getattr(sess, "active_agent", "")
+            or sid
+        )
+        body_lines.append(f"# Session `{sid}`")
+        body_lines.append("")
+        body_lines.append(title if title != sid else "_(no summary recorded)_")
+        body_lines.append("")
+        body_lines.append("## Stats")
+        body_lines.append("")
+        body_lines.append(f"- turns: **{turn_count}**")
+        body_lines.append(
+            f"- tool calls: **{sum(tool_counts.values())}**"
+        )
+        body_lines.append(
+            f"- messages: **{getattr(sess, 'message_count', 0) or 0}**"
+        )
+        if tool_counts:
+            body_lines.append("")
+            body_lines.append("## Tools used")
+            body_lines.append("")
+            for name, cnt in sorted(
+                tool_counts.items(), key=lambda kv: (-kv[1], kv[0])
+            ):
+                body_lines.append(f"- `{name}` — {cnt}")
+        if goal_id:
+            body_lines.append("")
+            body_lines.append("## Goal")
+            body_lines.append("")
+            body_lines.append(f"- [[../../agent/goals/{goal_id}]]")
+
+        # Frontmatter — strip metadata to scalar/list values so YAML
+        # dump stays readable. Drop nested dicts (they bloat the page).
+        flat_meta: dict[str, Any] = {}
+        for k, v in metadata.items():
+            if isinstance(v, (str, int, float, bool)):
+                flat_meta[k] = v
+            elif isinstance(v, list):
+                flat_meta[k] = v[:20]  # cap deep lists like 'turns'
+
+        extra: dict[str, Any] = {
+            "agent": getattr(sess, "active_agent", ""),
+            "backend": getattr(sess, "backend", ""),
+            "model": getattr(sess, "model", ""),
+            "project": getattr(sess, "project", ""),
+            "status": status_val,
+            "message_count": getattr(sess, "message_count", 0) or 0,
+            "turn_count": turn_count,
+            "tool_call_count": sum(tool_counts.values()),
+        }
+        if goal_id:
+            extra["goal_id"] = goal_id
+        if flat_meta:
+            extra["metadata"] = flat_meta
+
+        content = self._render_page(
+            page_type="session",
+            page_id=sid,
+            body="\n".join(body_lines),
+            created_at=created_iso,
+            updated_at=updated_iso,
+            extra_fields=extra,
+        )
+        return sid, content
+
+    def _export_session_digest(self) -> int:
+        """Write a single rolling activity digest at recent-activity.md.
+
+        Combines two sources:
+
+          * Event store — most recent N sessions, with backlinks to
+            their per-session pages. This gives the human reader an
+            entry point into the per-session detail.
+          * Deep log JSONL — tail-scan to count tool_call / api_request
+            / error entries and surface their totals. This gives the
+            "what's been happening lately" view that the per-session
+            list can't (it's bounded by session boundaries).
+        """
+        digest_path = self.vault_dir / "shared" / "sessions" / "recent-activity.md"
+        digest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from obscura.core.db_factory import DatabaseFactory
+
+            store = DatabaseFactory.create_event_store()
+            try:
+                sessions = asyncio.run(store.list_sessions())
+            finally:
+                with contextlib.suppress(Exception):
+                    store.close()
+        except Exception:
+            logger.debug("Session digest: event store unavailable", exc_info=True)
+            sessions = []
+
+        try:
+            sessions.sort(
+                key=lambda s: getattr(s, "updated_at", None)
+                or getattr(s, "created_at", None)
+                or datetime.min.replace(tzinfo=UTC),
+                reverse=True,
+            )
+        except Exception:
+            logger.debug("Session digest: sort failed", exc_info=True)
+
+        log_stats = self._scan_deep_log_tail(_DIGEST_LOG_TAIL)
+
+        body_lines: list[str] = ["# Recent activity", ""]
+        body_lines.append(
+            f"Window: last {_DIGEST_RECENT_SESSIONS} sessions, last "
+            f"{_DIGEST_LOG_TAIL} deep-log entries.",
+        )
+        body_lines.append("")
+        body_lines.append("## Deep-log totals")
+        body_lines.append("")
+        if log_stats["scanned"] == 0:
+            body_lines.append("_no deep-log entries available_")
+        else:
+            body_lines.append(f"- entries scanned: **{log_stats['scanned']}**")
+            body_lines.append(f"- tool calls: **{log_stats['tool_calls']}**")
+            body_lines.append(f"- API requests: **{log_stats['api_requests']}**")
+            body_lines.append(f"- errors: **{log_stats['errors']}**")
+            top_tools = sorted(
+                log_stats["by_tool"].items(),
+                key=lambda kv: (-kv[1], kv[0]),
+            )[:10]
+            if top_tools:
+                body_lines.append("")
+                body_lines.append("**Top tools:**")
+                body_lines.extend(
+                    f"- `{name}` — {cnt}" for name, cnt in top_tools
+                )
+
+        body_lines.append("")
+        body_lines.append("## Recent sessions")
+        body_lines.append("")
+        if not sessions:
+            body_lines.append("_no sessions recorded_")
+        else:
+            for sess in sessions[:_DIGEST_RECENT_SESSIONS]:
+                sid = getattr(sess, "id", "")
+                if not sid:
+                    continue
+                title = (
+                    (getattr(sess, "summary", "") or "").strip()
+                    or getattr(sess, "active_agent", "")
+                    or "(unnamed)"
+                )
+                status = getattr(sess, "status", None)
+                status_val = (
+                    getattr(status, "value", None) or str(status or "")
+                )
+                body_lines.append(
+                    f"- [[{sid}]] · {status_val} · {title[:80]}"
+                )
+
+        content = self._render_page(
+            page_type="session_digest",
+            page_id="recent-activity",
+            body="\n".join(body_lines),
+            generated_at=datetime.now(UTC).isoformat(),
+            extra_fields={
+                "window_sessions": _DIGEST_RECENT_SESSIONS,
+                "window_log_entries": _DIGEST_LOG_TAIL,
+                "session_total": len(sessions),
+                "log_scanned": log_stats["scanned"],
+                "log_tool_calls": log_stats["tool_calls"],
+                "log_api_requests": log_stats["api_requests"],
+                "log_errors": log_stats["errors"],
+            },
+        )
+        digest_path.write_text(content, encoding="utf-8")
+        return 1
+
+    @staticmethod
+    def _scan_deep_log_tail(limit: int) -> dict[str, Any]:
+        """Tail-scan the JSONL deep log for aggregate stats.
+
+        Returns a dict with totals and a per-tool breakdown. Returns
+        zeros (and ``scanned=0``) when the log is missing or unreadable
+        — never raises.
+        """
+        result: dict[str, Any] = {
+            "scanned": 0,
+            "tool_calls": 0,
+            "api_requests": 0,
+            "errors": 0,
+            "by_tool": {},
+        }
+        log_path = Path.home() / ".obscura" / "logs" / "deep.jsonl"
+        if not log_path.is_file():
+            return result
+        try:
+            # Read full file then keep the last `limit` lines. Deep log
+            # is rotated at 10MB per file so this is bounded.
+            lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            logger.debug("deep-log tail read failed", exc_info=True)
+            return result
+        tail = lines[-limit:] if len(lines) > limit else lines
+        by_tool: dict[str, int] = {}
+        for raw in tail:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                entry: Any = json.loads(raw)
+            except Exception:
+                logger.debug("deep-log entry parse failed", exc_info=True)
+                continue
+            if not isinstance(entry, dict):
+                continue
+            entry_dict = cast(dict[str, Any], entry)
+            result["scanned"] = cast(int, result["scanned"]) + 1
+            kind = str(entry_dict.get("type", ""))
+            data: dict[str, Any] = entry_dict.get("data") or {}
+            if kind == "tool_call":
+                result["tool_calls"] = cast(int, result["tool_calls"]) + 1
+                tool_name = str(data.get("tool", "") or "?")
+                by_tool[tool_name] = by_tool.get(tool_name, 0) + 1
+            elif kind == "api_request":
+                result["api_requests"] = cast(int, result["api_requests"]) + 1
+            elif kind == "error":
+                result["errors"] = cast(int, result["errors"]) + 1
+        result["by_tool"] = by_tool
+        return result
 
     # ------------------------------------------------------------------
     # Notifications (called by tools on mutations)
