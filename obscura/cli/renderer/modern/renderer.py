@@ -19,6 +19,7 @@ import contextlib
 import logging
 import os
 import platform as _platform
+import random
 import re
 import shutil
 import signal
@@ -98,6 +99,42 @@ def _wrap(text: str, width: int) -> list[str]:
         else:
             wrapped.extend(textwrap.wrap(raw, width=width) or [""])
     return wrapped
+
+
+# ---------------------------------------------------------------------------
+# Reveal-cursor pacing
+# ---------------------------------------------------------------------------
+
+
+# Bounds for the per-frame jitter applied to the reveal cursor. ±30% of base
+# breaks up the rigid "snap" of fixed-burst reveal so streaming text feels
+# more like organic typing. Floor at 1 char/frame so a low jitter roll
+# never stalls the cursor; ceiling is enforced by min() against backlog at
+# the call site.
+_REVEAL_JITTER_LOW = 0.7
+_REVEAL_JITTER_HIGH = 1.3
+
+
+def _compute_reveal_burst(*, backlog: int, base: int) -> int:
+    """How many chars to reveal this frame.
+
+    Pure helper — no IO, no hidden state. Backlog-aware: when the buffer
+    is far ahead of the reveal cursor, scale the burst up so we don't
+    fall arbitrarily far behind. Then jitter ±30% so the visible reveal
+    rate isn't perfectly uniform.
+
+    Returns at least 1 (so frames never stall while there's backlog) and
+    is capped at the backlog by the caller's `min(full_len, ...)`.
+    """
+    if backlog <= 0:
+        return 0
+    burst = base
+    if backlog > 200:
+        burst = max(burst, backlog // 4)
+    elif backlog > 80:
+        burst = max(burst, backlog // 6)
+    jitter = random.uniform(_REVEAL_JITTER_LOW, _REVEAL_JITTER_HIGH)
+    return max(1, int(burst * jitter))
 
 
 # ---------------------------------------------------------------------------
@@ -954,12 +991,10 @@ class ModernRenderer:
                 # Advance text reveal
                 full_len = len("".join(self._stream_buf))
                 if self._reveal_pos < full_len:
-                    backlog = full_len - self._reveal_pos
-                    burst = self._chars_per_frame
-                    if backlog > 200:
-                        burst = max(burst, backlog // 4)
-                    elif backlog > 80:
-                        burst = max(burst, backlog // 6)
+                    burst = _compute_reveal_burst(
+                        backlog=full_len - self._reveal_pos,
+                        base=self._chars_per_frame,
+                    )
                     self._reveal_pos = min(full_len, self._reveal_pos + burst)
                     animation_active = True
                     # Blink cursor every 8 frames
