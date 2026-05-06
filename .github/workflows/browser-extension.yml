@@ -32,10 +32,7 @@ env:
 
 jobs:
   browser-extension-tests:
-<<<<<<< Updated upstream
     name: Browser extension (Python host + JS)
-=======
->>>>>>> Stashed changes
     runs-on: ubuntu-latest
 
     steps:

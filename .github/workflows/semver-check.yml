@@ -1,0 +1,62 @@
+name: Semver check
+
+# Runs on every PR to main. Reports — as a non-blocking annotation —
+# what version bump (if any) would happen if this PR's commits were
+# squashed straight onto main and the auto-release workflow ran.
+#
+# This is intentionally a notice, not a failure: not every PR has to
+# bump the version. The job exists so reviewers see "this PR would cut
+# v0.6.0" before merging, instead of being surprised by it.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: semver-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  semver:
+    name: Preview version bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Find merge base with main
+        id: base
+        run: |
+          git fetch origin main --depth=200
+          BASE=$(git merge-base origin/main HEAD)
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Run bump script (dry-run)
+        id: bump
+        run: |
+          # Use the merge base as the "since" so we only score this PR's
+          # commits, not the whole history since the last release tag.
+          python scripts/bump_version.py --dry-run --since "${{ steps.base.outputs.base }}"
+
+      - name: Annotate result
+        env:
+          BUMP: ${{ steps.bump.outputs.bump }}
+          NEW: ${{ steps.bump.outputs.new_version }}
+          CURRENT: ${{ steps.bump.outputs.current }}
+        run: |
+          if [ "$BUMP" = "none" ]; then
+            echo "::notice title=No version bump::This PR's commits do not contain any \`major:\` / \`minor:\` / \`patch:\` markers. Merging will NOT cut a new release. (Current: $CURRENT)"
+          else
+            echo "::notice title=Will release v$NEW ($BUMP)::Merging this PR will trigger an auto-release: $CURRENT → $NEW ($BUMP bump)."
+          fi
