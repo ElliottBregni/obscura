@@ -1,0 +1,90 @@
+name: Auto-release
+
+# When a PR merges to main (or someone direct-pushes — branch protection
+# should normally prevent this), scan the commits since the last `vX.Y.Z`
+# tag for `major:` / `minor:` / `patch:` markers, bump the version files,
+# commit, and push a new tag. The existing `release.yml` then picks up
+# the tag and cuts the GitHub Release.
+#
+# The bump commit is signed with `[skip ci]` so it doesn't loop.
+#
+# Required for the auto-commit/auto-tag step:
+#   * `permissions: contents: write` on this job (set below)
+#   * In repo Settings → Actions → General → Workflow permissions:
+#       "Read and write permissions" enabled
+#   * Branch protection on `main` must allow the GitHub Actions bot to
+#     bypass the PR requirement (Settings → Branches → main → "Allow
+#     specified actors to bypass required pull requests" → add
+#     `github-actions[bot]`).
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Compute & apply version bump
+    runs-on: ubuntu-latest
+    # Skip the loop: when this workflow's own commit lands, don't re-run.
+    if: |
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, 'chore(release):')
+
+    outputs:
+      bump: ${{ steps.bump.outputs.bump }}
+      new_version: ${{ steps.bump.outputs.new_version }}
+      tag: ${{ steps.bump.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so the script can find the last vX.Y.Z tag.
+          fetch-depth: 0
+          # Use a token that's allowed to push to a protected branch.
+          # Default GITHUB_TOKEN works as long as the bot is whitelisted
+          # under "Allow specified actors to bypass required pull
+          # requests" in branch protection.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Compute bump from commit messages
+        id: bump
+        run: python scripts/bump_version.py
+
+      - name: No bump needed — exit cleanly
+        if: steps.bump.outputs.bump == 'none'
+        run: |
+          echo "::notice::No major:/minor:/patch: marker in commits since last tag — skipping release."
+
+      - name: Configure git identity
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit + tag the bump
+        if: steps.bump.outputs.bump != 'none'
+        env:
+          BUMP: ${{ steps.bump.outputs.bump }}
+          NEW: ${{ steps.bump.outputs.new_version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git add pyproject.toml \
+                  packages/browser-extension/package.json \
+                  packages/browser-extension/manifest.json
+          git commit -m "chore(release): ${TAG} (${BUMP}) [skip ci]"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin HEAD:main
+          git push origin "${TAG}"
+          echo "::notice::Released ${TAG} (${BUMP} bump)"

@@ -23,6 +23,12 @@
 **Always:**
 - [ ] Title prefixed: `[ext]`, `[ext][host]`, `[ext][panel]`,
       `[ext][proto]`, or `[core]` for obscura core changes.
+- [ ] If this PR should cut a new release, **at least one commit
+      message** starts with `major:`, `minor:`, or `patch:` (or the
+      `[major]` / `(minor)` wrapped form, or a `feat!:` / `fix!:`
+      style breaking-change `!`). The CI **Semver check** job will
+      tell you what (if any) bump it computed. PRs without any of
+      those markers merge cleanly but do **not** cut a release.
 - [ ] Commits are undercover-clean — no AI attribution, first person.
 - [ ] `ruff check` + `ruff format --check` + `pyright` pass locally.
 - [ ] Net diff under ~500 LOC *or* split into multiple PRs.

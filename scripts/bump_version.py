@@ -57,19 +57,24 @@ _PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 
 # Only fire on explicit semver markers at, or near, the start of the
 # subject line. "monkey-patch" or "stage minor refactor" must NOT trigger.
+# Two accepted shapes:
+#   1. Bare keyword + ":"/"-"   e.g. "major: rewrite", "patch - fix"
+#   2. Wrapped keyword           e.g. "[major] rewrite", "(patch) fix"
 _KEYWORD_PREFIX_RE = re.compile(
-    r"^\s*"                            # optional leading whitespace
-    r"(?:\[|\()?"                      # optional [ or (
-    r"(major|minor|patch)"             # the keyword
-    r"(?:\]|\))?"                      # optional ] or )
-    r"\s*[:\-]",                       # required ":" or "-" separator
-    re.IGNORECASE,
+    r"""^\s*(?:
+        \[(major|minor|patch)\]   # bracketed
+        | \((major|minor|patch)\) # parenthesized
+        | (major|minor|patch)\s*[:\-]   # bare + : or -
+    )""",
+    re.IGNORECASE | re.VERBOSE,
 )
 _BREAKING_BANG_RE = re.compile(r"^[a-zA-Z]+(\([^)]+\))?!:")
 
 
 def _run(cmd: list[str], *, check: bool = True) -> str:
-    out = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    out = subprocess.run(
+        cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False
+    )
     if check and out.returncode != 0:
         raise SystemExit(f"command failed: {' '.join(cmd)}\n{out.stderr}")
     return out.stdout.strip()
@@ -100,7 +105,8 @@ def classify(messages: list[str]) -> BumpKind:
             seen.add("major")
         m = _KEYWORD_PREFIX_RE.match(first_line)
         if m:
-            seen.add(m.group(1).lower())
+            keyword = next(g for g in m.groups() if g)
+            seen.add(keyword.lower())
     if "major" in seen:
         return "major"
     if "minor" in seen:
@@ -114,7 +120,7 @@ def read_pyproject_version() -> str:
     text = PYPROJECT.read_text()
     m = _PYPROJECT_VERSION_RE.search(text)
     if not m:
-        raise SystemExit("pyproject.toml: could not find top-level `version = \"...\"`")
+        raise SystemExit('pyproject.toml: could not find top-level `version = "..."`')
     return m.group(1)
 
 
@@ -160,9 +166,15 @@ def emit_github_output(**kv: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dry-run", action="store_true", help="print the plan, don't write files")
-    parser.add_argument("--since", help="override the base ref (default: last vX.Y.Z tag)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="print the plan, don't write files"
+    )
+    parser.add_argument(
+        "--since", help="override the base ref (default: last vX.Y.Z tag)"
+    )
     args = parser.parse_args()
 
     base = args.since if args.since is not None else last_version_tag()
