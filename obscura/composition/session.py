@@ -240,6 +240,14 @@ class AgentSession:
     uds_inbox: Any = None
     imessage_daemon_task: Any = None  # asyncio.Task[None] | None
 
+    # Per-server MCP status — written by install_mcp_servers, read by
+    # the TUI header / bordered REPL session card and by the
+    # ``/mcp diagnose`` helper. Always a list (possibly empty) so
+    # consumers don't have to ``or []`` on every access. Typed as
+    # ``list[Any]`` because importing the concrete ``MCPServerStatus``
+    # here would create a circular dep through composition.blocks.
+    mcp_status: list[Any] = field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+
     # ── Reliability state (set by composition/core.py during build) ──
     # These mirror what ObscuraClient holds today. After Stage 4b,
     # composition is the canonical owner — ObscuraClient (when present)

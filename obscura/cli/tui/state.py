@@ -60,25 +60,25 @@ def make_tui_id() -> str:
 class TUIMode(StrEnum):
     """High-level TUI input mode. Drives the input box style + completer set."""
 
-    CHAT = "chat"           # Default — message goes to the agent loop
-    COMMAND = "command"     # Slash command being typed
-    SEARCH = "search"       # Ctrl-R history search
-    APPROVAL = "approval"   # Tool-approval modal in front
-    PALETTE = "palette"     # Ctrl-K command palette in front
+    CHAT = "chat"  # Default — message goes to the agent loop
+    COMMAND = "command"  # Slash command being typed
+    SEARCH = "search"  # Ctrl-R history search
+    APPROVAL = "approval"  # Tool-approval modal in front
+    PALETTE = "palette"  # Ctrl-K command palette in front
     AGENT_INSPECT = "agent_inspect"  # F2 agent inspector in front
 
 
 class TranscriptKind(StrEnum):
     """Discriminator for :class:`TranscriptEntry`."""
 
-    USER = "user"                   # User-submitted prompt
-    ASSISTANT = "assistant"         # Final assistant text
-    THINKING = "thinking"           # Reasoning block
-    TOOL_USE = "tool_use"           # Model invoked a tool
-    TOOL_RESULT = "tool_result"     # Result of that tool call
-    SYSTEM = "system"               # System notice (banner committed, /clear, etc.)
-    ERROR = "error"                 # Stream error or tool failure
-    SLASH_OUTPUT = "slash_output"   # Captured Rich output from a /slash command
+    USER = "user"  # User-submitted prompt
+    ASSISTANT = "assistant"  # Final assistant text
+    THINKING = "thinking"  # Reasoning block
+    TOOL_USE = "tool_use"  # Model invoked a tool
+    TOOL_RESULT = "tool_result"  # Result of that tool call
+    SYSTEM = "system"  # System notice (banner committed, /clear, etc.)
+    ERROR = "error"  # Stream error or tool failure
+    SLASH_OUTPUT = "slash_output"  # Captured Rich output from a /slash command
     NOTIFICATION_LOG = "notification_log"  # Notification archived to scrollback
 
 
@@ -176,6 +176,24 @@ class LiveRegionState(BaseModel):
     preview: str = ""
     """Truncated tail of the latest delta (≤80 chars typically)."""
 
+    full_text: str = ""
+    """Complete streamed text for the active live region.
+
+    The reveal-cursor tick (driven by ``app._reveal_tick``) advances
+    ``reveal_pos`` along this buffer with jittered bursts so the
+    visible ``preview`` types in smoothly rather than snapping. Empty
+    when ``kind`` is IDLE / TOOL_RUNNING / TOOL_PENDING / ERROR.
+    """
+
+    reveal_pos: int = 0
+    """How many chars of ``full_text`` are currently shown via ``preview``.
+
+    Bumped in jittered ±30% bursts by the per-frame reveal tick so the
+    streaming preview reads as organic typing instead of arriving in
+    backend-shaped chunks. Reset to 0 by ``reset()`` and on transitions
+    out of STREAMING / THINKING.
+    """
+
     started_at_monotonic: float = Field(default_factory=time.monotonic)
     """Used to compute elapsed time without storing it."""
 
@@ -194,6 +212,8 @@ class LiveRegionState(BaseModel):
         self.kind = LiveRegionKind.IDLE
         self.label = ""
         self.preview = ""
+        self.full_text = ""
+        self.reveal_pos = 0
         self.spinner_idx = 0
 
 
@@ -335,6 +355,21 @@ class HUDState(BaseModel):
     task_count: int = 0
     running_agents: list[RunningAgentSnapshot] = Field(default_factory=list)
 
+    # Capability surface — tools registered with the session and MCP
+    # servers connected for it. Populated at app startup and refreshed
+    # by the agents-tick poll so newly-discovered MCP tools / hot-
+    # registered tools appear without a restart.
+    tool_count: int = 0
+
+    # Per-server MCP status. Each entry is an ``MCPServerStatus``-shaped
+    # dict (kept as ``dict`` here so this module doesn't pull in the
+    # MCP protocol types just for typing): ``{"name": str, "state":
+    # "connected"|"failed"|"unknown", "transport": str, "tool_count":
+    # int, "error": str}``. The header reads ``state`` for the dot
+    # colour; the Ctrl-K palette's "diagnose MCP servers" action reads
+    # ``error`` for the per-server failure detail.
+    mcp_servers: list[dict[str, Any]] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+
 
 # ---------------------------------------------------------------------------
 # Top-level TUI state
@@ -372,6 +407,20 @@ class TUIState(BaseModel):
     # Per-run flags consulted by layout components.
     show_agent_panel: bool = True
     show_thinking: bool = True
+
+    # Transcript filter — ``"all"`` is the normal scrollback, while
+    # ``"tools_only"`` (toggled with Ctrl+T) hides assistant prose and
+    # shows only TOOL_USE / TOOL_RESULT entries. Useful for catching
+    # up on long sessions where tool-call lines are buried under
+    # narration.
+    transcript_filter: Literal["all", "tools_only"] = "all"
+
+    # Most recent ``maybe_truncate_result`` overflow file. The renderer
+    # writes both fields when it detects the truncation marker; the
+    # Ctrl-K palette's ``:open last large output`` action reads them
+    # to launch ``$EDITOR``. Empty when no overflow has happened.
+    last_overflow_path: str = ""
+    last_overflow_tool: str = ""
 
     # ---- Mutators -------------------------------------------------------
     # Kept here (not on the renderer) so any caller — runtime, overlay,

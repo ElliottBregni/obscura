@@ -30,9 +30,7 @@ from typing import TYPE_CHECKING
 
 from obscura.composition.blocks import (
     install_a2a_input_bridge,
-    install_plugin_tools,
     install_skill_context,
-    install_system_tools,
     install_tool_router,
 )
 from obscura.composition.core import build_core_session
@@ -82,10 +80,8 @@ async def build_a2a_session(
         user=None,
         session_id=task_id,
     )
-    # MCP servers: build_core_session calls install_mcp_servers internally
-    # so the block runs before backend.start (Claude SDK requirement).
-    await install_plugin_tools(session, config_with_task)
-    await install_system_tools(session, config_with_task)
+    # MCP servers + plugin + system tools: build_core_session installs
+    # all three before backend.start (Copilot/Claude SDK requirement).
     await install_skill_context(session, config_with_task)
     await install_a2a_input_bridge(
         session,

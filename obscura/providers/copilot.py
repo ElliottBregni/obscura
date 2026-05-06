@@ -436,6 +436,12 @@ class CopilotBackend(BackendToolHostMixin):
         unsub_fns.append(
             self._session.on(_make_handler("tool.execution_start", _on_tool_start)),
         )
+        # SDK 0.3 emits ``tool.execution_complete``; older builds used
+        # ``tool.execution_end``. Subscribe to both so the bridge sees the
+        # end event regardless of which the runtime fires.
+        unsub_fns.append(
+            self._session.on(_make_handler("tool.execution_complete", _on_tool_end)),
+        )
         unsub_fns.append(
             self._session.on(_make_handler("tool.execution_end", _on_tool_end)),
         )
@@ -845,7 +851,8 @@ class CopilotBackend(BackendToolHostMixin):
                 core_set = effective_core_names(all_names)
                 pre_phase3 = list(filtered)
                 filtered = [
-                    t for t in filtered
+                    t
+                    for t in filtered
                     if t.name in core_set
                     or (
                         t.name.startswith("mcp__")

@@ -19,7 +19,6 @@ import contextlib
 import logging
 import os
 import platform as _platform
-import random
 import re
 import shutil
 import signal
@@ -30,7 +29,9 @@ from enum import Enum
 from typing import Any
 
 from obscura.cli.renderer.modern.layout import get_border_chars
+from obscura.cli.renderer.reveal import compute_reveal_burst as _compute_reveal_burst
 from obscura.cli.renderer.modern.theme import (
+    ACCENT,
     ERROR_COLOR,
     MUTED,
     RESET,
@@ -102,39 +103,71 @@ def _wrap(text: str, width: int) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Reveal-cursor pacing
+# Reveal-cursor pacing — see :mod:`obscura.cli.renderer.reveal`. The TUI
+# surface imports the same helper so both surfaces feel identical when
+# streaming text.
 # ---------------------------------------------------------------------------
 
 
-# Bounds for the per-frame jitter applied to the reveal cursor. ±30% of base
-# breaks up the rigid "snap" of fixed-burst reveal so streaming text feels
-# more like organic typing. Floor at 1 char/frame so a low jitter roll
-# never stalls the cursor; ceiling is enforced by min() against backlog at
-# the call site.
-_REVEAL_JITTER_LOW = 0.7
-_REVEAL_JITTER_HIGH = 1.3
+# Marker emitted by :func:`obscura.core.tool_bridge.maybe_truncate_result`
+# at the bottom of an oversized tool result. We pull the path back out
+# so the renderer can show it as a clickable hint and stash it for the
+# ``/last-output`` shortcut.
+_OVERFLOW_MARKER_RE = re.compile(
+    r"\[Result truncated[^\]]*Full result saved to:\s*([^\]]+?)\]",
+)
 
 
-def _compute_reveal_burst(*, backlog: int, base: int) -> int:
-    """How many chars to reveal this frame.
+def _extract_overflow_path(text: str) -> str:
+    """Return the cached-result file path from a truncation marker, or ""."""
+    if "[Result truncated" not in text:
+        return ""
+    match = _OVERFLOW_MARKER_RE.search(text)
+    if match is None:
+        return ""
+    return match.group(1).strip()
 
-    Pure helper — no IO, no hidden state. Backlog-aware: when the buffer
-    is far ahead of the reveal cursor, scale the burst up so we don't
-    fall arbitrarily far behind. Then jitter ±30% so the visible reveal
-    rate isn't perfectly uniform.
 
-    Returns at least 1 (so frames never stall while there's backlog) and
-    is capped at the backlog by the caller's `min(full_len, ...)`.
+# Per-kind ``⏺`` colour + bracketed tag. The tag is rendered DIM so
+# the eye is drawn to the tool name itself; the colour shift is the
+# main signal.  Empty tag means "no decoration" (default native
+# tools) — keeps backward compatibility with the existing yellow-dot
+# look users are used to.
+_TOOL_KIND_STYLES: dict[str, tuple[int, str]] = {
+    "native": (TOOL_COLOR, ""),
+    "shell": (78, "$"),  # GREEN.ansi
+    "mcp": (75, "MCP"),  # SAPPHIRE.ansi
+    "plugin": (79, "PLUG"),  # TEAL.ansi
+    "delegation": (141, "TASK"),  # MAUVE.ansi
+}
+
+
+def _format_overflow_hint(path: str, width: int) -> list[str]:
+    """Render a single styled line pointing at the overflow cache file.
+
+    Most modern terminals (iTerm2, Wezterm, Ghostty, recent Kitty,
+    Terminal.app on macOS Sequoia+) treat absolute file paths as
+    clickable. We just print the path verbatim with a hint glyph;
+    no OSC 8 hyperlink, since wrapping with ``\x1b]8;;file://...\x07``
+    confuses copy/paste in older terminals.
     """
-    if backlog <= 0:
-        return 0
-    burst = base
-    if backlog > 200:
-        burst = max(burst, backlog // 4)
-    elif backlog > 80:
-        burst = max(burst, backlog // 6)
-    jitter = random.uniform(_REVEAL_JITTER_LOW, _REVEAL_JITTER_HIGH)
-    return max(1, int(burst * jitter))
+    hint = (
+        _styled("  ⤷ ", Style(fg=ACCENT))
+        + _styled(
+            "Full output cached — view with: $EDITOR ",
+            Style(fg=MUTED, dim=True),
+        )
+        + _styled(path, Style(fg=ACCENT))
+    )
+    if 20 < width < len(_sanitize(hint)):
+        # Drop the verbose explainer when the path is too long for one
+        # line; just surface the path on a second indented line.
+        return [
+            _styled("  ⤷ ", Style(fg=ACCENT))
+            + _styled("Full output cached:", Style(fg=MUTED, dim=True)),
+            _styled(f"     {path}", Style(fg=ACCENT)),
+        ]
+    return [hint]
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +213,16 @@ class ModernRenderer:
         self._cursor_blink_counter: int = 0
         self._chars_per_frame: int = 12
 
+        # Reveal-aware flush queue. Flush-triggering events
+        # (TOOL_CALL / TURN_COMPLETE / etc.) are deferred until the
+        # reveal cursor catches up to the buffer end so the text that
+        # gets committed to scrollback matches what the user just
+        # watched type in. Subsequent events queue behind a deferred
+        # flush to preserve order. Hard timeout per entry caps the
+        # wait so a sudden 50 KB chunk can't stall the UI.
+        self._pending_events: list[tuple[AgentEvent, float]] = []
+        self._FLUSH_WAIT_TIMEOUT_S: float = 1.5
+
         # Frame loop
         self._dirty = False
         self._frame_task: asyncio.Task[None] | None = None
@@ -216,9 +259,102 @@ class ModernRenderer:
 
     # ── RendererProtocol ──────────────────────────────────────────────────
 
+    # Event kinds whose handler unconditionally commits assistant text
+    # to scrollback (TOOL_CALL → ⏺ line; TURN_*/AGENT_DONE → final
+    # commit; ERROR / PLAN_APPROVAL → before-banner flush). For each,
+    # defer dispatch until the reveal cursor has caught up to the
+    # buffer end so the scrollback commit matches what the user just
+    # watched type in. THINKING_DELTA is conditional — see
+    # :meth:`_event_will_flush_text`.
+    _UNCONDITIONAL_FLUSH_KINDS: frozenset[AgentEventKind] = frozenset(
+        {
+            AgentEventKind.TURN_START,
+            AgentEventKind.TOOL_CALL,
+            AgentEventKind.TURN_COMPLETE,
+            AgentEventKind.AGENT_DONE,
+            AgentEventKind.ERROR,
+            AgentEventKind.PLAN_APPROVAL_REQUEST,
+        },
+    )
+
+    # Terminal events — no more text is coming. Skip the deferral
+    # queue and force-drain pending events with an immediate snap
+    # forward so scrollback is consistent before the run ends.
+    _TERMINAL_KINDS: frozenset[AgentEventKind] = frozenset(
+        {AgentEventKind.AGENT_DONE, AgentEventKind.ERROR},
+    )
+
+    def _event_will_flush_text(self, event: AgentEvent) -> bool:
+        """Will dispatching ``event`` commit ``_stream_buf`` to scrollback?
+
+        Used by :meth:`handle` to decide whether to defer the event
+        until the reveal cursor has caught up. ``THINKING_DELTA`` only
+        flushes on the first delta after text mode (the
+        text → thinking transition); subsequent thinking deltas just
+        append to the thinking buffer.
+        """
+        if event.kind in self._UNCONDITIONAL_FLUSH_KINDS:
+            return True
+        if event.kind == AgentEventKind.THINKING_DELTA and not self._in_thinking:
+            return bool(self._stream_buf)
+        return False
+
     def handle(self, event: AgentEvent) -> None:
         self._ensure_frame_task()
 
+        # Terminal events — no more text is coming. Snap the reveal,
+        # drain the queue, then dispatch this event. Without this, a
+        # queued AGENT_DONE / ERROR would sit forever in test contexts
+        # that don't run the frame loop.
+        if event.kind in self._TERMINAL_KINDS:
+            self._force_drain_pending()
+            self._dispatch_event(event)
+            return
+
+        # Preserve order: once anything is queued, everything queues
+        # behind it until the drain runs. Otherwise a TEXT_DELTA could
+        # slip past a deferred TOOL_CALL and end up rendered after the
+        # tool-call line.
+        if self._pending_events:
+            self._pending_events.append(
+                (event, time.monotonic() + self._FLUSH_WAIT_TIMEOUT_S),
+            )
+            self._dirty = True
+            return
+
+        # Defer flush-triggering events when the reveal cursor is
+        # still chasing the buffer — the frame loop's drain step picks
+        # them up once reveal catches up (or the timeout fires).
+        if self._event_will_flush_text(event):
+            backlog = len("".join(self._stream_buf)) - self._reveal_pos
+            if backlog > 0:
+                self._pending_events.append(
+                    (event, time.monotonic() + self._FLUSH_WAIT_TIMEOUT_S),
+                )
+                self._dirty = True
+                return
+
+        self._dispatch_event(event)
+
+    def _force_drain_pending(self) -> None:
+        """Snap reveal forward and replay every queued event in order.
+
+        Used by terminal events and :meth:`finish` to flush the
+        backlog when waiting any longer would lose information.
+        """
+        if not self._pending_events:
+            return
+        self._reveal_pos = len("".join(self._stream_buf))
+        for event, _deadline in list(self._pending_events):
+            self._dispatch_event(event)
+        self._pending_events.clear()
+
+    def _dispatch_event(self, event: AgentEvent) -> None:
+        """Execute the renderer-side action for ``event``.
+
+        Split out from :meth:`handle` so the flush-deferral queue can
+        replay queued events without re-entering the queueing logic.
+        """
         match event.kind:
             case AgentEventKind.TURN_START:
                 self._handle_turn_start()
@@ -302,6 +438,11 @@ class ModernRenderer:
         self._dirty = True
 
     def finish(self) -> None:
+        # Drain any flush-triggering events still waiting on the
+        # reveal cursor — at shutdown there's no point holding back,
+        # replay them all so we don't lose tool-call lines / errors
+        # that were queued.
+        self._force_drain_pending()
         self._flush_all()
         self._erase_live_region()
         self._finished = True
@@ -365,34 +506,60 @@ class ModernRenderer:
     def _handle_tool_call(self, event: AgentEvent) -> None:
         self._flush_all()
         try:
-            from obscura.cli.tool_summaries import summarize_tool_call
+            from obscura.cli.tool_summaries import (
+                classify_tool,
+                summarize_tool_call,
+            )
 
             summary = summarize_tool_call(event.tool_name, event.tool_input)
+            kind = classify_tool(event.tool_name or "")
         except Exception:
             logger.debug("suppressed exception in _handle_tool_call", exc_info=True)
             summary = f"{event.tool_name}()"
+            kind = "native"
 
         tool_name = _sanitize(event.tool_name or "")
-        self._commit_lines(
-            [
-                "",
-                (
-                    _styled(f"  {_BLACK_CIRCLE} ", Style(fg=TOOL_COLOR))
-                    + _styled(tool_name, Style(fg=TOOL_COLOR, bold=True))
-                    + _styled(f"  {_sanitize(summary)}", Style(fg=MUTED))
-                ),
-            ]
+        # Per-kind colour + leading tag so MCP / plugin / shell / sub-
+        # agent calls are scannable at a glance. The dot itself stays
+        # ``⏺`` for visual continuity; the colour and the optional
+        # bracketed tag are what change.
+        kind_color, kind_tag = _TOOL_KIND_STYLES.get(
+            kind,
+            _TOOL_KIND_STYLES["native"],
         )
+        runs: list[str] = [
+            _styled(f"  {_BLACK_CIRCLE} ", Style(fg=kind_color, bold=True)),
+        ]
+        if kind_tag:
+            runs.append(_styled(f"{kind_tag} ", Style(fg=kind_color, dim=True)))
+        runs.append(_styled(tool_name, Style(fg=kind_color, bold=True)))
+        runs.append(_styled(f"  {_sanitize(summary)}", Style(fg=MUTED)))
+        self._commit_lines(["", "".join(runs)])
         self._start_spinner(f"{_sanitize(summary)}")
 
     def _handle_tool_result(self, event: AgentEvent) -> None:
         self._stop_spinner()
+
+        raw_full = event.tool_result or ""
+        # Detect ``maybe_truncate_result`` overflow markers — when a
+        # result exceeds 200 KB it's written to ~/.cache/obscura/
+        # tool-results/<id>.txt and a marker is appended. Surface the
+        # cache path inline (so the user can open it from their
+        # terminal) and as a session-scoped tracker so a future
+        # ``/last-output`` slash command can pop it open.
+        overflow_path = _extract_overflow_path(raw_full)
+        if overflow_path:
+            self._record_last_overflow(event.tool_name or "", overflow_path)
 
         # Try per-tool renderer for structured output
         registry = self._get_tool_registry()
         lines = registry.render_result_lines(event, self._width)
         if lines is not None:
             self._commit_lines(lines)
+            if overflow_path:
+                self._commit_lines(
+                    _format_overflow_hint(overflow_path, self._width),
+                )
             return
 
         raw = event.tool_result or ""
@@ -443,6 +610,25 @@ class ModernRenderer:
                     )
                 )
             self._commit_lines(out)
+        if overflow_path:
+            self._commit_lines(
+                _format_overflow_hint(overflow_path, self._width),
+            )
+
+    def _record_last_overflow(self, tool_name: str, path: str) -> None:
+        """Stash the most recent overflow file path on the renderer.
+
+        Used by the bordered REPL's ``/last-output`` slash command (and
+        the TUI palette entry of the same name) so the user can ``open``
+        / ``$EDITOR`` the cached file without copy-pasting the path.
+        """
+        self._last_overflow_tool = tool_name
+        self._last_overflow_path = path
+
+    @property
+    def last_overflow_path(self) -> str:
+        """Path of the most recent oversized tool result, or empty."""
+        return getattr(self, "_last_overflow_path", "")
 
     # ── Flush helpers ─────────────────────────────────────────────────────
 
@@ -1014,6 +1200,16 @@ class ModernRenderer:
                         self._pulse_idx = (self._pulse_idx + 1) % len(_PULSE_COLORS)
                     animation_active = True
 
+                # Drain any flush-triggering events that have been
+                # waiting for the reveal cursor to catch up. Runs AFTER
+                # ``_reveal_pos`` was advanced this frame and BEFORE
+                # the redraw, so any commits that happen here become
+                # visible on the same frame.
+                if self._pending_events:
+                    drained = self._drain_pending_events()
+                    if drained:
+                        animation_active = True
+
                 # Redraw live region
                 if self._dirty or animation_active:
                     self._width = shutil.get_terminal_size((80, 24)).columns
@@ -1023,6 +1219,39 @@ class ModernRenderer:
                 await asyncio.sleep(self.FRAME_INTERVAL_S)
         except asyncio.CancelledError:
             logger.debug("suppressed exception in _frame_loop", exc_info=True)
+
+    def _drain_pending_events(self) -> int:
+        """Replay queued events whose flush is now safe to commit.
+
+        An event waits until either (a) the reveal cursor has reached
+        the end of the buffer (so the scrollback commit is exactly
+        what the user just saw type in) or (b) its per-event timeout
+        fires. On timeout we snap ``_reveal_pos`` forward so the
+        commit still matches what's about to be rendered.
+
+        Returns the number of events drained this call. The frame
+        loop uses that to decide whether to redraw.
+        """
+        drained = 0
+        now = time.monotonic()
+        while self._pending_events:
+            event, deadline = self._pending_events[0]
+            if self._event_will_flush_text(event):
+                full_len = len("".join(self._stream_buf))
+                backlog = full_len - self._reveal_pos
+                if backlog > 0:
+                    if now < deadline:
+                        # Reveal is still chasing — wait for the next
+                        # frame to advance ``_reveal_pos`` further.
+                        break
+                    # Timeout: snap forward so the impending commit
+                    # matches what the user will see on this frame.
+                    self._reveal_pos = full_len
+            self._pending_events.pop(0)
+            self._dispatch_event(event)
+            drained += 1
+            now = time.monotonic()
+        return drained
 
     def _render_frame(self) -> None:
         """Synchronous single-frame render (used by finish)."""

@@ -41,14 +41,12 @@ from obscura.composition.blocks import (
     install_imessage_daemon,
     install_kairos_engine,
     install_memory_tools,
-    install_plugin_tools,
     install_project_hooks,
     install_repl_callbacks,
     install_repl_prompt_sections,
     install_session_registration,
     install_skill_context,
     install_supervisor,
-    install_system_tools,
     install_tool_router,
     install_uds_inbox,
     install_vector_memory,
@@ -106,10 +104,8 @@ async def build_repl_session(
         session_id=session_id,
         preregistered_tools=preregistered_tools,
     )
-    # MCP servers: build_core_session calls install_mcp_servers internally
-    # so the block runs before backend.start (Claude SDK requirement).
-    await install_plugin_tools(session, config)
-    await install_system_tools(session, config)
+    # MCP servers + plugin + system tools: build_core_session installs
+    # all three before backend.start (Copilot/Claude SDK requirement).
     await install_vector_memory(session, config)
     await install_memory_tools(session, config)
     await install_project_hooks(session, config)

@@ -36,7 +36,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.dag import (
     DAGNode,
@@ -362,7 +362,9 @@ class AgentLoopV2:
             result = handler(**tool_input)
             if asyncio.iscoroutine(result):
                 result = await result
-            return result if isinstance(result, str) else json.dumps(result, default=str)
+            return (
+                result if isinstance(result, str) else json.dumps(result, default=str)
+            )
 
         try:
             results = await run_preflight(prompt, invoke_tool=_invoke)
@@ -465,6 +467,15 @@ class AgentLoopV2:
                 str, list[str]
             ] = {}  # tool_use_id -> JSON delta chunks
             partial_names: dict[str, str] = {}
+            # SDK-pre-resolved tool results: backends whose SDK runs the tool
+            # internally (Copilot, Claude with the agent SDK) emit
+            # ChunkKind.TOOL_RESULT after TOOL_USE_END carrying the SDK's
+            # result. We populate this map and use it to short-circuit the
+            # local Python dispatcher (see ``_seen_calls`` priming below)
+            # — re-running the tool would double-execute and frequently
+            # fails on signature drift between the SDK spec and the
+            # registered Python handler.
+            sdk_resolved: dict[str, tuple[str, bool]] = {}
 
             # Extract the latest user-message text as the positional ``prompt``
             # arg for backends whose ``stream()`` signature is
@@ -584,6 +595,25 @@ class AgentLoopV2:
                             input=parsed_input,
                         )
                     )
+                elif kind == ChunkKind.TOOL_RESULT:
+                    # Backend SDK already executed the tool — capture its
+                    # result so the local dispatcher returns it from the
+                    # _seen_calls cache instead of re-running the tool.
+                    # See ``sdk_resolved`` declaration above.
+                    tu_id = chunk.tool_use_id
+                    if not tu_id and len(partial_names) == 1:
+                        tu_id = next(iter(partial_names))
+                    if tu_id:
+                        raw = getattr(chunk, "raw", None)
+                        success = True
+                        if raw is not None:
+                            data = getattr(raw, "data", None) or raw
+                            success_val = getattr(data, "success", None)
+                            if success_val is None and isinstance(data, dict):
+                                success_val = cast(dict[str, Any], data).get("success")
+                            if success_val is not None:
+                                success = bool(success_val)
+                        sdk_resolved[tu_id] = (chunk.text or "", success)
                 elif kind == ChunkKind.TASK_STARTED:
                     yield AgentEvent(
                         kind=AgentEventKind.TASK_STARTED,
@@ -651,6 +681,28 @@ class AgentLoopV2:
                     text=full_text,
                 )
                 return
+
+            # Pre-populate ``_seen_calls`` with results the backend SDK
+            # already produced. The dispatcher's cache check
+            # (``if tu_id and tu_id in self._seen_calls``) then returns
+            # the SDK's result text directly — no Python handler invoked.
+            # Required for Copilot/Claude where the SDK runs the tool
+            # internally before our chunks even arrive.
+            for tu_id, (result_text, success) in sdk_resolved.items():
+                if tu_id in self._seen_calls:
+                    continue
+                self._seen_calls[tu_id] = _ToolEnvelopeV2(
+                    tool_use_id=tu_id,
+                    content=[
+                        ContentBlock(
+                            kind="text",
+                            text=result_text,
+                            is_error=not success,
+                        )
+                    ],
+                    is_error=not success,
+                    is_cancelled=False,
+                )
 
             # Build the merged turn DAG. parallel_plan calls expand into
             # their declared sub-DAG; non-plan calls become no-edge sibling
@@ -786,6 +838,28 @@ class AgentLoopV2:
                         text="stopped by post_turn hook",
                     )
                     return
+
+            # Backend SDK ran the tool loop itself (Copilot, Claude with
+            # the agent SDK). The chunk stream we just consumed already
+            # contained the post-tool model continuation, so we have all
+            # the assistant text the user is going to see. Iterating
+            # ``backend.stream`` again would just replay a fresh SDK
+            # conversation with the tool result re-injected — wasteful
+            # and visible to the user as duplicate "Done — ..." text.
+            #
+            # Detect this by: every tool call we observed was already
+            # resolved by the SDK (its result arrived as a TOOL_RESULT
+            # chunk). When that holds, the SDK is the source of truth;
+            # exit cleanly.
+            if tool_calls and all(
+                tc.tool_use_id and tc.tool_use_id in sdk_resolved for tc in tool_calls
+            ):
+                yield AgentEvent(
+                    kind=AgentEventKind.AGENT_DONE,
+                    turn=turn,
+                    text=full_text,
+                )
+                return
 
         # max_turns exceeded.
         yield AgentEvent(

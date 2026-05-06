@@ -25,10 +25,8 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.composition.blocks import (
     install_memory_tools,
-    install_plugin_tools,
     install_project_hooks,
     install_skill_context,
-    install_system_tools,
     install_tool_router,
     install_vector_memory,
 )
@@ -54,10 +52,8 @@ async def build_api_session(
         user=user,
         auth=auth,
     )
-    # MCP servers: build_core_session calls install_mcp_servers internally
-    # so the block runs before backend.start (Claude SDK requirement).
-    await install_plugin_tools(session, config)
-    await install_system_tools(session, config)
+    # MCP servers + plugin + system tools: build_core_session installs
+    # all three before backend.start (Copilot/Claude SDK requirement).
     await install_vector_memory(session, config)
     await install_memory_tools(session, config)
     await install_project_hooks(session, config)

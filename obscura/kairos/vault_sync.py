@@ -31,13 +31,14 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
 import hashlib
 import json
 import logging
 import os
 import time as _time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,6 +69,29 @@ def _empty_file_meta_list() -> list["FileMeta"]:
 
 def _empty_any_dict() -> dict[str, Any]:
     return {}
+
+
+def _run_async[T](coro: Awaitable[T]) -> T:
+    """Run *coro* to completion from synchronous code.
+
+    The export pipeline is sync (``_export_all`` calls each step
+    synchronously) but is itself dispatched from
+    ``VaultSync.sync()`` which is async — so an event loop is already
+    running on this thread. ``asyncio.run`` raises ``RuntimeError`` in
+    that case and the un-awaited coroutine leaks (visible as the
+    ``coroutine 'list_sessions' was never awaited`` warning).
+
+    Detect a running loop and, when present, drive *coro* on a worker
+    thread's own loop. Without a running loop, fall back to
+    ``asyncio.run`` (the simple path that tests / CLI scripts hit).
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(cast("Any", coro))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, cast("Any", coro))
+        return cast("T", future.result())
 
 
 def _retry(
@@ -833,9 +857,7 @@ class VaultSync:
         return 1
 
     @staticmethod
-    def _top_pending_tasks(
-        _q: TaskQueue, *, limit: int = 20
-    ) -> list[dict[str, Any]]:
+    def _top_pending_tasks(_q: TaskQueue, *, limit: int = 20) -> list[dict[str, Any]]:
         """Return up to *limit* highest-priority pending tasks.
 
         Reads directly through the queue's internal connection helper
@@ -1012,7 +1034,7 @@ class VaultSync:
             return 0
 
         try:
-            sessions = asyncio.run(store.list_sessions())
+            sessions = _run_async(store.list_sessions())
         except Exception:
             logger.debug("Session-log export: list_sessions failed", exc_info=True)
             return 0
@@ -1023,9 +1045,11 @@ class VaultSync:
         # Most recent first; cap so the directory stays bounded.
         try:
             sessions.sort(
-                key=lambda s: getattr(s, "updated_at", None)
-                or getattr(s, "created_at", None)
-                or datetime.min.replace(tzinfo=UTC),
+                key=lambda s: (
+                    getattr(s, "updated_at", None)
+                    or getattr(s, "created_at", None)
+                    or datetime.min.replace(tzinfo=UTC)
+                ),
                 reverse=True,
             )
         except Exception:
@@ -1060,9 +1084,7 @@ class VaultSync:
 
         return count
 
-    def _render_session_page(
-        self, sess: Any
-    ) -> tuple[str, str] | None:
+    def _render_session_page(self, sess: Any) -> tuple[str, str] | None:
         """Render a single session into (page_id, file_content)."""
         sid = getattr(sess, "id", "") or ""
         if not sid:
@@ -1078,7 +1100,7 @@ class VaultSync:
 
             store = DatabaseFactory.create_event_store()
             try:
-                events = asyncio.run(store.get_events(sid))
+                events = _run_async(store.get_events(sid))
             finally:
                 with contextlib.suppress(Exception):
                     store.close()
@@ -1096,17 +1118,17 @@ class VaultSync:
         metadata = dict(getattr(sess, "metadata", {}) or {})
         goal_id = str(metadata.get("goal_id", "")).strip()
         status = getattr(sess, "status", None)
-        status_val = (
-            getattr(status, "value", None) or str(status or "")
-        )
+        status_val = getattr(status, "value", None) or str(status or "")
         created = getattr(sess, "created_at", None)
         updated = getattr(sess, "updated_at", None)
         created_iso = (
-            created.isoformat() if created is not None and hasattr(created, "isoformat")
+            created.isoformat()
+            if created is not None and hasattr(created, "isoformat")
             else ""
         )
         updated_iso = (
-            updated.isoformat() if updated is not None and hasattr(updated, "isoformat")
+            updated.isoformat()
+            if updated is not None and hasattr(updated, "isoformat")
             else ""
         )
 
@@ -1123,12 +1145,8 @@ class VaultSync:
         body_lines.append("## Stats")
         body_lines.append("")
         body_lines.append(f"- turns: **{turn_count}**")
-        body_lines.append(
-            f"- tool calls: **{sum(tool_counts.values())}**"
-        )
-        body_lines.append(
-            f"- messages: **{getattr(sess, 'message_count', 0) or 0}**"
-        )
+        body_lines.append(f"- tool calls: **{sum(tool_counts.values())}**")
+        body_lines.append(f"- messages: **{getattr(sess, 'message_count', 0) or 0}**")
         if tool_counts:
             body_lines.append("")
             body_lines.append("## Tools used")
@@ -1198,7 +1216,7 @@ class VaultSync:
 
             store = DatabaseFactory.create_event_store()
             try:
-                sessions = asyncio.run(store.list_sessions())
+                sessions = _run_async(store.list_sessions())
             finally:
                 with contextlib.suppress(Exception):
                     store.close()
@@ -1208,9 +1226,11 @@ class VaultSync:
 
         try:
             sessions.sort(
-                key=lambda s: getattr(s, "updated_at", None)
-                or getattr(s, "created_at", None)
-                or datetime.min.replace(tzinfo=UTC),
+                key=lambda s: (
+                    getattr(s, "updated_at", None)
+                    or getattr(s, "created_at", None)
+                    or datetime.min.replace(tzinfo=UTC)
+                ),
                 reverse=True,
             )
         except Exception:
@@ -1240,9 +1260,7 @@ class VaultSync:
             if top_tools:
                 body_lines.append("")
                 body_lines.append("**Top tools:**")
-                body_lines.extend(
-                    f"- `{name}` — {cnt}" for name, cnt in top_tools
-                )
+                body_lines.extend(f"- `{name}` — {cnt}" for name, cnt in top_tools)
 
         body_lines.append("")
         body_lines.append("## Recent sessions")
@@ -1260,12 +1278,8 @@ class VaultSync:
                     or "(unnamed)"
                 )
                 status = getattr(sess, "status", None)
-                status_val = (
-                    getattr(status, "value", None) or str(status or "")
-                )
-                body_lines.append(
-                    f"- [[{sid}]] · {status_val} · {title[:80]}"
-                )
+                status_val = getattr(status, "value", None) or str(status or "")
+                body_lines.append(f"- [[{sid}]] · {status_val} · {title[:80]}")
 
         content = self._render_page(
             page_type="session_digest",

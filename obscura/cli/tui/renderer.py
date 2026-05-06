@@ -37,6 +37,7 @@ Design notes
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 
@@ -44,6 +45,7 @@ from obscura.cli.renderer.channels import (
     Banner,
     BannerKind,
     Notification,
+    Severity,
     StatusEvent,
     TranscriptEvent,
     from_agent_event,
@@ -93,6 +95,24 @@ _BANNER_KIND_MAP: dict[BannerKind, str] = {
 }
 
 
+# Marker emitted by :func:`obscura.core.tool_bridge.maybe_truncate_result`
+# when a tool's output exceeds 200 KB. We pull the cached path out so
+# the TUI can show a toast pointing at it.
+_OVERFLOW_MARKER_RE = re.compile(
+    r"\[Result truncated[^\]]*Full result saved to:\s*([^\]]+?)\]",
+)
+
+
+def _extract_overflow_path(text: str) -> str:
+    """Return the cached-result file path from a truncation marker, or ""."""
+    if "[Result truncated" not in text:
+        return ""
+    match = _OVERFLOW_MARKER_RE.search(text)
+    if match is None:
+        return ""
+    return match.group(1).strip()
+
+
 class TUIRenderer:
     """Implements :class:`RendererProtocol` against a :class:`TUIState`.
 
@@ -128,9 +148,54 @@ class TUIRenderer:
         self._thinking_blocks: list[str] = []
         self._in_thinking: bool = False
 
+        # Reveal-aware flush queue — same shape as the bordered REPL.
+        # Events whose handler commits ``_text_buf`` to the transcript
+        # are deferred until ``state.live.reveal_pos`` has caught up to
+        # ``state.live.full_text`` so the committed transcript entry
+        # matches what the user just watched type in. Drained from
+        # ``ObscuraTUIApp._reveal_tick`` after each frame's reveal
+        # advance. Hard timeout per entry caps the wait.
+        self._pending_events: list[tuple[AgentEvent, float]] = []
+        self._FLUSH_WAIT_TIMEOUT_S: float = 1.5
+
     # ------------------------------------------------------------------
     # RendererProtocol surface
     # ------------------------------------------------------------------
+
+    # Event kinds whose handler unconditionally commits ``_text_buf``
+    # to the transcript via :meth:`_flush_text`. Deferred until the
+    # reveal cursor has caught up so the committed entry matches the
+    # text the user just watched type in. THINKING_DELTA is
+    # conditional — see :meth:`_event_will_flush_text`.
+    _UNCONDITIONAL_FLUSH_KINDS: frozenset[AgentEventKind] = frozenset(
+        {
+            AgentEventKind.TOOL_CALL,
+            AgentEventKind.TURN_COMPLETE,
+            AgentEventKind.AGENT_DONE,
+            AgentEventKind.ERROR,
+        },
+    )
+
+    # Terminal events — no more text is coming. Skip the deferral
+    # queue and force-drain pending events with an immediate snap
+    # forward so the transcript is consistent before the run ends.
+    _TERMINAL_KINDS: frozenset[AgentEventKind] = frozenset(
+        {AgentEventKind.AGENT_DONE, AgentEventKind.ERROR},
+    )
+
+    def _event_will_flush_text(self, event: AgentEvent) -> bool:
+        """Will dispatching ``event`` commit ``_text_buf`` to the transcript?
+
+        Used to decide whether to defer the event until the reveal
+        cursor has caught up. ``THINKING_DELTA`` only flushes on the
+        first delta after text mode (the text → thinking transition);
+        subsequent thinking deltas just append to ``_thinking_buf``.
+        """
+        if event.kind in self._UNCONDITIONAL_FLUSH_KINDS:
+            return True
+        if event.kind == AgentEventKind.THINKING_DELTA and not self._in_thinking:
+            return bool(self._text_buf)
+        return False
 
     def handle(self, event: AgentEvent) -> None:
         """Route a single :class:`AgentEvent` to the appropriate channel.
@@ -139,6 +204,65 @@ class TUIRenderer:
         routing rules. After dispatch, expired notifications are pruned
         and the optional ``invalidate`` callback is fired so the owning
         ``Application`` can redraw.
+        """
+        # Terminal events — no more text is coming. Snap the reveal,
+        # drain the queue, then dispatch this event. Without this,
+        # a queued AGENT_DONE / ERROR would sit forever in test
+        # contexts that don't run the app's ``_reveal_tick``.
+        if event.kind in self._TERMINAL_KINDS:
+            self._force_drain_pending()
+            self._dispatch_event(event)
+            return
+
+        # Preserve order: once anything is queued, everything queues
+        # behind it until the drain runs. Otherwise a TEXT_DELTA could
+        # slip past a deferred TOOL_CALL and end up rendered after
+        # the tool-call transcript entry.
+        #
+        # No invalidate on the queue path — :meth:`drain_pending_events`
+        # fires it (via ``_dispatch_event``) once each event actually
+        # commits, so we get exactly one invalidate per event regardless
+        # of how long it sat queued. The reveal-tick keeps the live
+        # preview animating in the meantime.
+        if self._pending_events:
+            self._pending_events.append(
+                (event, time.monotonic() + self._FLUSH_WAIT_TIMEOUT_S),
+            )
+            return
+
+        # Defer flush-triggering events when the reveal cursor is
+        # still chasing the live buffer — drained by
+        # :meth:`drain_pending_events` from the app's ``_reveal_tick``.
+        if self._event_will_flush_text(event):
+            backlog = len(self._state.live.full_text) - self._state.live.reveal_pos
+            if backlog > 0:
+                self._pending_events.append(
+                    (event, time.monotonic() + self._FLUSH_WAIT_TIMEOUT_S),
+                )
+                return
+
+        self._dispatch_event(event)
+
+    def _force_drain_pending(self) -> None:
+        """Snap reveal forward and replay every queued event in order.
+
+        Used by terminal events and :meth:`finish` to flush the
+        backlog when waiting any longer would lose information.
+        """
+        if not self._pending_events:
+            return
+        live = self._state.live
+        live.reveal_pos = len(live.full_text)
+        live.preview = live.full_text
+        for event, _deadline in list(self._pending_events):
+            self._dispatch_event(event)
+        self._pending_events.clear()
+
+    def _dispatch_event(self, event: AgentEvent) -> None:
+        """Execute the renderer-side action for ``event`` immediately.
+
+        Split out from :meth:`handle` so the flush-deferral queue can
+        replay queued events without re-entering the queueing logic.
         """
         rendered = from_agent_event(event)
         if isinstance(rendered, TranscriptEvent):
@@ -154,12 +278,53 @@ class TUIRenderer:
         self._state.prune_notifications()
         self._fire_invalidate()
 
+    def drain_pending_events(self) -> int:
+        """Replay queued events whose flush is now safe to commit.
+
+        Called by the app's ``_reveal_tick`` after advancing the
+        reveal cursor. Drains while the head event either does not
+        require a flush or its required reveal has caught up. On
+        per-event timeout, snaps the reveal forward so the impending
+        commit matches what the user is about to see this frame.
+
+        Returns the number of events drained (callers may use this
+        to decide whether to invalidate).
+        """
+        if not self._pending_events:
+            return 0
+        drained = 0
+        now = time.monotonic()
+        live = self._state.live
+        while self._pending_events:
+            event, deadline = self._pending_events[0]
+            if self._event_will_flush_text(event):
+                full_len = len(live.full_text)
+                backlog = full_len - live.reveal_pos
+                if backlog > 0:
+                    if now < deadline:
+                        # Reveal still chasing — wait for next frame.
+                        break
+                    # Timeout: snap forward so the impending commit
+                    # matches what the user will see on this frame.
+                    live.reveal_pos = full_len
+                    live.preview = live.full_text
+            self._pending_events.pop(0)
+            self._dispatch_event(event)
+            drained += 1
+            now = time.monotonic()
+        return drained
+
     def finish(self) -> None:
         """Flush any pending buffers and reset the live region.
 
         Called at the end of a turn (and again on cancellation). Safe to
         call repeatedly — flushing an empty buffer is a no-op.
         """
+        # Drain any events still waiting on the reveal cursor — at
+        # turn end / cancellation there's nothing left to type, replay
+        # them so we don't lose tool-call entries / errors that were
+        # queued.
+        self._force_drain_pending()
         self._flush_thinking()
         self._flush_text()
         self._state.live.reset()
@@ -169,14 +334,21 @@ class TUIRenderer:
     def get_accumulated_text(self) -> str:
         """Return all accumulated assistant text for this turn.
 
-        Mirrors :meth:`StreamRenderer.get_accumulated_text`: includes
-        already-flushed text plus any unflushed buffer contents and any
-        unflushed thinking buffer contents (so the agent loop can capture
+        Mirrors :meth:`StreamRenderer.get_accumulated_text`: returns
+        every TEXT_DELTA seen so far this turn, plus any unflushed
+        thinking buffer contents (so the agent loop can capture
         partial output even if the turn was cancelled).
+
+        ``_all_text`` already contains everything ``_text_buf`` does —
+        both are appended on every TEXT_DELTA — so concatenating both
+        would double-count the unflushed segment. Pre-flush this
+        difference was invisible because the immediate dispatch always
+        cleared ``_text_buf`` before this method ran; the reveal-aware
+        flush queue can leave ``_text_buf`` populated, exposing the
+        latent double-count.
         """
         parts: list[str] = []
         parts.extend(self._all_text)
-        parts.extend(self._text_buf)
         parts.extend(self._thinking_buf)
         return "".join(parts)
 
@@ -431,6 +603,29 @@ class TUIRenderer:
         )
         self._state.append_transcript(entry)
 
+        # Truncation marker — surface the cached file path as a toast
+        # AND stash it on the state so a future ``/last-output``
+        # palette entry can pop it open. Doing both is intentional: the
+        # toast is the "you should know" signal the user can ignore;
+        # the stash is the "I want to look now" affordance.
+        overflow_path = _extract_overflow_path(raw)
+        if overflow_path:
+            self._state.last_overflow_path = overflow_path
+            self._state.last_overflow_tool = event.tool_name or ""
+            self._state.push_notification(
+                NotificationItem(
+                    title="Output cached",
+                    body=(
+                        f"{event.tool_name or 'tool'} result was large; "
+                        f"full text saved to {overflow_path}"
+                    ),
+                    severity=Severity.INFO,
+                    source="tui",
+                    key=f"tui.overflow.{event.tool_use_id}",
+                    ttl_seconds=12.0,
+                ),
+            )
+
         # Returning to a streaming-or-idle state is the agent loop's job;
         # most backends emit the next TEXT_DELTA / TURN_COMPLETE shortly
         # after a tool result, so we just clear the tool-running label.
@@ -452,30 +647,39 @@ class TUIRenderer:
     # ------------------------------------------------------------------
 
     def _update_live_thinking(self) -> None:
-        """Refresh ``state.live`` to show a tail of the thinking buffer."""
+        """Refresh ``state.live`` for thinking deltas.
+
+        Seeds the full thinking text into ``live.full_text``; the
+        reveal-cursor tick (``app._reveal_tick``) advances the visible
+        ``preview`` along it with jittered bursts so the preview reads
+        as organic typing instead of snapping per-delta.
+        """
         live = self._state.live
         if live.kind == LiveRegionKind.IDLE:
             live.started_at_monotonic = time.monotonic()
+            live.reveal_pos = 0
+        if live.kind != LiveRegionKind.THINKING:
+            live.reveal_pos = 0
         live.kind = LiveRegionKind.THINKING
         live.label = "thinking"
-        live.preview = self._tail("".join(self._thinking_buf))
+        live.full_text = "".join(self._thinking_buf)
 
     def _update_live_streaming(self) -> None:
-        """Refresh ``state.live`` to show a tail of the text buffer."""
+        """Refresh ``state.live`` for assistant text deltas.
+
+        Seeds the full streamed text into ``live.full_text``; the
+        reveal-cursor tick advances ``preview`` along it (see
+        :func:`_update_live_thinking`).
+        """
         live = self._state.live
         if live.kind == LiveRegionKind.IDLE:
             live.started_at_monotonic = time.monotonic()
+            live.reveal_pos = 0
+        if live.kind != LiveRegionKind.STREAMING:
+            live.reveal_pos = 0
         live.kind = LiveRegionKind.STREAMING
         live.label = "streaming"
-        live.preview = self._tail("".join(self._text_buf))
-
-    @staticmethod
-    def _tail(text: str, *, limit: int = 80) -> str:
-        """Trim ``text`` to a single-line preview suitable for the live row."""
-        flat = text.replace("\n", " ").strip()
-        if len(flat) <= limit:
-            return flat
-        return "..." + flat[-(limit - 3):]
+        live.full_text = "".join(self._text_buf)
 
     # ------------------------------------------------------------------
     # Tool-call summary (thin placeholder — formatter will replace)

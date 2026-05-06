@@ -286,12 +286,31 @@ async def repl(
         if browser_status is not None:
             tool_count += int(browser_status.get("tool_count") or 0)
 
+        # Translate the session's structured ``MCPServerStatus`` list
+        # into the dict shape ``print_banner`` expects so the
+        # bordered REPL shows the same connected/failed badges the
+        # TUI does. Falls back to the legacy ``mcp_servers`` list of
+        # names if ``install_mcp_servers`` didn't populate the
+        # structured field (e.g. tools-disabled runs).
+        raw_mcp_status: list[Any] = getattr(_session, "mcp_status", None) or []
+        mcp_status_dicts: list[dict[str, Any]] = []
+        for s in raw_mcp_status:
+            mcp_status_dicts.append(
+                {
+                    "name": str(getattr(s, "name", "") or "?"),
+                    "state": str(getattr(s, "state", "unknown")),
+                    "transport": str(getattr(s, "transport", "")),
+                    "tool_count": int(getattr(s, "tool_count", 0) or 0),
+                    "error": str(getattr(s, "error", "") or ""),
+                },
+            )
         print_banner(
             backend,
             model,
             sid,
             tool_count=tool_count,
             mcp_servers=mcp_names or None,
+            mcp_status=mcp_status_dicts or None,
             mode=mm.current.value,
             available_agents=available_agents,
             agent_infos=agent_infos or None,

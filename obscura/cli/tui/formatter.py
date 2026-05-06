@@ -33,18 +33,22 @@ from obscura.cli.renderer.channels import Notification as ChannelNotification
 from obscura.cli.renderer.channels import StatusEvent
 from obscura.cli.renderer.modern.theme import (
     ERROR_HEX,
+    GREEN,
+    MAUVE,
     MUTED_HEX,
     OK_HEX,
+    SAPPHIRE,
+    TEAL,
     THINKING_HEX,
     TOOL_HEX,
 )
+from obscura.cli.tool_summaries import classify_tool
 from obscura.cli.tui.state import (
     BannerState,
     LiveRegionKind,
     LiveRegionState,
     NotificationItem,
     StyledRun,
-    ToolApprovalRequest,  # noqa: F401  -- re-exported for callers
     TranscriptEntry,
     TranscriptKind,
 )
@@ -74,6 +78,19 @@ _STYLE_THINKING_BAR = f"fg:{THINKING_HEX}"
 _STYLE_TOOL_NAME = f"fg:{TOOL_HEX} bold"
 _STYLE_TOOL_GLYPH = f"fg:{TOOL_HEX}"
 _STYLE_TOOL_DETAIL = f"fg:{MUTED_HEX}"
+
+# Per-kind glyph + name colour. Mirrors ``_TOOL_KIND_STYLES`` in the
+# bordered modern renderer so a Copilot session looks the same in
+# both surfaces. The "tag" is a short bracketed label (``MCP``,
+# ``PLUG``, ``$``, ``TASK``) prefixed before the tool name; empty
+# means no decoration (default native tools).
+_TOOL_KIND_STYLES: dict[str, tuple[str, str]] = {
+    "native": (TOOL_HEX, ""),
+    "shell": (GREEN.hex, "$"),
+    "mcp": (SAPPHIRE.hex, "MCP"),
+    "plugin": (TEAL.hex, "PLUG"),
+    "delegation": (MAUVE.hex, "TASK"),
+}
 _STYLE_TOOL_RESULT = f"fg:{MUTED_HEX}"
 _STYLE_ERROR = f"fg:{ERROR_HEX} bold"
 _STYLE_SYSTEM = f"fg:{MUTED_HEX} italic"
@@ -170,12 +187,23 @@ def _format_tool_input(name: str, input_dict: dict[str, Any]) -> str:
 
 
 def _runs_for_tool_call(name: str, input_dict: dict[str, Any]) -> list[StyledRun]:
-    """Lay out a tool-call line: glyph + bold tool name + dim detail."""
+    """Lay out a tool-call line: glyph + (kind tag) + bold tool name + dim detail."""
     detail = _format_tool_input(name, input_dict)
+    kind = classify_tool(name)
+    color_hex, tag = _TOOL_KIND_STYLES.get(kind, _TOOL_KIND_STYLES["native"])
     runs: list[StyledRun] = [
-        StyledRun(text=f"  {_GLYPH_TOOL} ", style=_STYLE_TOOL_GLYPH),
-        StyledRun(text=name, style=_STYLE_TOOL_NAME),
+        StyledRun(
+            text=f"  {_GLYPH_TOOL} ",
+            style=f"fg:{color_hex} bold",
+        ),
     ]
+    if tag:
+        runs.append(
+            StyledRun(text=f"{tag} ", style=f"fg:{color_hex}"),
+        )
+    runs.append(
+        StyledRun(text=name, style=f"fg:{color_hex} bold"),
+    )
     if detail:
         runs.append(StyledRun(text=" ", style=""))
         runs.append(StyledRun(text=detail, style=_STYLE_TOOL_DETAIL))

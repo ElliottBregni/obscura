@@ -17,11 +17,19 @@ import random
 
 import pytest
 
-from obscura.cli.renderer.modern.renderer import (
-    _REVEAL_JITTER_HIGH,  # pyright: ignore[reportPrivateUsage]
-    _REVEAL_JITTER_LOW,  # pyright: ignore[reportPrivateUsage]
-    _compute_reveal_burst,  # pyright: ignore[reportPrivateUsage]
+from obscura.cli.renderer.reveal import (
+    REVEAL_JITTER_HIGH,
+    REVEAL_JITTER_LOW,
+    compute_reveal_burst,
 )
+
+# Aliases preserve the assertion text + private-API "are these
+# constants stable?" intent from when the helper lived inside the
+# bordered REPL renderer module. The TUI now imports the same helper
+# (see ``obscura.cli.renderer.reveal``).
+_REVEAL_JITTER_HIGH = REVEAL_JITTER_HIGH
+_REVEAL_JITTER_LOW = REVEAL_JITTER_LOW
+_compute_reveal_burst = compute_reveal_burst
 
 
 @pytest.fixture(autouse=True)
@@ -74,7 +82,9 @@ def test_full_buffer_drains_in_bounded_frames() -> None:
     base = 12
     pos = 0
     frames = 0
-    max_frames = 1000  # at base=12 unjittered we'd finish in ~417; jitter+scaling pushes lower
+    max_frames = (
+        1000  # at base=12 unjittered we'd finish in ~417; jitter+scaling pushes lower
+    )
     while pos < full_len and frames < max_frames:
         burst = _compute_reveal_burst(backlog=full_len - pos, base=base)
         pos = min(full_len, pos + burst)

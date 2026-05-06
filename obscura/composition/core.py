@@ -19,12 +19,12 @@ What core does:
 - Generate identity (capability) token (composition.tokens)
 - Construct backend via composition.backend_factory.create_backend
 - Run install_mcp_servers BEFORE backend.start (so Claude SDK sees them)
+- Run install_plugin_tools + install_system_tools BEFORE backend.start
+  (Copilot and Claude SDKs commit the tool list at session creation)
 - await backend.start()
 - Return AgentSession with _owned_* state populated
 
 What core does NOT do (extras blocks add):
-- plugin tool registration (install_plugin_tools)
-- system tool registration (install_system_tools)
 - vector memory (install_vector_memory)
 - hook loading (install_project_hooks)
 - skill context (install_skill_context)
@@ -177,7 +177,18 @@ async def build_core_session(
 
     await install_mcp_servers(session, config)
 
-    # 9. Start backend
+    # 9. Register plugin + system tools BEFORE backend.start so the
+    # Copilot and Claude SDKs (which commit the tool list at session
+    # creation) see them. Surfaces MUST NOT call these blocks again —
+    # core has done it. Both blocks are idempotent (session.add_tool
+    # dedupes by name) but a stray repeat call wastes work.
+    from obscura.composition.blocks.plugins import install_plugin_tools
+    from obscura.composition.blocks.system_tools import install_system_tools
+
+    await install_plugin_tools(session, config)
+    await install_system_tools(session, config)
+
+    # 10. Start backend
     try:
         await backend.start()
     except Exception:

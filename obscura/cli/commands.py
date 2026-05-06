@@ -45,7 +45,11 @@ from obscura.cli.vector_memory_bridge import (
     CLI_NAMESPACE,
     clear_mcp_noise_memories,
 )
+from rich.markup import escape as markup_escape
+
 from obscura.cli.render import (
+    ERROR_COLOR,
+    OK_COLOR,
     TOOL_COLOR,
     LabeledStreamRenderer,
     console,
@@ -3228,8 +3232,67 @@ async def cmd_mcp(args: str, ctx: REPLContext) -> str | None:
         logger.debug("suppressed exception in cmd_mcp", exc_info=True)
         args_list = args.split()
 
+    # ``diagnose`` reports the live session's per-server MCP status —
+    # connected count, transport, tool count, and the raw error for
+    # failed servers. Routed inline because it needs ``ctx.client`` to
+    # reach ``session.mcp_status``; the broader MCP command surface in
+    # ``mcp_commands.py`` only sees argument lists.
+    if args_list and args_list[0] == "diagnose":
+        _print_mcp_diagnose(ctx)
+        return None
+
     handle_mcp_command(args_list)
     return None
+
+
+def _print_mcp_diagnose(ctx: REPLContext) -> None:
+    """Pretty-print the live ``session.mcp_status`` to the Rich console."""
+    session = ctx.client
+    statuses = list(getattr(session, "mcp_status", []) or [])
+    if not statuses:
+        print_info("No MCP servers configured for this session.")
+        return
+    table = Table(show_header=True, show_lines=False, title="MCP servers")
+    table.add_column("Status", width=10)
+    table.add_column("Name")
+    table.add_column("Transport", width=10)
+    table.add_column("Tools", justify="right", width=6)
+    table.add_column("Error")
+    for srv in statuses:
+        state = getattr(srv, "state", "unknown")
+        if state == "connected":
+            badge = f"[{OK_COLOR}]● connected[/]"
+        elif state == "failed":
+            badge = f"[{ERROR_COLOR}]✗ failed[/]"
+        else:
+            badge = "[dim]○ unknown[/]"
+        err_raw = getattr(srv, "error", "") or ""
+        # Cap the error to a single line in the table; full text
+        # follows below for any failed server.
+        err_first = err_raw.splitlines()[0] if err_raw else ""
+        if len(err_first) > 80:
+            err_first = err_first[:77] + "..."
+        table.add_row(
+            badge,
+            getattr(srv, "name", "?"),
+            getattr(srv, "transport", "") or "?",
+            str(int(getattr(srv, "tool_count", 0) or 0)),
+            f"[dim]{markup_escape(err_first)}[/]" if err_first else "",
+        )
+    console.print(table)
+    failed = [s for s in statuses if getattr(s, "state", "") == "failed"]
+    if failed:
+        console.print()
+        for srv in failed:
+            err = (getattr(srv, "error", "") or "").strip()
+            if not err:
+                continue
+            console.print(
+                f"[{ERROR_COLOR}]Full error — {markup_escape(srv.name)}:[/]",
+            )
+            for line in err.splitlines():
+                console.print(f"  [dim]{markup_escape(line)}[/]")
+            console.print()
 
 
 async def cmd_plugin(args: str, ctx: REPLContext) -> str | None:

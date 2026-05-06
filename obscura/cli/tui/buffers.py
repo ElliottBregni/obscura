@@ -50,6 +50,7 @@ from obscura.cli.tui.state import (
 )
 
 __all__ = [
+    "agent_panel_text",
     "banner_text",
     "header_text",
     "live_region_text",
@@ -189,14 +190,35 @@ def transcript_text(state: TUIState) -> FormattedText:
     if not entries:
         # Empty-state hint so the launch screen isn't a void.
         hint_style = f"fg:{OVERLAY0.hex}"
-        return FormattedText([
-            ("", "\n"),
-            (hint_style, "  Welcome to Obscura.\n"),
-            ("", "\n"),
-            (hint_style, "  Type a message and press Enter to send.\n"),
-            (hint_style, "  Esc+Enter or Ctrl+J inserts a newline.\n"),
-            (hint_style, "  /help for commands · Ctrl+C cancels · Ctrl+D exits.\n"),
-        ])
+        return FormattedText(
+            [
+                ("", "\n"),
+                (hint_style, "  Welcome to Obscura.\n"),
+                ("", "\n"),
+                (hint_style, "  Type a message and press Enter to send.\n"),
+                (hint_style, "  Esc+Enter or Ctrl+J inserts a newline.\n"),
+                (hint_style, "  /help for commands · Ctrl+C cancels · Ctrl+D exits.\n"),
+            ]
+        )
+
+    # Tool-call filter: show only TOOL_USE / TOOL_RESULT entries when
+    # ``state.transcript_filter == "tools_only"`` (toggled with Ctrl+T).
+    # Long sessions bury tool-call lines under assistant prose; this
+    # gives the user a one-keystroke "show me what the agent actually
+    # ran" view without changing the underlying transcript.
+    if state.transcript_filter == "tools_only":
+        tool_kinds = {TranscriptKind.TOOL_USE, TranscriptKind.TOOL_RESULT}
+        filtered = [e for e in entries if e.kind in tool_kinds]
+        if not filtered:
+            empty_style = f"fg:{OVERLAY0.hex}"
+            return FormattedText(
+                [
+                    ("", "\n"),
+                    (empty_style, "  No tool calls yet in this session.\n"),
+                    (empty_style, "  Ctrl+T to show all transcript entries.\n"),
+                ],
+            )
+        entries = filtered
     if len(entries) > _TRANSCRIPT_RENDER_CAP:
         entries = entries[-_TRANSCRIPT_RENDER_CAP:]
 
@@ -301,6 +323,9 @@ def header_text(state: TUIState) -> FormattedText:
     * session title (or short session id)
     * backend / model
     * branch (when present)
+    * tool count (when registered)
+    * MCP server count (when connected; full list shown on hover via
+      the Ctrl-K palette later if it gets large)
     * context-window percent
     * mode label
     """
@@ -318,6 +343,54 @@ def header_text(state: TUIState) -> FormattedText:
     if hud.branch:
         runs.append((f"{OVERLAY0.hex}", "  │  "))
         runs.append((f"{GREEN.hex}", f"⎇ {hud.branch}"))
+
+    if hud.tool_count > 0:
+        runs.append((f"{OVERLAY0.hex}", "  │  "))
+        runs.append((f"{YELLOW.hex}", "🔧 "))
+        runs.append((f"{TEXT.hex}", f"{hud.tool_count} tools"))
+
+    if hud.mcp_servers:
+        runs.append((f"{OVERLAY0.hex}", "  │  "))
+        # "OK" = connected OR unknown (clean connection, just no tools
+        # exposed, or routed externally as on Codex). Only ``failed``
+        # — i.e. servers in MCPBackend.connection_errors — count
+        # against the badge.
+        ok = sum(
+            1 for s in hud.mcp_servers if s.get("state") in ("connected", "unknown")
+        )
+        failed = sum(1 for s in hud.mcp_servers if s.get("state") == "failed")
+        total = len(hud.mcp_servers)
+        label_color = (
+            f"{GREEN.hex}"
+            if failed == 0 and ok > 0
+            else f"{YELLOW.hex}"
+            if failed > 0 and ok > 0
+            else f"{RED.hex} bold"
+            if failed > 0
+            else f"{PEACH.hex}"
+        )
+        runs.append((label_color, f"MCP {ok}/{total}"))
+        if failed > 0:
+            runs.append((f"{RED.hex} bold", " ⚠"))
+        if total <= 3:
+            runs.append((f"{OVERLAY0.hex}", "  "))
+            _state_colors: dict[str, str] = {
+                "connected": f"{GREEN.hex}",
+                "failed": f"{RED.hex} bold",
+                "unknown": f"{OVERLAY0.hex}",
+            }
+            for i, srv in enumerate(hud.mcp_servers):
+                if i:
+                    runs.append((f"{OVERLAY0.hex}", " "))
+                # ``srv_state`` rather than ``state`` to avoid
+                # shadowing the outer ``state: TUIState`` parameter.
+                srv_state = str(srv.get("state", "unknown"))
+                dot_color = _state_colors.get(srv_state, f"{OVERLAY0.hex}")
+                runs.append((dot_color, "● "))
+                name_color = (
+                    f"{TEXT.hex}" if srv_state == "connected" else f"{SUBTEXT0.hex}"
+                )
+                runs.append((name_color, str(srv.get("name", "?"))))
 
     runs.append((f"{OVERLAY0.hex}", "  │  "))
     ctx_color = (
@@ -356,28 +429,89 @@ def toolbar_text(state: TUIState) -> FormattedText:
     ]
 
     runs.append((f"{OVERLAY0.hex}", "   │   "))
-    runs.append((f"{TEXT.hex}", f"agents {len(hud.running_agents)}"))
+
+    # Agent counter — bright green dot when at least one agent is
+    # actively running, dim grey otherwise. Breakdown by status when
+    # multiple are present so the user can tell "2 agents 1 running"
+    # apart from "2 agents both running" without opening the panel.
+    total_agents = len(hud.running_agents)
+    running = sum(1 for a in hud.running_agents if a.status == "running")
+    if total_agents > 0:
+        glyph_color = f"{GREEN.hex}" if running else f"{PEACH.hex}"
+        runs.append((glyph_color, "● "))
+        if total_agents == running:
+            runs.append((f"{TEXT.hex}", f"{total_agents} agent"))
+            if total_agents != 1:
+                runs.append((f"{TEXT.hex}", "s"))
+        else:
+            runs.append(
+                (f"{TEXT.hex}", f"{total_agents} agents · {running} running"),
+            )
+    else:
+        runs.append((f"{OVERLAY0.hex}", "○ 0 agents"))
     runs.append((f"{OVERLAY0.hex}", "   "))
     runs.append((f"{TEXT.hex}", f"tasks {hud.task_count}"))
 
-    if state.show_agent_panel and hud.running_agents:
-        runs.append(("", "\n"))
-        for idx, agent in enumerate(hud.running_agents):
-            connector = "└─" if idx == len(hud.running_agents) - 1 else "├─"
-            status_color = {
-                "running": f"{GREEN.hex}",
-                "waiting": f"{PEACH.hex}",
-                "pending": f"{OVERLAY1.hex}",
-            }.get(agent.status, f"{SUBTEXT0.hex}")
-            runs.append((f"{OVERLAY0.hex}", f"  {connector} "))
-            runs.append((status_color, "● "))
-            runs.append((f"{TEXT.hex}", agent.name))
-            runs.append((f"{OVERLAY0.hex}", "  "))
-            runs.append((f"{SUBTEXT0.hex}", agent.elapsed_display))
-            if agent.last_tool:
-                runs.append((f"{OVERLAY0.hex}", "  "))
-                runs.append((f"{YELLOW.hex}", agent.last_tool))
-            if idx < len(hud.running_agents) - 1:
-                runs.append(("", "\n"))
+    return FormattedText(runs)
 
+
+def agent_panel_text(state: TUIState) -> FormattedText:
+    """Render the right-side subagent panel (toggled with ``Ctrl+G``).
+
+    One row per running agent showing a coloured status glyph, the
+    agent's name, elapsed time since spawn, iteration count, and the
+    most recent tool the agent invoked. Returns an empty
+    :class:`FormattedText` when the panel is collapsed
+    (``state.show_agent_panel`` is ``False``) — the layout's
+    :class:`ConditionalContainer` then drops the side column entirely
+    so the transcript reclaims the horizontal real estate.
+    """
+    if not state.show_agent_panel:
+        return FormattedText([])
+
+    hud = state.hud
+    runs: list[tuple[str, str]] = []
+
+    # Header row — distinguishes the panel from the transcript next to
+    # it and makes the empty state self-explanatory.
+    runs.append((f"{LAVENDER.hex} bold", "Agents"))
+    runs.append((f"{OVERLAY0.hex}", "  "))
+    runs.append((f"{SUBTEXT0.hex}", f"({len(hud.running_agents)})"))
+    runs.append(("", "\n"))
+    runs.append((f"{OVERLAY0.hex}", "─" * 24))
+    runs.append(("", "\n"))
+
+    if not hud.running_agents:
+        runs.append((f"{OVERLAY0.hex}", "no agents running"))
+        return FormattedText(runs)
+
+    status_colors: dict[str, str] = {
+        "running": f"{GREEN.hex}",
+        "waiting": f"{PEACH.hex}",
+        "pending": f"{OVERLAY1.hex}",
+    }
+    for agent in hud.running_agents:
+        glyph_color = status_colors.get(agent.status, f"{SUBTEXT0.hex}")
+        runs.append((glyph_color, "● "))
+        runs.append((f"{TEXT.hex} bold", agent.name))
+        runs.append(("", "\n"))
+        # Indent the metadata one column under the glyph.
+        runs.append((f"{OVERLAY0.hex}", "  "))
+        runs.append((f"{SUBTEXT0.hex}", agent.status))
+        runs.append((f"{OVERLAY0.hex}", " · "))
+        runs.append((f"{SUBTEXT0.hex}", agent.elapsed_display))
+        if agent.iteration_count:
+            runs.append((f"{OVERLAY0.hex}", " · "))
+            runs.append(
+                (f"{SUBTEXT0.hex}", f"#{agent.iteration_count}"),
+            )
+        runs.append(("", "\n"))
+        if agent.last_tool:
+            runs.append((f"{OVERLAY0.hex}", "  ↳ "))
+            runs.append((f"{YELLOW.hex}", _truncate(agent.last_tool, 24)))
+            runs.append(("", "\n"))
+    # Drop the trailing newline so the surrounding window doesn't
+    # show an extra blank row.
+    if runs and runs[-1] == ("", "\n"):
+        runs.pop()
     return FormattedText(runs)

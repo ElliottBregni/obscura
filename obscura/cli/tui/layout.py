@@ -43,15 +43,18 @@ from prompt_toolkit.layout.containers import (
     Float,
     FloatContainer,
     HSplit,
+    VSplit,
     Window,
 )
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.widgets import TextArea
 
 from obscura.cli.promptkit.highlighter import KeywordHighlighter
 from obscura.cli.tui.buffers import (
+    agent_panel_text,
     banner_text,
     header_text,
     live_region_text,
@@ -92,6 +95,7 @@ class TUILayoutComponents:
     banner_window: Window
     header_window: Window
     toolbar_window: Window
+    agent_panel_window: Window
     floats_container: FloatContainer
 
 
@@ -210,6 +214,37 @@ def build_layout(
         style="class:tui.transcript",
     )
 
+    # ---- Agent side panel (collapsible, right column) --------------------
+    # 26 columns is the smallest comfortable width for "● agent_name\n
+    # waiting · 1m23s · #5\n  ↳ tool_name" without wrapping. Toggled by
+    # ``state.show_agent_panel`` (Ctrl+G in app keybindings); when off,
+    # the :class:`ConditionalContainer` collapses to zero width and the
+    # transcript reclaims the column.
+    agent_panel_window = _make_text_window(
+        lambda: agent_panel_text(state),
+        style="class:tui.agent-panel",
+    )
+    agent_panel_container = ConditionalContainer(
+        content=Window(
+            content=FormattedTextControl(
+                text=lambda: agent_panel_text(state),
+                focusable=False,
+                show_cursor=False,
+            ),
+            wrap_lines=False,
+            always_hide_cursor=True,
+            width=Dimension.exact(26),
+            style="class:tui.agent-panel",
+        ),
+        filter=Condition(lambda: state.show_agent_panel),
+    )
+    transcript_row = VSplit(
+        [
+            transcript_window,
+            agent_panel_container,
+        ],
+    )
+
     # ---- Live region (1 row, conditional) --------------------------------
     live_region_window = _make_text_window(
         lambda: live_region_text(state),
@@ -236,15 +271,15 @@ def build_layout(
     key_bindings = KeyBindings()
 
     @key_bindings.add("enter")
-    def _submit(event: KeyPressEvent) -> None:
+    def _submit(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         event.current_buffer.validate_and_handle()
 
     @key_bindings.add("escape", "enter")
-    def _newline_esc(event: KeyPressEvent) -> None:
+    def _newline_esc(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         event.current_buffer.insert_text("\n")
 
     @key_bindings.add("c-j")
-    def _newline_ctrl_j(event: KeyPressEvent) -> None:
+    def _newline_ctrl_j(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
         event.current_buffer.insert_text("\n")
 
     def _accept(buffer: Buffer) -> bool:
@@ -263,7 +298,11 @@ def build_layout(
         wrap_lines=True,
         prompt="❯ ",  # noqa: RUF001
         completer=completer,
-        complete_while_typing=False,
+        # ``complete_while_typing`` makes the completion menu pop up
+        # as the user types ``/``, ``@``, or ``$``. The TUI app caches
+        # the supplier results for ~5s so the per-keystroke filesystem
+        # walk doesn't show up as input lag.
+        complete_while_typing=True,
         height=Dimension(min=1, max=6, preferred=1),
         accept_handler=_accept,
         focusable=True,
@@ -301,7 +340,7 @@ def build_layout(
     body = HSplit(
         [
             header_window,
-            transcript_window,
+            transcript_row,
             live_region_container,
             input_area,
             toolbar_window,
@@ -329,9 +368,20 @@ def build_layout(
         width=48,
     )
 
+    # Completions popup — anchored to the cursor so it appears next to
+    # whatever ``@command`` / ``$skill`` / ``/slash`` token the user is
+    # typing. ``CompletionsMenu`` uses prompt-toolkit's built-in widget
+    # which already handles up/down navigation and Enter / Tab to
+    # accept; we don't need our own keybindings for it.
+    completions_float = Float(
+        xcursor=True,
+        ycursor=True,
+        content=CompletionsMenu(max_height=10, scroll_offset=1),
+    )
+
     floats_container = FloatContainer(
         content=body,
-        floats=[banner_float, notification_float],
+        floats=[banner_float, notification_float, completions_float],
     )
 
     layout = Layout(floats_container, focused_element=input_window)
@@ -346,5 +396,6 @@ def build_layout(
         banner_window=banner_window,
         header_window=header_window,
         toolbar_window=toolbar_window,
+        agent_panel_window=agent_panel_window,
         floats_container=floats_container,
     )
