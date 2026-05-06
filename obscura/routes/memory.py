@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit
-from obscura.memory import MemoryStore
+from obscura.memory import create_memory_store
 
 from obscura.auth.models import AuthenticatedUser
 import logging
@@ -66,7 +66,7 @@ async def memory_list(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """List all memory keys for the user."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     keys = store.list_keys(namespace=namespace)
     return JSONResponse(
         content={
@@ -82,7 +82,7 @@ async def memory_search(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Search memory keys and values."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     results = store.search(q)
     return JSONResponse(
         content={
@@ -99,7 +99,7 @@ async def memory_stats(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get memory usage statistics."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     stats = store.get_stats()
     return JSONResponse(content=stats)
 
@@ -112,7 +112,7 @@ async def memory_namespace_list(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """List all memory namespaces."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     keys = store.list_keys()
     namespaces = {k.namespace for k in keys}
 
@@ -168,7 +168,7 @@ async def memory_namespace_delete(
 
     deleted_keys = 0
     if delete_data:
-        store = MemoryStore.for_user(user)
+        store = create_memory_store(user)
         keys = store.list_keys(namespace=namespace)
         for key in keys:
             store.delete(key.key, namespace=key.namespace)
@@ -198,7 +198,7 @@ async def memory_namespace_stats(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get statistics for a specific namespace."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     keys = store.list_keys(namespace=namespace)
 
     total_size = 0
@@ -225,7 +225,7 @@ async def memory_transaction(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_WRITE_ROLES))],
 ) -> JSONResponse:
     """Execute multiple memory operations atomically."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
 
     operations = body.operations
     if not operations:
@@ -283,7 +283,7 @@ async def memory_export(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Export memory data as JSON."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
 
     keys = store.list_keys(namespace=namespace)
     data: dict[str, dict[str, Any]] = {}
@@ -313,7 +313,7 @@ async def memory_import(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_WRITE_ROLES)),
 ) -> JSONResponse:
     """Import memory data from JSON."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
 
     import_data = body.data
     if not import_data:
@@ -367,7 +367,7 @@ async def memory_get(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Get a value from the user's memory store."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     value = store.get(key, namespace=namespace)
     if value is None:
         raise HTTPException(
@@ -386,7 +386,7 @@ async def memory_set(
     user: AuthenticatedUser = Depends(require_any_role(*AGENT_READ_ROLES)),
 ) -> JSONResponse:
     """Store a value in the user's memory store."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     value: Any = body.get("value")
     ttl_delta = timedelta(seconds=ttl) if ttl else None
     store.set(key, value, namespace=namespace, ttl=ttl_delta)
@@ -401,7 +401,7 @@ async def memory_delete(
     user: Annotated[AuthenticatedUser, Depends(require_any_role(*AGENT_READ_ROLES))],
 ) -> JSONResponse:
     """Delete a key from the user's memory store."""
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     deleted = store.delete(key, namespace=namespace)
     if not deleted:
         raise HTTPException(

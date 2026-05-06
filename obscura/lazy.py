@@ -56,7 +56,6 @@ _LAZY: dict[str, tuple[str, str, tuple[str, ...]]] = {
         "make_agent_loop",
         (),
     ),
-    "is_v2_enabled": ("obscura.core.agent_loop_factory", "is_v2_enabled", ()),
     # --- OpenClaw bridge (pulls httpx) ---
     "OpenClawBridge": ("obscura.openclaw_bridge", "OpenClawBridge", ()),
     "OpenClawBridgeConfig": ("obscura.openclaw_bridge", "OpenClawBridgeConfig", ()),

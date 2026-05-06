@@ -35,6 +35,7 @@ from obscura.core.compaction import should_auto_compact
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
 from obscura.core.enums.agent import AgentEventKind
+from obscura.core.context_window import get_context_window
 from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
 from obscura.core.session_utils import generate_session_title
 from obscura.core.types import (
@@ -120,9 +121,13 @@ async def send_message(
         return True
 
     # ── Token-aware auto-compact ────────────────────────────────────────────
-    _context_window = ctx.client.context_window
+    _context_window = (
+        getattr(ctx.client, "context_window", 0) if ctx.client else 0
+    ) or get_context_window(ctx.model or ctx.backend)
     _compact_threshold = int(_context_window * 0.60)  # compact at 60%
-    _warn_threshold = ctx.client.context_warn_threshold  # 50% of window
+    _warn_threshold = (
+        getattr(ctx.client, "context_warn_threshold", 0) if ctx.client else 0
+    )  # 50% of window
 
     # ── Vector memory pre-search ──────────────────────────────────────────
     augmented_text = text
@@ -439,7 +444,7 @@ async def send_message(
     if not _session_state["titled"] and len(ctx.message_history) >= 2:
         _session_state["titled"] = True
         try:
-            title = await generate_session_title(text, ctx.client._backend)  # pyright: ignore[reportPrivateUsage]
+            title = await generate_session_title(text, ctx.client._backend)  # noqa: SLF001
             if title:
                 await ctx.store.update_session(ctx.session_id, summary=title)
                 _prompt_status = getattr(ctx, "_prompt_status", None)

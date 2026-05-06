@@ -15,7 +15,6 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.core.types import AgentEvent, ToolCallInfo
 from obscura.integrations.a2a.event_mapper import EventMapper
@@ -40,21 +39,28 @@ logger = logging.getLogger(__name__)
 class A2AService:
     """Core A2A service — protocol-agnostic business logic.
 
+    Per-task agent execution goes through ``obscura.composition.a2a.
+    build_a2a_session``, which constructs an ``AgentSession`` with all
+    plugin tools registered and the backend started. This means A2A
+    agents can call tools end-to-end — the previous ``get_runtime``-
+    based design left agents toolless when ``get_runtime`` was unset
+    (the production default), and they returned placeholder strings.
+
     Parameters
     ----------
     store:
         Task persistence backend (in-memory or Redis).
     agent_card:
         Pre-built agent card for ``/.well-known/agent.json``.
-    get_runtime:
-        Factory that returns an ``AgentRuntime`` for a given user dict.
-        The A2A layer injects ``on_confirm`` callbacks so agent loops
-        can be paused for external input.
     agent_model:
         Model backend to use when spawning agents (default: ``"copilot"``).
     agent_system_prompt:
         System prompt for spawned agents.
-
+    agent_max_turns:
+        Max model turns per task before the loop bails.
+    agent_backend:
+        Provider backend identifier (``"copilot"``, ``"claude"``, …).
+        Passed straight through to ``SessionConfig.backend``.
     """
 
     def __init__(
@@ -62,14 +68,14 @@ class A2AService:
         store: TaskStore,
         agent_card: AgentCard,
         *,
-        get_runtime: Callable[..., Any] | None = None,
+        agent_backend: str = "copilot",
         agent_model: str = "copilot",
         agent_system_prompt: str = "",
         agent_max_turns: int = 10,
     ) -> None:
         self._store = store
         self._agent_card = agent_card
-        self._get_runtime = get_runtime
+        self._agent_backend = agent_backend
         self._agent_model = agent_model
         self._agent_system_prompt = agent_system_prompt
         self._agent_max_turns = agent_max_turns
@@ -77,10 +83,14 @@ class A2AService:
         # Active tasks: task_id → asyncio.Task wrapping agent execution
         self._running: dict[str, asyncio.Task[Any]] = {}
 
-        # Pending confirmations: task_id → (Event, result dict)
+        # Pending input-required parking: task_id → (Event, result_dict).
+        # Result dict carries 'kind' (confirm/ask/plan/permission),
+        # 'approved' (bool), 'answer' (str). _resume_task fills it in
+        # when the user replies, then sets the event to wake the
+        # agent-loop callback.
         self._pending_confirmations: dict[
             str,
-            tuple[asyncio.Event, dict[str, bool]],
+            tuple[asyncio.Event, dict[str, Any]],
         ] = {}
 
         # Context → agent mapping for multi-turn conversations
@@ -236,61 +246,127 @@ class A2AService:
             yield event
 
     # ------------------------------------------------------------------
-    # Confirmation bridge: on_confirm → INPUT_REQUIRED
+    # Input-required bridge: tool confirm + ask_user + permission +
+    # plan_approval all flow through the same INPUT_REQUIRED machinery.
+    #
+    # _pending_confirmations[task_id] stores (Event, result_dict). The
+    # result dict holds:
+    #   - "kind": "confirm" | "ask" | "permission" | "plan"
+    #   - "approved": bool (for binary kinds)
+    #   - "answer":   str  (for free-text "ask" kind)
+    # _resume_task reads `kind` to decide how to interpret the user's
+    # follow-up message (y/n parser vs raw text capture).
     # ------------------------------------------------------------------
+
+    async def _park_for_input(
+        self,
+        task_id: str,
+        kind: str,
+        prompt_text: str,
+        message_id_prefix: str = "input",
+    ) -> dict[str, Any]:
+        """Park the task in INPUT_REQUIRED with a synthetic agent message
+        and wait for the user's reply. Returns the result dict populated
+        by ``_resume_task``.
+        """
+        confirmation_event = asyncio.Event()
+        confirmation_result: dict[str, Any] = {
+            "kind": kind,
+            "approved": False,
+            "answer": "",
+        }
+        self._pending_confirmations[task_id] = (
+            confirmation_event,
+            confirmation_result,
+        )
+
+        msg = A2AMessage(
+            role=A2ARole.AGENT,
+            messageId=f"{message_id_prefix}-{uuid.uuid4().hex[:8]}",
+            parts=[TextPart(text=prompt_text)],
+        )
+        await self._store.transition(
+            task_id,
+            A2ATaskState.INPUT_REQUIRED,
+            message=msg,
+        )
+
+        # Publish update for streaming subscribers
+        task = await self._store.get_task(task_id)
+        if task:
+            await self._store.publish_update(
+                task_id,
+                TaskStatusUpdateEvent(
+                    taskId=task_id,
+                    contextId=task.contextId,
+                    status=task.status,
+                ),
+            )
+
+        await confirmation_event.wait()
+        confirmation_event.clear()
+        return confirmation_result
 
     def _make_on_confirm(
         self,
         task_id: str,
     ) -> Callable[[ToolCallInfo], Awaitable[bool]]:
-        """Create an on_confirm callback that bridges to A2A INPUT_REQUIRED.
-
-        When the agent loop wants to confirm a tool call, this:
-        1. Transitions the task to INPUT_REQUIRED
-        2. Publishes an update for streaming clients
-        3. Parks the agent loop via asyncio.Event
-        4. Resumes when external client sends a follow-up message
-        """
-        confirmation_event = asyncio.Event()
-        confirmation_result: dict[str, bool] = {"approved": False}
-        self._pending_confirmations[task_id] = (confirmation_event, confirmation_result)
+        """on_confirm callback for tool-call gating (binary y/n)."""
 
         async def on_confirm(tool_call: ToolCallInfo) -> bool:
-            # Transition to INPUT_REQUIRED
-            confirm_msg = A2AMessage(
-                role=A2ARole.AGENT,
-                messageId=f"confirm-{uuid.uuid4().hex[:8]}",
-                parts=[
-                    TextPart(
-                        text=f"Approve tool call: {tool_call.name}({tool_call.input})",
-                    ),
-                ],
-            )
-            await self._store.transition(
+            result = await self._park_for_input(
                 task_id,
-                A2ATaskState.INPUT_REQUIRED,
-                message=confirm_msg,
+                kind="confirm",
+                prompt_text=f"Approve tool call: {tool_call.name}({tool_call.input})",
+                message_id_prefix="confirm",
             )
-
-            # Publish update for streaming subscribers
-            task = await self._store.get_task(task_id)
-            if task:
-                await self._store.publish_update(
-                    task_id,
-                    TaskStatusUpdateEvent(
-                        taskId=task_id,
-                        contextId=task.contextId,
-                        status=task.status,
-                    ),
-                )
-
-            # Park — wait for external client to respond
-            await confirmation_event.wait()
-            confirmation_event.clear()
-
-            return confirmation_result.get("approved", False)
+            return bool(result.get("approved", False))
 
         return on_confirm
+
+    def _make_ask_user(
+        self,
+        task_id: str,
+    ) -> Callable[..., Awaitable[str]]:
+        """ask_user callback for free-text questions (or choice menus)."""
+
+        async def ask_user(
+            question: str,
+            choices: list[str] | None = None,
+            allow_custom: bool = False,  # noqa: ARG001
+        ) -> str:
+            choices_str = ""
+            if choices:
+                choices_str = " Choices: " + ", ".join(choices)
+            result = await self._park_for_input(
+                task_id,
+                kind="ask",
+                prompt_text=f"Question: {question}{choices_str}",
+                message_id_prefix="ask",
+            )
+            return str(result.get("answer", ""))
+
+        return ask_user
+
+    def _make_plan_approval(
+        self,
+        task_id: str,
+    ) -> Callable[[str], Awaitable[bool]]:
+        """plan_approval callback for plan-mode exit (binary y/n)."""
+
+        async def plan_approval(plan_summary: str) -> bool:
+            result = await self._park_for_input(
+                task_id,
+                kind="plan",
+                prompt_text=(
+                    "Approve plan and begin implementation:\n\n"
+                    f"{plan_summary or '(no summary)'}"
+                ),
+                message_id_prefix="plan",
+            )
+            return bool(result.get("approved", False))
+
+        return plan_approval
 
     async def _resume_task(self, task_id: str, message: A2AMessage) -> Task:
         """Resume a task that's waiting for input (INPUT_REQUIRED)."""
@@ -301,10 +377,27 @@ class A2AService:
 
         confirmation_event, confirmation_result = pending
 
-        # Determine approval from message content
-        text = self._extract_text(message).lower().strip()
-        approved = text in ("yes", "true", "approve", "confirm", "ok", "y", "1")
-        confirmation_result["approved"] = approved
+        kind = str(confirmation_result.get("kind", "confirm"))
+        text = self._extract_text(message).strip()
+
+        if kind == "ask":
+            # Free-text answer — capture verbatim
+            confirmation_result["answer"] = text
+            confirmation_result["approved"] = bool(text)
+        else:
+            # Binary kinds (confirm / plan / permission): parse y/n
+            lower = text.lower()
+            approved = lower in (
+                "yes",
+                "true",
+                "approve",
+                "confirm",
+                "ok",
+                "y",
+                "1",
+            )
+            confirmation_result["approved"] = approved
+            confirmation_result["answer"] = text
 
         # Append the user's response to history
         await self._store.append_message(task_id, message)
@@ -364,31 +457,37 @@ class A2AService:
     async def _execute_agent(self, task: Task, prompt: str) -> str:
         """Execute the agent and return the final text result.
 
-        If ``get_runtime`` is not configured (e.g., in tests), returns
-        a placeholder indicating no runtime is available.
+        Builds a per-task ``AgentSession`` via ``build_a2a_session`` so
+        the agent has the full plugin tool set available, plus all
+        three INPUT_REQUIRED-backed callbacks (on_confirm + ask_user +
+        plan_approval). The session is torn down on return.
         """
-        if not self._get_runtime:
-            logger.warning("No agent runtime configured — returning placeholder")
-            return f"[No agent runtime] Received: {prompt}"
+        from obscura.composition.a2a import build_a2a_session
+        from obscura.composition.session import SessionConfig
 
-        runtime = self._get_runtime()
-        agent = runtime.spawn(
-            name=f"a2a-{task.id}",
+        config = SessionConfig(
+            backend=self._agent_backend,
             model=self._agent_model,
             system_prompt=self._agent_system_prompt,
+            max_turns=self._agent_max_turns,
         )
-        await agent.start()
-
         on_confirm = self._make_on_confirm(task.id)
-        try:
-            result = await agent.run_loop(
+        ask_user = self._make_ask_user(task.id)
+        plan_approval = self._make_plan_approval(task.id)
+
+        async with await build_a2a_session(
+            config,
+            task_id=task.id,
+            on_confirm=on_confirm,
+            ask_user=ask_user,
+            plan_approval=plan_approval,
+        ) as session:
+            result = await session.run_loop_to_text(
                 prompt,
                 max_turns=self._agent_max_turns,
                 on_confirm=on_confirm,
             )
-            return str(result) if result else ""
-        finally:
-            await agent.stop()
+            return result or ""
 
     async def _execute_agent_stream(
         self,
@@ -396,35 +495,32 @@ class A2AService:
         prompt: str,
     ) -> AsyncIterator[AgentEvent]:
         """Execute the agent and yield AgentEvent objects."""
-        if not self._get_runtime:
-            logger.warning("No agent runtime configured — yielding placeholder")
-            yield AgentEvent(kind=AgentEventKind.TURN_START)
-            yield AgentEvent(
-                kind=AgentEventKind.TEXT_DELTA,
-                text=f"[No agent runtime] Received: {prompt}",
-            )
-            yield AgentEvent(kind=AgentEventKind.TURN_COMPLETE)
-            yield AgentEvent(kind=AgentEventKind.AGENT_DONE)
-            return
+        from obscura.composition.a2a import build_a2a_session
+        from obscura.composition.session import SessionConfig
 
-        runtime = self._get_runtime()
-        agent = runtime.spawn(
-            name=f"a2a-{task.id}",
+        config = SessionConfig(
+            backend=self._agent_backend,
             model=self._agent_model,
             system_prompt=self._agent_system_prompt,
+            max_turns=self._agent_max_turns,
         )
-        await agent.start()
-
         on_confirm = self._make_on_confirm(task.id)
-        try:
-            async for event in agent.stream_loop(
+        ask_user = self._make_ask_user(task.id)
+        plan_approval = self._make_plan_approval(task.id)
+
+        async with await build_a2a_session(
+            config,
+            task_id=task.id,
+            on_confirm=on_confirm,
+            ask_user=ask_user,
+            plan_approval=plan_approval,
+        ) as session:
+            async for event in session.stream_loop(
                 prompt,
                 max_turns=self._agent_max_turns,
                 on_confirm=on_confirm,
             ):
                 yield event
-        finally:
-            await agent.stop()
 
     # ------------------------------------------------------------------
     # Helpers

@@ -10,7 +10,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from obscura.core.client import ObscuraClient
+    # Accepts ObscuraClient OR AgentSession (both expose .send / .stream)
+    from typing import Any as ObscuraClient  # noqa: F401
+
     from obscura.core.types import Message
 
 

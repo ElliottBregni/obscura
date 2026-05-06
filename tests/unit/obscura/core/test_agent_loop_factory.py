@@ -1,15 +1,12 @@
 """Tests for the agent-loop factory.
 
-v1 has been removed; ``make_agent_loop`` now always returns an
-``AgentLoopV2``. The factory still accepts v1-shape kwargs and translates
-them into v2 middleware/hook composition.
+``make_agent_loop`` translates a flat kwarg surface into the
+:class:`AgentLoopV2` middleware/hook composition.
 
 Exercises:
-- ``is_v2_enabled`` returns True regardless of env (kept for back-compat).
-- ``make_agent_loop`` always returns ``AgentLoopV2``.
-- ``OBSCURA_AGENT_LOOP=v1`` logs a one-time warning but still uses v2.
-- v1 kwargs translate to the right v2 middleware/hook composition.
-- Unsupported v1 kwargs are dropped with a one-time WARNING.
+- ``make_agent_loop`` returns ``AgentLoopV2``.
+- Kwargs translate to the right middleware/hook composition.
+- Unrecognised kwargs are dropped with a one-time WARNING.
 """
 
 from __future__ import annotations
@@ -21,45 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
-from obscura.core.agent_loop_factory import is_v2_enabled, make_agent_loop
+from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.tools import ToolRegistry
-
-
-# ---------------------------------------------------------------------------
-# is_v2_enabled
-# ---------------------------------------------------------------------------
-
-
-class TestIsV2Enabled:
-    """v1 has been removed — is_v2_enabled() now always returns True.
-
-    Kept as a compatibility shim so existing callers that gated on the
-    env var continue to compile. The function logs a one-time warning
-    when v1 is explicitly requested.
-    """
-
-    def test_returns_true_unset(self) -> None:
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("OBSCURA_AGENT_LOOP", None)
-            assert is_v2_enabled() is True
-
-    @pytest.mark.parametrize("value", ["v2", "1", "true", "yes", "on", "anything-else"])
-    def test_returns_true_for_v2_synonyms(self, value: str) -> None:
-        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
-            assert is_v2_enabled() is True
-
-    @pytest.mark.parametrize("value", ["v1", "0", "false", "no", "off"])
-    def test_v1_optout_still_returns_true_with_warning(
-        self, value: str, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # Reset the dedup so the warning fires per call in the test.
-        import obscura.core.agent_loop_factory as factory_mod
-
-        factory_mod._warned_v1_optout = False
-        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": value}):
-            with caplog.at_level("WARNING"):
-                assert is_v2_enabled() is True
-            assert any("v1 has been removed" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -100,22 +60,13 @@ class TestMakeAgentLoopSelection:
             loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
             assert isinstance(loop, AgentLoopV2)
 
-    def test_env_v1_still_returns_v2(self) -> None:
-        """v1 has been removed — explicit opt-out logs a warning but
-        still returns AgentLoopV2."""
-        from obscura.core.agent_loop_v2 import AgentLoopV2
-
-        with patch.dict(os.environ, {"OBSCURA_AGENT_LOOP": "v1"}):
-            loop = make_agent_loop(_StubBackend(), ToolRegistry())  # type: ignore[arg-type]
-            assert isinstance(loop, AgentLoopV2)
-
 
 # ---------------------------------------------------------------------------
-# v1 kwarg translation under v2
+# Kwarg translation
 # ---------------------------------------------------------------------------
 
 
-class TestV1KwargTranslation:
+class TestKwargTranslation:
     def test_capability_token_becomes_capability_gate_middleware(self) -> None:
         class _Token:
             def allows(self, _name: str) -> bool:
@@ -161,7 +112,7 @@ class TestV1KwargTranslation:
             )
             assert len(loop._dispatch_middleware) >= 1  # type: ignore[attr-defined]
 
-    def test_full_v1_kwargs_compose_correctly(self) -> None:
+    def test_full_kwargs_compose_correctly(self) -> None:
         class _Token:
             def allows(self, _name: str) -> bool:
                 return True
@@ -180,7 +131,8 @@ class TestV1KwargTranslation:
                 hooks=_Hooks(),
                 tool_output_overrides={"a": "silent"},
             )
-            # Five v1 features + predictive_cache (default-on) → six middleware entries.
+            # Five caller-facing features + predictive_cache (default-on)
+            # → six middleware entries.
             assert len(loop._dispatch_middleware) == 6  # type: ignore[attr-defined]
 
     def test_compaction_pre_turn_when_context_budget_set(self) -> None:

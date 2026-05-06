@@ -1,15 +1,15 @@
-"""obscura.core.agent_loop_hooks — pre_turn / post_turn hook builders for AgentLoopV2.
+"""obscura.core.agent_loop_hooks — pre_turn / post_turn hook builders.
 
-These wrap turn-level concerns (compaction, arbiter eval) into the simple
-``Callable`` shape AgentLoopV2 accepts via the ``pre_turn`` / ``post_turn``
-constructor kwargs.
+These wrap turn-level concerns (compaction, arbiter eval, event-store
+persistence) into the ``Callable`` shape :class:`AgentLoopV2` accepts
+via the ``pre_turn`` / ``post_turn`` constructor kwargs.
 
 ============================  ============================  =========================
-v1 ``AgentLoop`` kwarg        v2 hook builder               When it fires
+Concern                       Hook builder                  When it fires
 ============================  ============================  =========================
-context_budget + compaction   :func:`compact_pre_turn`      Before each model stream
+context budget + compaction   :func:`compact_pre_turn`      Before each model stream
 arbiter (turn-level)          :func:`arbiter_post_turn`     After tools complete
-event_store persistence       :func:`event_store_post_turn` After tools complete
+event-store persistence       :func:`event_store_post_turn` After tools complete
 ============================  ============================  =========================
 """
 
@@ -50,7 +50,7 @@ def compact_pre_turn(
 ) -> Callable[[TurnContext], Awaitable[None]]:
     """Build a ``pre_turn`` hook that runs :func:`compact_history` before each turn.
 
-    Mirrors v1's between-turn compaction. The hook mutates ``ctx.messages``
+    Mirrors between-turn compaction. The hook mutates ``ctx.messages``
     in-place. By default, compaction only runs when the message history
     is over the threshold; set ``only_when_over_threshold=False`` to
     always run (mostly useful for debugging).
@@ -99,12 +99,12 @@ def arbiter_post_turn(
 ) -> Callable[[TurnContext, TurnResult], Awaitable[None]]:
     """Build a ``post_turn`` hook that runs the arbiter against the latest turn.
 
-    *arbiter* is opaque — pass a v1-style arbiter (anything with an
+    *arbiter* is opaque — pass any object with an
     ``evaluate(messages)`` method, async or sync). When *kill_on_fail* is
     True (default), a fail result sets ``ctx.stop_after_turn = True`` so
     the loop terminates after this turn.
 
-    Mirrors v1's arbiter integration which set ``self._arbiter_killed``
+    Replaces the inline ``self._arbiter_killed`` flag pattern
     and broke out of the run loop.
     """
 
@@ -143,7 +143,7 @@ def event_store_post_turn(
 ) -> Callable[[TurnContext, TurnResult], Awaitable[None]]:
     """Build a ``post_turn`` hook that records turn results to an event store.
 
-    Mirrors v1's ``AgentLoop(event_store=...)`` integration. *event_store*
+    Wraps the ``AgentLoop(event_store=...)`` integration. *event_store*
     must implement ``EventStoreProtocol.append(session_id, AgentEvent)``.
     Each turn produces one ``TURN_COMPLETE`` record with the assistant
     text; tool-call / result counts are stashed in ``raw`` for any

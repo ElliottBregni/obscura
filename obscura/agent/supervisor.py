@@ -57,7 +57,6 @@ from obscura.agent.interaction import (
     InteractionBus,
 )
 from obscura.agent.loop_agent import LoopAgent
-from obscura.core.client import ObscuraClient
 from obscura.core.config_io import apply_agent_defaults, try_load_config
 from obscura.manifest.loader import ManifestLoader
 from obscura.notifications.native import NativeNotifier
@@ -422,28 +421,35 @@ class AgentSupervisor:
         # Generate A2A card for this agent
         self._generate_agent_card(agent_def)
 
-        client = ObscuraClient(
-            agent_def.model,
-            system_prompt=agent_def.system_prompt,
-            user=self._user,
-        )
-        await client.start()
+        # Build session via composition. Loop/daemon/aper helpers accept
+        # any object that quacks like ObscuraClient (run_loop / send /
+        # run_loop_to_completion / reset_session) — AgentSession provides
+        # all of those via the absorption pipeline.
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
 
-        try:
+        agent_config = SessionConfig(
+            backend=agent_def.model,
+            system_prompt=agent_def.system_prompt,
+            inject_claude_context=False,
+        )
+        async with await build_core_session(
+            agent_config,
+            surface="a2a",  # supervisor-spawned agents are task-style
+            user=self._user,
+        ) as session:
             if agent_def.type == "loop":
-                await self._run_loop_agent(client, agent_def)
+                await self._run_loop_agent(session, agent_def)
             elif agent_def.type == "daemon":
-                await self._run_daemon_agent(client, agent_def)
+                await self._run_daemon_agent(session, agent_def)
             elif agent_def.type == "aper":
-                await self._run_aper_agent(client, agent_def)
+                await self._run_aper_agent(session, agent_def)
             else:
                 logger.warning(
                     "Unknown agent type '%s' for '%s' — skipping",
                     agent_def.type,
                     agent_def.name,
                 )
-        finally:
-            await client.stop()
 
     async def _run_loop_agent(
         self,

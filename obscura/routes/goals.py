@@ -16,9 +16,9 @@ from obscura.core.kairos import (
     Goal,
     GoalBudget,
     GoalNotFoundError,
-    GoalStore,
+    GoalStoreProtocol,
+    create_goal_store,
 )
-from obscura.core.paths import resolve_obscura_home
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,13 +32,12 @@ router = APIRouter(prefix="/api/v1", tags=["goals"])
 # ---------------------------------------------------------------------------
 
 
-def _get_store() -> GoalStore:
-    """Return a fresh GoalStore bound to the default kairos.db path."""
-    db_path = resolve_obscura_home() / "kairos.db"
-    return GoalStore(str(db_path))
+def _get_store() -> GoalStoreProtocol:
+    """Return a fresh goal store bound to the default kairos.db path."""
+    return create_goal_store()
 
 
-def _safe_get_goal(store: GoalStore, goal_id: str) -> Goal | None:
+def _safe_get_goal(store: GoalStoreProtocol, goal_id: str) -> Goal | None:
     """Wrap GoalStore.get_goal (which raises) with a None-on-missing API."""
     try:
         return store.get_goal(goal_id)

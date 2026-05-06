@@ -173,7 +173,6 @@ def test_known_names_matches_registry() -> None:
         "SimpleHandler",
         "SpawnAgentRequest",
         "WorkflowRunRequest",
-        "is_v2_enabled",
         "make_agent_loop",
     }
     assert expected.issubset(set(known_names())), (

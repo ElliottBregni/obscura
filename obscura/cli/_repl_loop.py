@@ -25,20 +25,12 @@ import os
 import subprocess
 import time
 import uuid
-from dataclasses import replace as _dc_replace
 from datetime import UTC, datetime
 from typing import Any
 
-from obscura.agent import AGENT_TYPE_REGISTRY
 from obscura.agent.agents import AgentStatus
-from obscura.agent.coordinator import (
-    get_coordinator_system_prompt,
-    is_coordinator_mode,
-)
-from obscura.agent.supervisor import AgentSupervisor
 from obscura.arbiter.hooks import register_agent_loop as _reg_arbiter_loop
 from obscura.auth.cli_user import current_cli_user
-from obscura.cli._daemon import start_imessage_daemon
 from obscura.cli._env_loader import bootstrap_env
 from obscura.cli._send import (
     _session_state,  # pyright: ignore[reportPrivateUsage]
@@ -59,6 +51,7 @@ from obscura.cli.prompt import (
     RunningAgentInfo,
     StreamingStatus,
     _get_git_branch,  # pyright: ignore[reportPrivateUsage]
+    _sanitize_text,  # pyright: ignore[reportPrivateUsage]
     animate_spinner,
     bordered_prompt,
     create_prompt_session,
@@ -73,84 +66,26 @@ from obscura.cli.render import (
 )
 from obscura.cli.tips import TipScheduler
 from obscura.cli.tui_effects import ultrathink_banner
-from obscura.cli.vector_memory_bridge import (
-    init_vector_store,
-    load_startup_memories,
-    run_startup_maintenance,
-)
-from obscura.cli.widgets import (
-    AttentionWidgetRequest,
-    ModelQuestionRequest,
-    MultiSelectRequest,
-    NotifyWidgetRequest,
-    PermissionWidgetRequest,
-    ask_model_question,
-    ask_multi_select,
-    confirm_attention,
-    confirm_permission,
-    render_notification_banner,
-)
+from obscura.composition.repl import build_repl_session
+from obscura.composition.session import SessionConfig, SessionExtras
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
-from obscura.core.client import ObscuraClient
 from obscura.core.commit_attribution import get_attribution_tracker
-from obscura.core.compiler.compiled import ToolRoutingConfig
-from obscura.core.context import load_obscura_memory
 from obscura.core.deep_log import dlog
-from obscura.core.enums.agent import AgentEventKind, Backend
+from obscura.core.context_window import get_context_window
+from obscura.core.enums.agent import Backend
 from obscura.core.enums.lifecycle import SessionStatus
-from obscura.core.event_store import SQLiteEventStore
-from obscura.core.hooks import HookRegistry
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.db_factory import DatabaseFactory
 from obscura.core.prompt_cache import PromptCacheManager
-from obscura.core.session_utils import (
-    check_concurrent_sessions,
-    install_signal_handlers,
-    register_session,
-    register_shutdown_handler,
-    unregister_session,
-)
-from obscura.core.settings import load_all_hooks
-from obscura.core.system_prompts import (
-    compose_environment_context,
-    compose_system_prompt,
-)
-from obscura.core.tool_router import ToolRouter
-from obscura.core.tool_score_index import ToolScoreIndex
 from obscura.core.types import (
     SessionRef,
     ToolChoice,
-    ToolRouterCapable,
 )
 from obscura.eval.models import EvalRunSummary
 from obscura.eval.store import EvalResultStore
-from obscura.integrations.browser.client import attach_if_running
 from obscura.kairos.away_summary import AwaySummaryTracker, generate_away_summary
-from obscura.kairos.engine import KairosEngine, is_kairos_enabled
+from obscura.kairos.engine import is_kairos_enabled
 from obscura.kairos.frustration import FrustrationDetector
-from obscura.kairos.supervisor_hooks import register_kairos_hooks
-from obscura.kairos.uds_messaging import UDSInbox
-from obscura.memory_channels import (
-    ContextRouter,
-    TurnClassifier,
-    load_channels_from_config,
-)
-from obscura.plugins.builtins import list_builtin_plugin_ids
-from obscura.plugins.capabilities import resolve_allowed_tools_from_config
-from obscura.plugins.loader import (
-    PluginLoader,
-    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
-    get_all_builtin_tool_specs,
-    get_capability_map,
-    get_filtered_builtin_tool_specs,
-)
-from obscura.plugins.models import PluginSpec
-from obscura.plugins.registries.capability_index import CapabilityIndex
-from obscura.tools.memory_tools import (
-    build_channels_prompt_section,
-    make_memory_tool_specs,
-)
-from obscura.tools.swarm import build_agent_catalog, load_agent_configs
-from obscura.tools.system import UI, Session, get_system_tool_specs
+from obscura.tools.system import Session
 from obscura.voice.session import VoiceSession
 
 _log = logging.getLogger("obscura.cli")
@@ -176,9 +111,8 @@ async def repl(
     compiled_ws: Any | None = None,
 ) -> None:
     """Core async loop -- runs the interactive REPL or single-shot."""
-    # Event store
-    db_path = resolve_obscura_home() / "events.db"
-    store = SQLiteEventStore(db_path)
+    # Event store — backend chosen via OBSCURA_DB_TYPE.
+    store = DatabaseFactory.create_event_store()
     sid = session_id or uuid.uuid4().hex
 
     # Resolve backend/model names from arguments or environment defaults
@@ -198,220 +132,36 @@ async def repl(
     # Create authenticated user for vector memory + memory tools
     cli_user = current_cli_user()
 
-    # Initialize vector memory store
-    vector_store = init_vector_store(cli_user)
+    # Vector memory init + memory channel router moved to
+    # obscura.composition.blocks.vector_memory.install_vector_memory
+    # (runs inside build_repl_session below).
 
-    # Run decay maintenance in background
-    if vector_store is not None:
-        run_startup_maintenance(vector_store)
+    # System-prompt composition moved to
+    # obscura.composition.blocks.repl_prompt.install_repl_prompt_sections.
+    # The base prompt is what the caller provided; the block reads
+    # vector_store/context_router/etc. from the session and re-primes
+    # the backend's system_prompt post-build.
+    combined_system = system
 
-    # Initialize memory channel router
-    context_router = None
-    turn_classifier = None
-    if vector_store is not None:
-        try:
-            _channels = load_channels_from_config()
-            if _channels:
-                context_router = ContextRouter(_channels, vector_store)
-                turn_classifier = TurnClassifier(_channels)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
+    # System + plugin tool registration was extracted to the composition
+    # layer (install_system_tools + install_plugin_tools). Both run inside
+    # build_repl_session() below; tool_count is computed from the session's
+    # registry after composition.
 
-    # Compose system prompt
-    include_default = not no_default_prompt
-    if os.environ.get("OBSCURA_INCLUDE_DEFAULT_PROMPT", "true").lower() == "false":
-        include_default = False
-
-    memory_context = load_obscura_memory(sid, db_path)
-    custom_sections: list[str] = [memory_context] if memory_context else []
-
-    # Inject user identity & preferences
-    prefs_path = resolve_obscura_home() / "memory" / "preferences.md"
-    if prefs_path.exists():
-        prefs_text = prefs_path.read_text().strip()
-        if prefs_text:
-            custom_sections.append(f"# User Identity & Preferences\n\n{prefs_text}")
-
-    # Inject vector memory context at session start
-    if vector_store is not None:
-        vm_startup = load_startup_memories(vector_store, sid, top_k=3)
-        if vm_startup:
-            custom_sections.append(vm_startup)
-
-    # Inject memory channel documentation
-    if context_router is not None:
-        try:
-            channels_doc = build_channels_prompt_section(context_router.channels)
-            if channels_doc:
-                custom_sections.append(channels_doc)
-
-            sys_channel_ctx = context_router.get_system_channels()
-            if sys_channel_ctx:
-                custom_sections.append(sys_channel_ctx)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Inject environment context (available plugins, capabilities, agent types)
-    try:
-        env_section = compose_environment_context(
-            plugin_ids=list_builtin_plugin_ids(),
-            capabilities=[
-                "shell.exec",
-                "file.read",
-                "file.write",
-                "git.ops",
-                "web.browse",
-                "search.web",
-                "security.scan",
-            ],
-            agent_types=list(AGENT_TYPE_REGISTRY.keys()),
-        )
-        if env_section:
-            custom_sections.append(env_section)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Inject KAIROS context
-    try:
-        if is_kairos_enabled():
-            _probe_engine = KairosEngine()
-            _kairos_sys = _probe_engine.get_system_prompt_addition()
-            if _kairos_sys:
-                custom_sections.append(_kairos_sys)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Inject coordinator system prompt
-    try:
-        if is_coordinator_mode():
-            custom_sections.append(get_coordinator_system_prompt())
-            try:
-                catalog = build_agent_catalog(load_agent_configs())
-                if catalog:
-                    custom_sections.append(
-                        f"## Available Specialist Agents\n\n{catalog}"
-                    )
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    combined_system = compose_system_prompt(
-        base=system,
-        include_default=include_default,
-        custom_sections=custom_sections or None,
-    )
-
-    # Gather system tools BEFORE client starts
-    system_tools: list[Any] = []
-    if tools_enabled:
-        try:
-            system_tools = get_system_tool_specs()
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-        if vector_store is not None:
-            try:
-                system_tools.extend(make_memory_tool_specs(cli_user))
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-
-        for _getter, _mod in [
-            ("get_worktree_tool_specs", "obscura.tools.worktree"),
-            ("get_task_tool_specs", "obscura.tools.task_tools"),
-            ("get_goal_tool_specs", "obscura.tools.goal_tools"),
-            ("get_profile_tool_specs", "obscura.tools.profile_tools"),
-            ("get_lsp_tool_specs", "obscura.tools.lsp"),
-            ("get_browser_tool_specs", "obscura.tools.browser"),
-        ]:
-            try:
-                import importlib
-
-                _m = importlib.import_module(_mod)
-                system_tools.extend(getattr(_m, _getter)())
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-
-        # Load builtin plugin tools
-        try:
-            existing_names = {t.name for t in system_tools}
-            _ws_include = (
-                getattr(compiled_ws, "plugin_include", None) if compiled_ws else None
-            )
-            _ws_exclude = (
-                getattr(compiled_ws, "plugin_exclude", None) if compiled_ws else None
-            )
-
-            if _ws_include or _ws_exclude:
-                plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
-            else:
-                plugin_tools = get_all_builtin_tool_specs()
-
-            for tool in plugin_tools:
-                if tool.name not in existing_names:
-                    system_tools.append(tool)
-                    existing_names.add(tool.name)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Backfill capability field
-    if tools_enabled and system_tools:
-        try:
-            _cap_map = get_capability_map()
-            system_tools = [
-                _dc_replace(t, capability=_cap_map[t.name])
-                if not getattr(t, "capability", "") and t.name in _cap_map
-                else t
-                for t in system_tools
-            ]
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Filter tools by capability grants
-    if tools_enabled and system_tools:
-        try:
-            _allowed = resolve_allowed_tools_from_config()
-            if _allowed is not None:
-                system_tools = [
-                    t
-                    for t in system_tools
-                    if not getattr(t, "capability", "") or t.name in _allowed
-                ]
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    tool_count = len(system_tools)
-
-    # Wire the ask_user callback
-    if tools_enabled:
-        try:
-
-            async def _ask_user_handler(
-                question: str,
-                choices: list[str],
-                allow_custom: bool = False,
-            ) -> str:
-                if choices:
-                    result = await confirm_attention(
-                        AttentionWidgetRequest(
-                            request_id="ask_user",
-                            agent_name="assistant",
-                            message=question,
-                            priority="normal",
-                            actions=tuple(choices),
-                        ),
-                    )
-                    return result.action
-                result = await ask_model_question(
-                    ModelQuestionRequest(question=question),
-                )
-                return result.text
-
-            UI.set_ask_user_callback(_ask_user_handler)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Wire plan-mode callbacks
+    # ask_user / plan_approval / user_interact callback wiring moved to
+    # obscura.composition.blocks.repl_callbacks.install_repl_callbacks,
+    # which runs inside build_repl_session. permission_mode is wired
+    # inline below because its handler must mutate REPLContext (built
+    # only after the session is constructed).
+    #
+    # Prompt composition (memory + preferences + user_memory + active
+    # goals + channels + KAIROS + coordinator + WIZARD profile) moved to
+    # obscura.composition.blocks.repl_prompt.install_repl_prompt_sections.
+    # Tool gathering (system_tools + memory_tools + worktree/task/goal/
+    # profile/lsp/browser/plugins) moved to
+    # obscura.composition.blocks.system_tools.install_system_tools and
+    # obscura.composition.blocks.plugins.install_plugin_tools. All run
+    # inside build_repl_session() below.
     if tools_enabled:
         try:
 
@@ -419,167 +169,53 @@ async def repl(
                 ctx.permission_mode = mode  # set later
 
             Session.set_permission_mode_callback(_set_permission_mode)
-
-            async def _plan_approval_handler(plan_summary: str) -> bool:
-                result = await confirm_permission(
-                    PermissionWidgetRequest(
-                        action="Exit plan mode and begin implementation",
-                        reason=plan_summary or "Agent wants to leave plan mode.",
-                        risk="medium",
-                    ),
-                )
-                return result.action == "approve"
-
-            Session.set_plan_approval_callback(_plan_approval_handler)
         except Exception:
             _log.debug("suppressed exception in repl", exc_info=True)
 
-    # Wire user_interact callback
-    if tools_enabled:
-        try:
-
-            async def _user_interact_handler(**kwargs: Any) -> dict[str, Any]:
-                mode = kwargs.get("mode", "question")
-
-                if mode == "permission":
-                    result = await confirm_permission(
-                        PermissionWidgetRequest(
-                            action=kwargs.get("action", ""),
-                            reason=kwargs.get("reason", ""),
-                            risk=kwargs.get("risk", "low"),
-                        ),
-                    )
-                    return {"approved": result.action == "approve"}
-
-                if mode == "notify":
-                    render_notification_banner(
-                        NotifyWidgetRequest(
-                            title=kwargs.get("title", ""),
-                            message=kwargs.get("message", ""),
-                            priority=kwargs.get("priority", "normal"),
-                        ),
-                    )
-                    return {}
-
-                if mode == "multi_select":
-                    choices = kwargs.get("choices", [])
-                    question = kwargs.get("question", "")
-                    result = await ask_multi_select(
-                        MultiSelectRequest(
-                            question=question,
-                            choices=tuple(choices),
-                        ),
-                    )
-                    selected = [s.strip() for s in result.text.split(",") if s.strip()]
-                    return {"selected": selected}
-
-                # question mode (default)
-                choices = kwargs.get("choices", [])
-                question = kwargs.get("question", "")
-                if choices:
-                    result = await confirm_attention(
-                        AttentionWidgetRequest(
-                            request_id="user_interact",
-                            agent_name="assistant",
-                            message=question,
-                            priority="normal",
-                            actions=tuple(choices),
-                        ),
-                    )
-                    return {"selected": result.action}
-                result = await ask_model_question(
-                    ModelQuestionRequest(question=question),
-                )
-                return {"selected": result.text}
-
-            UI.set_user_interact_callback(_user_interact_handler)
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Load project hooks
-    project_hooks = None
-    try:
-        _hook_registry = load_all_hooks()
-        if _hook_registry.count > 0:
-            project_hooks = _hook_registry
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Wire memory channel TOOL_CALL hook
+    # Project hooks loading + memory-channel hook + KAIROS hooks moved to
+    # obscura.composition.blocks.project_hooks.install_project_hooks.
+    # The block reads session.context_router after install_vector_memory
+    # runs, so the channel hook closure binds correctly.
     _tool_router_ref = None
-    if context_router is not None:
-        if project_hooks is None:
-            project_hooks = HookRegistry()
 
-        def _channel_tool_signal(event: Any) -> None:
-            context_router.update_signals_from_event(event)
-            if _tool_router_ref is not None and context_router.signals.file_paths:
-                _tool_router_ref.set_file_context(
-                    list(context_router.signals.file_paths),
-                )
+    # Build session via composition. install_plugin_tools runs inside,
+    # registering all plugin tool specs onto the session's registry +
+    # backend, building the capability resolver, and storing it on the
+    # session for the tool router below.
+    # Discover agents.yaml entries so install_supervisor can pick them up
+    agent_infos = _discover_agent_infos()
+    available_agents = [a.name for a in agent_infos] or None
 
-        project_hooks.add_after(_channel_tool_signal, AgentEventKind.TOOL_CALL)
+    _session_extras: SessionExtras = {
+        "supervise": supervise,
+        "agent_infos": agent_infos,
+    }
+    if compiled_ws is not None:
+        _session_extras["compiled_ws"] = compiled_ws
 
-    # Wire Kairos tool-call hooks
-    _kairos_engine: Any = None
-    try:
-        if is_kairos_enabled():
-            if project_hooks is None:
-                project_hooks = HookRegistry()
-
-            def _kairos_tool_hook(event: Any) -> None:
-                if _kairos_engine is not None and _kairos_engine.is_running:
-                    tool = getattr(event, "tool_name", "") or ""
-                    args = str(getattr(event, "tool_input", "") or "")[:80]
-                    _kairos_engine.log_tool_use(tool, args)
-
-            def _kairos_turn_hook(event: Any) -> None:
-                if _kairos_engine is not None and _kairos_engine.is_running:
-                    _kairos_engine.log_agent_event("turn_complete")
-
-            project_hooks.add_after(_kairos_tool_hook, AgentEventKind.TOOL_CALL)
-            project_hooks.add_after(_kairos_turn_hook, AgentEventKind.TURN_COMPLETE)
-    except Exception:
-        _log.debug("suppressed exception in repl", exc_info=True)
-
-    # Build client
-    async with ObscuraClient(
-        backend,
+    _session_config = SessionConfig(
+        backend=backend,
         model=model,
         system_prompt=combined_system,
-        tools=system_tools or None,
-        mcp_servers=mcp_configs or None,
-        hooks=project_hooks,
-    ) as client:
-        # Wire eval-driven tool router
-        if tools_enabled:
-            try:
-                _routing_config = ToolRoutingConfig()
-                _score_index = ToolScoreIndex()
-                _cap_index = CapabilityIndex()
-                _pl = PluginLoader()
-                _all_pspecs: list[PluginSpec] = []
-                if _load_plugin_config_flag("load_builtins"):
-                    _all_pspecs.extend(_pl.discover_builtins())
-                _all_pspecs.extend(_pl.discover_local())
-                _all_pspecs.extend(_pl.discover_user())
-                for _ps in _all_pspecs:
-                    for _cap in _ps.capabilities:
-                        _cap_index.register(_cap, _ps.id)
+        tools_enabled=tools_enabled,
+        confirm_enabled=confirm,
+        max_turns=max_turns,
+        mcp_servers=mcp_configs,
+        extras=_session_extras,
+    )
+    _repl_session = await build_repl_session(
+        _session_config,
+        user=cli_user,
+    )
 
-                _router = ToolRouter.from_capability_index(
-                    config=_routing_config,
-                    score_index=_score_index,
-                    capability_index=_cap_index,
-                    backend=backend,
-                )
-
-                _backend_ref = client._backend  # pyright: ignore[reportPrivateUsage]
-                if isinstance(_backend_ref, ToolRouterCapable):
-                    _backend_ref.set_tool_router(_router)
-                _tool_router_ref = _router
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
+    async with _repl_session as _session:
+        client = _session
+        tool_count = len(_session.registry.all())
+        # Tool router wiring moved to obscura.composition.blocks.tool_router.
+        # _tool_router_ref is preserved as a back-compat name for the
+        # channel hook closure built earlier (which captured `nonlocal`
+        # _tool_router_ref).
+        _tool_router_ref = _session.tool_router
 
         # Session resume
         if session_id:
@@ -613,9 +249,9 @@ async def repl(
             tools_enabled=tools_enabled,
             mcp_configs=mcp_configs,
             confirm_enabled=confirm,
-            vector_store=vector_store,
-            context_router=context_router,
-            turn_classifier=turn_classifier,
+            vector_store=_session.vector_store,
+            context_router=_session.context_router,
+            turn_classifier=_session.turn_classifier,
         )
 
         # --- Single-shot mode ---
@@ -636,20 +272,17 @@ async def repl(
         mm = ctx.get_mode_manager()
         ss = StreamingStatus()
 
-        agent_infos = _discover_agent_infos()
-        available_agents = [a.name for a in agent_infos] or None
-
         # Best-effort browser bridge attach
         browser_bridge_client: Any = None
         browser_status: dict[str, Any] | None = None
-        if tools_enabled:
-            try:
-                browser_bridge_client, browser_status = await attach_if_running(
-                    client.register_tool,
-                )
-            except Exception:
-                _log.debug("suppressed exception in repl", exc_info=True)
-                browser_bridge_client, browser_status = None, None
+        # Browser bridge attach moved to obscura.composition.blocks.browser_bridge.
+        # Read the post-build state off the session for the banner below.
+        browser_bridge_client = _session.browser_bridge
+        browser_status = (
+            getattr(browser_bridge_client, "status", None)
+            if browser_bridge_client is not None
+            else None
+        )
         if browser_status is not None:
             tool_count += int(browser_status.get("tool_count") or 0)
 
@@ -665,35 +298,18 @@ async def repl(
             browser_status=browser_status,
         )
 
-        # Start supervisor if --supervise and agents.yaml has agents
-        supervisor_task: asyncio.Task[None] | None = None
-        supervisor: Any = None
-        if supervise and agent_infos:
-            try:
-                sup_user = current_cli_user()
-                agents_yaml = resolve_obscura_home() / "agents.yaml"
-                supervisor = AgentSupervisor(
-                    config_path=agents_yaml,
-                    user=sup_user,
-                )
-                supervisor_task = asyncio.create_task(
-                    supervisor.run_forever(),
-                    name="supervisor",
-                )
-                print_ok(f"Supervisor started -- {len(agent_infos)} agent(s) launching")
-            except Exception as exc:
-                _log.debug("suppressed exception in repl", exc_info=True)
-                print_warning(f"Supervisor failed to start: {exc}")
+        # Supervisor spawning moved to obscura.composition.blocks.supervisor.
+        # Read post-build state for downstream code (daemon, banner) that
+        # branches on whether the supervisor came up.
+        supervisor = _session.supervisor
+        supervisor_task = _session.supervisor_task
+        if supervisor is not None and agent_infos:
+            print_ok(f"Supervisor started -- {len(agent_infos)} agent(s) launching")
 
-        # Start iMessage daemon (only when supervisor is NOT running)
-        daemon_task: asyncio.Task[None] | None = None
+        # iMessage daemon spawn moved to obscura.composition.blocks.imessage_daemon.
+        # Read post-build state for downstream code that polls the task.
+        daemon_task: asyncio.Task[None] | None = _session.imessage_daemon_task
         _daemon_client: Any = None
-        if supervisor_task is None:
-            try:
-                daemon_task = await start_imessage_daemon(ctx.client)
-            except Exception as exc:
-                _log.debug("suppressed exception in repl", exc_info=True)
-                print_warning(f"iMessage daemon failed to start: {exc}")
         daemon_restart_count = 0
         daemon_last_restart_at = 0.0
 
@@ -771,7 +387,9 @@ async def repl(
                 task_count += 1
             prompt_status.task_count = task_count
             tokens = estimate_effective_context_tokens(ctx)
-            window = ctx.client.context_window
+            window = (
+                getattr(ctx.client, "context_window", 0) if ctx.client else 0
+            ) or get_context_window(ctx.model or ctx.backend)
             prompt_status.ctx_tokens = tokens
             prompt_status.ctx_window = window
             prompt_status.ctx_pct = int(tokens / window * 100) if window else 0
@@ -787,20 +405,20 @@ async def repl(
         spinner_task = asyncio.create_task(animate_spinner(ss))
 
         # --- KAIROS integration ---
-        _kairos_engine = None
-        _kairos_hooks_registered = False
-        try:
-            if is_kairos_enabled():
-                _kairos_engine = KairosEngine()
-                if supervisor is not None and hasattr(supervisor, "hooks"):
-                    register_kairos_hooks(supervisor.hooks, _kairos_engine)
-                    _kairos_hooks_registered = True
-                else:
-                    await _kairos_engine.start()
-        except Exception as _e:
-            _log.debug("suppressed exception in repl", exc_info=True)
-            _swallow("kairos_start", _e)
+        # KAIROS engine init moved to obscura.composition.blocks.kairos.
+        # Read post-build state for downstream hooks/closures that
+        # captured `_kairos_engine` at parse time.
+        _kairos_engine = _session.kairos_engine
+        _kairos_hooks_registered = (
+            _kairos_engine is not None
+            and supervisor is not None
+            and hasattr(supervisor, "hooks")
+        )
 
+        # Loop registration is intentional post-build wiring (the loop
+        # only exists after the first stream_loop call begins). Keep it
+        # here until install_session_registration extracts the per-stream
+        # wiring.
         if _kairos_engine is not None:
             try:
                 _agent_loop = getattr(client, "_loop", None)
@@ -862,18 +480,9 @@ async def repl(
             _log.debug("suppressed exception in repl", exc_info=True)
             _swallow("cleanup_init", _e)
 
-        # --- Concurrent session detection ---
-        try:
-            register_session(sid, backend=backend_name, model=model_name or "")
-            register_shutdown_handler(lambda: unregister_session(sid))
-            install_signal_handlers()
-            concurrent = check_concurrent_sessions(sid)
-            if concurrent:
-                console.print(
-                    f"[yellow]Note: {len(concurrent)} other session(s) running in this workspace[/]",
-                )
-        except Exception:
-            _log.debug("suppressed exception in repl", exc_info=True)
+        # Session registration (PID lock + signal handlers) moved to
+        # obscura.composition.blocks.session_registration. Concurrent-
+        # session warning is logged at INFO by the block.
 
         # --- Deep log session start ---
         try:
@@ -886,21 +495,9 @@ async def repl(
         except Exception:
             _log.debug("suppressed exception in repl", exc_info=True)
 
-        # --- UDS inbox for cross-session messaging ---
-        _uds_inbox = None
-        try:
-            _uds_inbox = UDSInbox(sid)
-
-            def _on_peer_message(msg: dict[str, Any]) -> None:
-                sender = msg.get("from", "?")
-                text = msg.get("text", "")
-                console.print(f"\n[bold cyan]Message from {sender}:[/] {text}")
-
-            await _uds_inbox.start(on_message=_on_peer_message)
-        except Exception as _e:
-            _log.debug("suppressed exception in repl", exc_info=True)
-            _swallow("uds_init", _e)
-            _uds_inbox = None
+        # UDS inbox spawn moved to obscura.composition.blocks.uds_inbox.
+        # Reference for downstream slash commands.
+        _uds_inbox = _session.uds_inbox
 
         # Reset session title tracker
         _session_state["titled"] = False
@@ -933,6 +530,10 @@ async def repl(
                                 + (f": {exc}" if exc else ""),
                             )
                             try:
+                                from obscura.cli._daemon import (
+                                    start_imessage_daemon,
+                                )
+
                                 daemon_task = await start_imessage_daemon(ctx.client)
                             except Exception as restart_exc:
                                 _log.debug(
@@ -948,6 +549,9 @@ async def repl(
                     _log.debug("suppressed exception in repl", exc_info=True)
                     console.print()
                     break
+                if not user_input:
+                    continue
+                user_input = _sanitize_text(user_input).strip()
                 if not user_input:
                     continue
 
@@ -1362,6 +966,17 @@ async def repl(
                 def _on_done(t: asyncio.Task[str]) -> None:
                     background_tasks.discard(t)
                     ss.reset()
+                    if t.cancelled():
+                        return
+                    try:
+                        exc = t.exception()
+                    except Exception:
+                        _log.debug(
+                            "suppressed exception in repl task callback", exc_info=True
+                        )
+                        return
+                    if exc is not None:
+                        _log.error("chat turn failed", exc_info=exc)
 
                 task.add_done_callback(_on_done)
 

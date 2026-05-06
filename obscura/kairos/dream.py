@@ -27,7 +27,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from obscura.core.client import ObscuraClient
 from obscura.core.config import ObscuraConfig
 from obscura.core.paths import resolve_obscura_home
 from obscura.kairos.daily_log import DailyLog
@@ -341,13 +340,25 @@ class DreamConsolidator:
             _prev_base_dir = os.environ.get("OBSCURA_SYSTEM_TOOLS_BASE_DIR")
             os.environ["OBSCURA_SYSTEM_TOOLS_BASE_DIR"] = memory_dir
             try:
-                async with ObscuraClient(
-                    cfg.default_backend,
-                    model=None,
+                # Migrated from direct ObscuraClient construction to
+                # composition.build_core_session — ObscuraClient is no
+                # longer instantiated on production paths after the
+                # absorption (Stages 1-4b).
+                from obscura.composition.core import build_core_session
+                from obscura.composition.session import SessionConfig
+
+                dream_config = SessionConfig(
+                    backend=cfg.default_backend,
                     system_prompt=CONSOLIDATION_PROMPT,
-                    tools=dream_tools,
-                ) as client:
-                    result = await client.run_loop_to_completion(
+                    inject_claude_context=False,
+                    max_turns=15,
+                )
+                async with await build_core_session(
+                    dream_config,
+                    surface="a2a",  # KAIROS dream is short-lived task-style
+                    preregistered_tools=dream_tools,
+                ) as session:
+                    result = await session.run_loop_to_text(
                         "Begin memory consolidation. Follow all phases in the system prompt.",
                         max_turns=15,
                         tool_allowlist=_DREAM_AGENT_TOOLS,

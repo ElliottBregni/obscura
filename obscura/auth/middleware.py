@@ -22,7 +22,7 @@ import threading
 import time as _time
 from typing import TYPE_CHECKING, Any, override
 
-from obscura.memory import MemoryStore
+from obscura.memory import create_memory_store
 from obscura.vector_memory.vector_memory import VectorMemoryStore
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -56,7 +56,7 @@ def _ensure_user_account(user: AuthenticatedUser) -> None:
         if user.user_id in _PROVISIONED_USERS:
             return
 
-    MemoryStore.for_user(user)
+    create_memory_store(user)
     VectorMemoryStore.for_user(user)
 
     with _PROVISIONED_USERS_LOCK:

@@ -34,6 +34,7 @@ from prompt_toolkit.styles import Style
 from obscura.cli.render import (
     THINKING_COLOR,
     _active_renderer,  # pyright: ignore[reportPrivateUsage]
+    _sanitize_text,  # pyright: ignore[reportPrivateUsage]
     console,
     get_active_text,
     get_model_space_delta,
@@ -774,7 +775,7 @@ async def bordered_prompt(
     """
     with patch_stdout(raw=True):
         result = await session.prompt_async()
-    return result.strip()
+    return _sanitize_text(result).strip()
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@
     "**/node_modules",
     "**/.venv",
     "**/web-ui",
+    "build",
     "sdk/scripts",
     ".claude",
     ".obscura",

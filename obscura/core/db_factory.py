@@ -7,18 +7,19 @@ from __future__ import annotations
 
 import os
 
-from obscura.core.event_store import SQLiteEventStore
+from obscura.core.event_store import EventStoreProtocol, SQLiteEventStore
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.postgres_event_store import PostgreSQLEventStore
 
-EventStore = SQLiteEventStore | PostgreSQLEventStore
+# Public alias — callers should type against the Protocol, not the union.
+EventStore = EventStoreProtocol
 
 
 class DatabaseFactory:
     """Factory for creating event store instances based on configuration."""
 
     @staticmethod
-    def create_event_store(db_type: str | None = None) -> EventStore:
+    def create_event_store(db_type: str | None = None) -> EventStoreProtocol:
         """Create an event store instance.
 
         Args:
@@ -80,7 +81,7 @@ class DatabaseFactory:
 
 
 # Convenience function for backwards compatibility
-def get_event_store(db_type: str | None = None) -> EventStore:
+def get_event_store(db_type: str | None = None) -> EventStoreProtocol:
     """Get an event store instance.
 
     This is a convenience wrapper around DatabaseFactory.create_event_store().

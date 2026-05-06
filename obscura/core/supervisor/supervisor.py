@@ -42,7 +42,6 @@ from typing import TYPE_CHECKING, Any
 from obscura.auth.cli_user import current_cli_user
 from obscura.core.supervisor.db_backend import (
     DatabaseBackend,
-    SQLiteSupervisorBackend,
     create_supervisor_backend,
     translate_sql,
 )
@@ -99,10 +98,8 @@ class Supervisor:
     ) -> None:
         if backend is not None:
             self._backend = backend
-        elif db_path is not None:
-            self._backend = SQLiteSupervisorBackend(db_path)
         else:
-            self._backend = create_supervisor_backend()
+            self._backend = create_supervisor_backend(db_path=db_path)
         self._config = config or SupervisorConfig()
         self._lock = SessionLock(
             backend=self._backend, default_ttl=self._config.lock_ttl

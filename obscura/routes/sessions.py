@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import require_role
-from obscura.core.event_store import SQLiteEventStore
-from obscura.core.paths import resolve_obscura_home
+from obscura.core.db_factory import DatabaseFactory
+from obscura.core.event_store import EventStoreProtocol
 from obscura.core.enums.agent import Backend
 from obscura.core.types import SessionRef
 from obscura.deps import ClientFactory, audit, get_oauth_github_token
@@ -30,11 +30,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["sessions"])
 
 
-def _get_event_store(request: Request) -> SQLiteEventStore:
+def _get_event_store(request: Request) -> EventStoreProtocol:
     """Get the shared event store from app state."""
-    store: SQLiteEventStore | None = getattr(request.app.state, "event_store", None)
+    store: EventStoreProtocol | None = getattr(request.app.state, "event_store", None)
     if store is None:
-        store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        store = DatabaseFactory.create_event_store()
         request.app.state.event_store = store
     return store
 
@@ -48,13 +48,12 @@ async def create_session(
 ) -> SessionResponse:
     """Create a new session."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         body.backend,
         user=user,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
-        ref = await client.create_session()
+    ) as _session:
+        ref = await _session.create_backend_session()
         audit(
             "session.create",
             user,
@@ -86,8 +85,6 @@ async def create_session(
             backend=ref.backend.value,
             source="live",
         )
-    finally:
-        await client.stop()
 
 
 @router.get("/sessions", response_model=list[SessionResponse])
@@ -238,14 +235,13 @@ async def resume_session(
     """Resume an existing session to validate liveness and access."""
     assert user is not None
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         backend,
         user=user,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
+    ) as _session:
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
-        await client.resume_session(ref)
+        await _session.resume_session(ref)
         return JSONResponse(
             content={
                 "ok": True,
@@ -253,8 +249,6 @@ async def resume_session(
                 "backend": backend,
             },
         )
-    finally:
-        await client.stop()
 
 
 @router.delete("/sessions/{session_id}")
@@ -267,14 +261,13 @@ async def delete_session(
 ) -> JSONResponse:
     """Delete a session by ID."""
     factory: ClientFactory = request.app.state.client_factory
-    client = await factory.create(
+    async with await factory.create_session(
         backend,
         user=user,
         oauth_github_token=oauth_gh_token,
-    )
-    try:
+    ) as _session:
         ref = SessionRef(session_id=session_id, backend=Backend(backend))
-        await client.delete_session(ref)
+        await _session.delete_session(ref)
         audit(
             "session.delete",
             user,
@@ -302,5 +295,3 @@ async def delete_session(
             ),
         )
         return JSONResponse(content={"deleted": True, "session_id": session_id})
-    finally:
-        await client.stop()

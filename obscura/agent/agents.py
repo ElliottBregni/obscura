@@ -53,7 +53,6 @@ from obscura.agent.peers import (
     PeerInvocationEnvelope,
     PeerRegistry,
 )
-from obscura.core.client import ObscuraClient
 from obscura.core.enums.protocol import MCPTransport
 from obscura.core.hooks import HookRegistry
 from obscura.core.paths import resolve_obscura_mcp_dir
@@ -65,7 +64,7 @@ from obscura.integrations.mcp.config_loader import (
 )
 from obscura.integrations.mcp.types import MCPConnectionConfig
 from obscura.manifest.lazy import LazyManifestProxy
-from obscura.memory import MemoryStore
+from obscura.memory import MemoryStoreProtocol, create_memory_store
 from obscura.plugins.broker import ToolBroker
 from obscura.plugins.policy import PluginPolicyEngine
 from obscura.tools.providers import (
@@ -316,7 +315,14 @@ class Agent:
         self.created_at = datetime.now(UTC)
         self.updated_at = self.created_at
         self.iteration_count = 0
-        self._client: ObscuraClient | None = None
+        # AgentSession is the source of truth post-migration; self._client
+        # remains as a back-compat alias pointing at session.client so the
+        # 26 existing self._client.X call sites keep working unchanged.
+        self._session: Any = None  # AgentSession | None
+        # Held as Any to accept either ObscuraClient (legacy) or
+        # AgentSession.client (composition path; might be None on the
+        # composition path since composition stores backend directly).
+        self._client: Any = None
         self._mcp_backend: MCPBackend | None = None
         self._providers: list[Any] = []
         self._broker_context: BrokerContext | None = None
@@ -332,12 +338,12 @@ class Agent:
 
     # -- Observability/test accessors -----------------------------------
     @property
-    def client(self) -> ObscuraClient | None:
+    def client(self) -> Any:
         """Testing/observability: injected client (read/write)."""
         return self._client
 
     @client.setter
-    def client(self, value: ObscuraClient | None) -> None:
+    def client(self, value: Any) -> None:
         self._client = value
 
     @property
@@ -410,15 +416,15 @@ class Agent:
         return self._broker
 
     @property
-    def memory(self) -> MemoryStore:
-        """Get the agent's memory store."""
-        return MemoryStore.for_user(self.user)
+    def memory(self) -> MemoryStoreProtocol:
+        """Get the agent's memory store (SQLite or Postgres per OBSCURA_DB_TYPE)."""
+        return create_memory_store(self.user)
 
     def list_registered_tools(self) -> list[ToolSpec]:
-        """Return all tools currently registered on the underlying client."""
-        if self._client is None:
+        """Return all tools currently registered on the session."""
+        if self._session is None:
             return []
-        return self._client.list_tools()
+        return self._session.list_tools()
 
     async def start(self) -> None:
         """Initialize the agent and connect to backend."""
@@ -428,7 +434,10 @@ class Agent:
             message="Starting backend client and tool providers.",
         )
 
-        # Pre-discover plugin specs for capability resolution BEFORE client
+        # PluginLoader is also needed downstream for ToolBroker scoped/
+        # lazy loading (load_scoped / load_lazy / load_all_enabled) — it's
+        # a separate concern from capability resolution. Capability
+        # discovery itself goes through the shared composition helper.
         plugin_loader = None
         try:
             from obscura.plugins.loader import PluginLoader
@@ -437,57 +446,74 @@ class Agent:
         except Exception:
             logger.debug("suppressed exception in start", exc_info=True)
 
-        # Build capability resolver from discovered specs (before client creation
-        # so skill gating is active when the system prompt is assembled)
-        capability_resolver = None
+        # Discover capabilities + build resolver via the shared helper.
+        # Same logic as obscura.composition.blocks.install_plugin_tools
+        # uses, eliminating the historical drift between the two paths.
+        # We need the resolver BEFORE client creation so skill gating is
+        # active when the system prompt is assembled (ContextLoader reads
+        # capability_resolver to filter skills).
+        from obscura.composition.capabilities import discover_capabilities
+
+        resolver = discover_capabilities(grantee_id=self.id)
+        capability_resolver = resolver
         allowed_tools: set[str] | None = None
         cap_index: Any = None
-        try:
-            from obscura.plugins.capabilities import CapabilityResolver
-            from obscura.plugins.registries.capability_index import CapabilityIndex
-            from obscura.plugins.registries.tool_index import ToolIndex
 
-            cap_index = CapabilityIndex()
-            tool_idx = ToolIndex()
-
-            if plugin_loader is not None:
-                for spec in (
-                    plugin_loader.discover_builtins() + plugin_loader.discover_local()
-                ):
-                    for cap in spec.capabilities:
-                        cap_index.register(cap, spec.id)
-                    for tool_contrib in spec.tools:
-                        tool_idx.register(tool_contrib, spec.id)
-
-            resolver = CapabilityResolver(cap_index, tool_idx)
-            resolver.grant_defaults(self.id)
-
+        if resolver is not None:
             for cap_id in self.config.capabilities.get("grant", []):
                 resolver.grant(self.id, cap_id, granted_by="manifest")
             for cap_id in self.config.capabilities.get("deny", []):
                 resolver.deny(self.id, cap_id, denied_by="manifest")
-
             allowed_tools = resolver.resolve_tool_names(self.id)
+            cap_index = resolver.capability_index
             self._capability_resolver = resolver
-            capability_resolver = resolver
-        except Exception as exc:
-            logger.debug("Capability resolver not available: %s", exc)
-            allowed_tools = None
+        else:
             self._capability_resolver = None
 
-        self._client = ObscuraClient(
-            self.config.provider,
-            model=self.config.model_id,
-            system_prompt=self.config.system_prompt,
-            lazy_load_skills=self.config.lazy_load_skills,
-            skill_filter=self.config.skill_filter,
-            capability_resolver=capability_resolver,
-            agent_id=self.id,
-            inject_claude_context=True,
-            user=self.user,
-        )
+        # Build the agent's session via composition. ObscuraClient is no
+        # longer constructed directly here; build_core_session owns the
+        # backend + tool registry, and we install the skill_context block
+        # to load OBSCURA.md / instructions / capability-gated skills
+        # (replacing inject_claude_context=True on the legacy client).
+        from obscura.composition.blocks.skill_context import install_skill_context
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig, SessionExtras
+
         try:
-            await self._client.start()
+            agent_extras: SessionExtras = {
+                "lazy_load_skills": self.config.lazy_load_skills,
+                "skill_filter": self.config.skill_filter,
+            }
+            session_config = SessionConfig(
+                backend=self.config.provider,
+                model=self.config.model_id,
+                system_prompt=self.config.system_prompt,
+                inject_claude_context=False,  # block handles it explicitly below
+                extras=agent_extras,
+            )
+            self._session = await build_core_session(
+                session_config,
+                surface="a2a",  # Agents are spawned by A2A/supervisor today
+                user=self.user,
+                session_id=self.id,
+            )
+            # Set capability_resolver BEFORE install_skill_context so the
+            # ContextLoader's skill gating sees it. (install_plugin_tools
+            # would set this on a normal surface; Agent has its own
+            # capability discovery flow above.)
+            if capability_resolver is not None:
+                self._session.capability_resolver = capability_resolver
+            # Run skill_context block to inject OBSCURA.md + skills.
+            await install_skill_context(
+                self._session,
+                SessionConfig(
+                    backend=self.config.provider,
+                    inject_claude_context=True,
+                    extras=session_config.extras,
+                ),
+            )
+            # Back-compat alias: existing self._client.X calls work unchanged.
+            self._client = self._session.client
         except Exception as exc:
             await self.runtime.emit_lifecycle_event(
                 kind="agent.start_failed",
@@ -496,6 +522,11 @@ class Agent:
                 details={"error": str(exc)},
             )
             raise
+
+        # Narrow types for the rest of start() — both must be set if we
+        # reached here without raising.
+        assert self._session is not None
+        assert self._client is not None
 
         # Create ToolBroker as the authoritative tool registry
         policy_engine = PluginPolicyEngine()
@@ -719,9 +750,9 @@ class Agent:
         self._providers = providers
         self._broker_context = ctx
 
-        # Sync broker → client (for LLM function calling schemas)
+        # Sync broker → session (for LLM function calling schemas)
         for tool_spec in broker.all_specs():
-            self._client.register_tool(tool_spec)
+            self._session.register_tool(tool_spec)
 
         # Wire eval-driven tool router into the backend
         try:
@@ -729,7 +760,7 @@ class Agent:
             from obscura.core.tool_router import ToolRouter
             from obscura.core.tool_score_index import ToolScoreIndex
 
-            backend_obj = getattr(self._client, "_backend", None)
+            backend_obj = self._session.backend
             if backend_obj is not None and hasattr(backend_obj, "set_tool_router"):
                 # Load persisted scores from previous sessions
                 scores_db = str(
@@ -772,11 +803,11 @@ class Agent:
             manifest_hooks = self.manifest_proxy.hook_registry
             if manifest_hooks.count > 0:
                 # If the client has a hook registry, merge; otherwise set it
-                existing: HookRegistry | None = getattr(self._client, "_hooks", None)
+                existing: HookRegistry | None = self._session.hooks
                 if existing is not None:
                     existing.merge(manifest_hooks)
                 else:
-                    self._client._hooks = manifest_hooks  # pyright: ignore[reportPrivateUsage]
+                    self._session.hooks = manifest_hooks
 
         # Register eval hooks (tool checks + past-failure memory injection)
         if self.config.eval_tools:
@@ -788,10 +819,10 @@ class Agent:
                 )
                 from obscura.core.enums.agent import AgentEventKind as _AEK
 
-                hook_reg: HookRegistry | None = getattr(self._client, "_hooks", None)
+                hook_reg: HookRegistry | None = self._session.hooks
                 if hook_reg is None:
                     hook_reg = HookRegistry()
-                    self._client._hooks = hook_reg  # pyright: ignore[reportPrivateUsage]
+                    self._session.hooks = hook_reg
 
                 # Defer factory execution until the hook is actually run. Some
                 # test suites patch the factory with AsyncMock() which would
@@ -835,10 +866,10 @@ class Agent:
                 from obscura.core.lifecycle import make_tool_pace_hook
                 from obscura.core.enums.agent import AgentEventKind as _AEK
 
-                hook_reg_: HookRegistry | None = getattr(self._client, "_hooks", None)
+                hook_reg_: HookRegistry | None = self._session.hooks
                 if hook_reg_ is None:
                     hook_reg_ = HookRegistry()
-                    self._client._hooks = hook_reg_  # pyright: ignore[reportPrivateUsage]
+                    self._session.hooks = hook_reg_
 
                 count_hook, remind_hook, text_reset_hook = make_tool_pace_hook(
                     max_consecutive=self.config.max_consecutive_tools,
@@ -895,8 +926,9 @@ class Agent:
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
             # Execute with timeout enforcement
+            assert self._session is not None
             message = await asyncio.wait_for(
-                self._client.send(full_prompt, **self.config.completion_params),
+                self._session.send(full_prompt, **self.config.completion_params),
                 timeout=self.config.timeout_seconds,
             )
             self._result = message.text
@@ -952,7 +984,8 @@ class Agent:
             relevant_memory = self._load_relevant_memory(prompt)
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
-            async for chunk in self._client.stream(
+            assert self._session is not None
+            async for chunk in self._session.stream(
                 full_prompt,
                 **self.config.completion_params,
             ):
@@ -1009,8 +1042,9 @@ class Agent:
             relevant_memory = self._load_relevant_memory(prompt)
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
+            assert self._session is not None
             result = await asyncio.wait_for(
-                self._client.run_loop_to_completion(
+                self._session.run_loop_to_text(
                     full_prompt,
                     max_turns=max_turns,
                     on_confirm=on_confirm,
@@ -1087,7 +1121,8 @@ class Agent:
             full_prompt = self._build_prompt(prompt, relevant_memory, context)
 
             text_parts: list[str] = []
-            async for event in self._client.run_loop(
+            assert self._session is not None
+            async for event in self._session.stream_loop(
                 full_prompt,
                 max_turns=max_turns,
                 on_confirm=on_confirm,
@@ -1355,9 +1390,9 @@ class Agent:
             except Exception as exc:
                 logger.debug("Failed to persist tool scores: %s", exc)
 
-        if self._client:
+        if self._session is not None:
             try:
-                await self._client.stop()
+                await self._session.aclose()
             except RuntimeError as e:
                 # Ignore cancel scope errors from underlying SDK
                 if "cancel scope" not in str(e):
@@ -1811,7 +1846,7 @@ class AgentRuntime:
 
         # Try to load from memory (agent may have crashed/restarted)
         if self.user:
-            memory = MemoryStore.for_user(self.user)
+            memory = create_memory_store(self.user)
             state_data = memory.get(
                 f"agent_state_{agent_id}",
                 namespace="agent:runtime",

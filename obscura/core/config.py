@@ -162,6 +162,12 @@ class ObscuraConfig(BaseModel):
     a2a_grpc_port: int = 50051  # gRPC server port (0 = disabled)
     a2a_agent_name: str = "Obscura Agent"
     a2a_agent_description: str = ""
+    # Agent provider/model used when A2A spawns a session for an inbound task.
+    # Threaded into composition.a2a.build_a2a_session via SessionConfig.
+    a2a_agent_backend: str = "copilot"
+    a2a_agent_model: str = ""  # empty = backend's default
+    a2a_agent_system_prompt: str = ""
+    a2a_agent_max_turns: int = 10
 
     # Kairos background daemon (opt-out: set OBSCURA_KAIROS=false to disable)
     kairos_enabled: bool = True  # default on; OBSCURA_KAIROS=false to disable

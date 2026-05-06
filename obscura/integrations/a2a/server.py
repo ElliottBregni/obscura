@@ -7,7 +7,7 @@ Used by the main ``create_app()`` to register A2A endpoints.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from obscura.integrations.a2a.agent_card import AgentCardGenerator
 from obscura.integrations.a2a.service import A2AService
@@ -34,8 +34,10 @@ class ObscuraA2AServer:
         Task persistence backend. Defaults to InMemoryTaskStore.
     agent_card:
         Pre-built agent card. If not provided, one is generated from kwargs.
-    get_runtime:
-        Factory returning per-user AgentRuntime (from ``obscura.deps``).
+    agent_backend:
+        Provider backend identifier (``"copilot"``, ``"claude"``, …) used
+        for every A2A task. Threaded into the ``SessionConfig`` that the
+        composition layer builds per-task.
     agent_model:
         Default model for spawned agents.
     agent_system_prompt:
@@ -51,7 +53,7 @@ class ObscuraA2AServer:
         *,
         store: TaskStore | None = None,
         agent_card: AgentCard | None = None,
-        get_runtime: Any = None,
+        agent_backend: str = "copilot",
         agent_model: str = "copilot",
         agent_system_prompt: str = "",
         name: str = "Obscura Agent",
@@ -75,7 +77,7 @@ class ObscuraA2AServer:
         self._service = A2AService(
             store=self._store,
             agent_card=self._agent_card,
-            get_runtime=get_runtime,
+            agent_backend=agent_backend,
             agent_model=agent_model,
             agent_system_prompt=agent_system_prompt,
         )

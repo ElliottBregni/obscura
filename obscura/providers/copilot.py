@@ -17,6 +17,11 @@ from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
 from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import EventToIteratorBridge
+from obscura.core.stream_guards import (
+    bind_stream_log,
+    check_stream_guards,
+    refusal_text,
+)
 from obscura.core.tool_policy import ToolPolicy
 from obscura.core.tools import ToolRegistry
 from obscura.core.models.content import TextBlock
@@ -441,22 +446,26 @@ class CopilotBackend(BackendToolHostMixin):
         tracer = _get_backend_tracer()
         span = tracer.start_span("copilot.stream")
         _set_span_attr(span, "backend", "copilot")
+        # Bind the per-task tool-call log BEFORE ``self._session.send`` —
+        # any child tasks the SDK spawns to invoke tool handlers inherit the
+        # context at task-creation time, so the shared guards see this dict.
         try:
-            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+            with bind_stream_log():
+                yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
-            msg_options = self._build_message_options(prompt, kwargs)
-            send_prompt = msg_options.pop("prompt")
-            await self._session.send(send_prompt, **msg_options)
+                msg_options = self._build_message_options(prompt, kwargs)
+                send_prompt = msg_options.pop("prompt")
+                await self._session.send(send_prompt, **msg_options)
 
-            # Yield chunks from the bridge
-            try:
-                async for chunk in bridge:
-                    yield chunk
-            finally:
-                # Unsubscribe all handlers
-                for unsub in unsub_fns:
-                    if callable(unsub):
-                        unsub()
+                # Yield chunks from the bridge
+                try:
+                    async for chunk in bridge:
+                        yield chunk
+                finally:
+                    # Unsubscribe all handlers
+                    for unsub in unsub_fns:
+                        if callable(unsub):
+                            unsub()
         finally:
             span.end()
 
@@ -703,6 +712,15 @@ class CopilotBackend(BackendToolHostMixin):
                     try:
                         raw_args = invocation.arguments
                         args = cast("dict[str, Any]", raw_args) if raw_args else {}
+
+                        refusal = check_stream_guards(bound_spec.name, args)
+                        if refusal is not None:
+                            return CopilotToolResult(
+                                text_result_for_llm=refusal_text(refusal),
+                                result_type="failure",
+                                error=cast("str", refusal["error"]),
+                            )
+
                         result: Any = await call_tool_handler(bound_spec, args)
                         # Normalize to SDK ToolResult (snake_case fields in 0.2.0)
                         if isinstance(result, CopilotToolResult):
@@ -801,6 +819,52 @@ class CopilotBackend(BackendToolHostMixin):
                         len(result.score_ranked),
                         result.quarantined_count,
                     )
+
+            # Phase-3 opt-in SDK tier filter (OBSCURA_PHASE3_SDK_TIER=1).
+            # Off by default because the Copilot SDK commits the tool list
+            # at session creation — once filtered, deferred tools are
+            # uncallable until session recreate. Enabling this trades
+            # mid-session callability for ~80%+ token savings on the
+            # initial system message.
+            #
+            # Set ``OBSCURA_PHASE3_EXTRA_CORE`` to keep specific tools
+            # callable even with phase-3 on (comma-separated names or
+            # fnmatch globs, e.g. ``jira_*,supabase_query``).
+            from obscura.core.tool_tiering import (
+                effective_core_names,
+                is_phase3_active,
+            )
+
+            if is_phase3_active():
+                from obscura.core.tool_observability import (
+                    TurnToolStats,
+                    emit_turn_tool_stats,
+                )
+
+                all_names = [t.name for t in filtered]
+                core_set = effective_core_names(all_names)
+                pre_phase3 = list(filtered)
+                filtered = [
+                    t for t in filtered
+                    if t.name in core_set
+                    or (
+                        t.name.startswith("mcp__")
+                        and (t.name.rsplit("__", 1)[-1] if "__" in t.name else "")
+                        in core_set
+                    )
+                ]
+                kept_names = {t.name for t in filtered}
+                dropped = tuple(t.name for t in pre_phase3 if t.name not in kept_names)
+                emit_turn_tool_stats(
+                    TurnToolStats(
+                        backend="copilot",
+                        registry_total=len(pre_phase3),
+                        core_count=len(filtered),
+                        discovered_count=0,  # SDK loop has no per-task discovery
+                        sent_count=len(filtered),
+                        dropped=dropped,
+                    ),
+                )
 
             # Safety-net hard cap — should rarely trigger with a router.
             _MAX_COPILOT_TOOLS = 128

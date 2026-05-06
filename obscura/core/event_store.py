@@ -118,6 +118,10 @@ class EventStoreProtocol(Protocol):
         parent_session_id: str | None = None,
     ) -> list[SessionRecord]: ...
 
+    async def reap_orphaned_sessions(self) -> int: ...
+
+    def close(self) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # SQLite implementation

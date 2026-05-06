@@ -62,7 +62,6 @@ from obscura.cli.render import (
 from obscura.cli.trace import tail_entries, tail_pretty
 from obscura.cli.tui_effects import context_bar, effort_badge, ultrathink_banner
 from obscura.core._default_skills import DEFAULT_SKILLS
-from obscura.core.client import ObscuraClient
 from obscura.core.compaction import compact_history
 from obscura.core.context_lazy import (
     EVAL_GRADING_PROMPT,
@@ -85,7 +84,7 @@ from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
 from obscura.core.enums.lifecycle import SessionStatus
 from obscura.core.enums.ui import TUIMode
-from obscura.core.event_store import SQLiteEventStore
+from obscura.core.event_store import EventStoreProtocol
 from obscura.core.paths import (
     resolve_all_commands_dirs,
     resolve_all_skills_dirs,
@@ -308,8 +307,8 @@ def _empty_bool_dict() -> dict[str, bool]:
 class REPLContext:
     """Mutable state for the REPL session."""
 
-    client: ObscuraClient
-    store: SQLiteEventStore
+    client: Any  # ObscuraClient | AgentSession — duck-typed handle
+    store: EventStoreProtocol
     session_id: str
     backend: str
     model: str | None
@@ -458,20 +457,42 @@ class REPLContext:
             self.runtime = None
 
     async def recreate_client(self, backend: str, model: str | None) -> None:
-        """Stop old client, create a new one for a different backend."""
-        await self.client.stop()
-        new_client = ObscuraClient(
-            backend,
-            model=model,
-            system_prompt=self.get_effective_system_prompt(),
-            mcp_servers=self.mcp_configs or None,
+        """Stop old client, create a new one for a different backend.
+
+        Migrated from direct ObscuraClient construction to
+        composition.build_core_session — the new client (an
+        AgentSession) quacks the same way as the old ObscuraClient for
+        every method REPLContext invokes (.send / .stream / .run_loop /
+        .register_tool / .resume_session / .stop).
+        """
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
+
+        # Old client teardown: aclose if it's a session, stop if it's a
+        # legacy ObscuraClient.
+        old_client = self.client
+        if hasattr(old_client, "aclose"):
+            try:
+                await old_client.aclose()
+            except Exception:
+                logger.debug("recreate_client: old aclose failed", exc_info=True)
+        else:
+            await old_client.stop()
+
+        new_session = await build_core_session(
+            SessionConfig(
+                backend=backend,
+                model=model,
+                system_prompt=self.get_effective_system_prompt(),
+                mcp_servers=self.mcp_configs or [],
+                inject_claude_context=False,
+            ),
+            surface="repl",
         )
-        await new_client.start()
         if self.tools_enabled:
             all_specs = get_system_tool_specs()
             mm = self.mode_manager
             mode_allowed = MODE_TOOL_GROUPS.get(mm.current) if mm is not None else None
-            # Also apply capability-based filtering from config.toml
             cap_allowed: set[str] | None = None
             try:
                 from obscura.plugins.capabilities import (
@@ -482,15 +503,13 @@ class REPLContext:
             except Exception:
                 logger.debug("suppressed exception in recreate_client", exc_info=True)
             for spec in all_specs:
-                # Mode filter (None = all modes allowed)
                 if mode_allowed is not None and spec.name not in mode_allowed:
                     continue
-                # Capability filter (None = no cap filtering)
                 cap = getattr(spec, "capability", "")
                 if cap_allowed is not None and cap and spec.name not in cap_allowed:
                     continue
-                new_client.register_tool(spec)
-        self.client = new_client
+                new_session.register_tool(spec)
+        self.client = new_session
         self.backend = backend
         self.model = model
 
@@ -979,7 +998,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
         print_ok("Tools disabled.")
     elif sub == "list":
         try:
-            registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            registry = ctx.client._tool_registry  # noqa: SLF001
             tools = registry.all_including_disabled()
             if not tools:
                 print_info("No tools registered.")
@@ -1006,7 +1025,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
         if not sub_arg:
             print_error("Usage: /tools enable <name>")
             return None
-        registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        registry = ctx.client._tool_registry  # noqa: SLF001
         if registry.enable(sub_arg):
             print_ok(f"Tool enabled: {sub_arg}")
         else:
@@ -1015,7 +1034,7 @@ async def cmd_tools(args: str, ctx: REPLContext) -> str | None:
         if not sub_arg:
             print_error("Usage: /tools disable <name>")
             return None
-        registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        registry = ctx.client._tool_registry  # noqa: SLF001
         if registry.disable(sub_arg):
             print_ok(f"Tool disabled: {sub_arg}")
         else:
@@ -1499,7 +1518,7 @@ async def cmd_compact(args: str, ctx: REPLContext) -> str | None:
         # Convert message_history tuples to dicts for compact_history.
         msg_dicts: list[Any] = [{"role": r, "content": t} for r, t in old]
         _backend_obj = (
-            ctx.client._backend  # pyright: ignore[reportPrivateUsage]
+            ctx.client._backend  # noqa: SLF001
             if hasattr(ctx.client, "_backend")
             else None
         )
@@ -5182,7 +5201,7 @@ async def cmd_search_tools(args: str, ctx: REPLContext) -> str | None:
         print_error("Usage: /search-tools <query>")
         return None
 
-    registry = ctx.client._tool_registry  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    registry = ctx.client._tool_registry  # noqa: SLF001
     tools = registry.all_including_disabled()
     if not tools:
         print_info("No tools registered.")
@@ -8953,19 +8972,19 @@ async def cmd_tool_policy(args: str, ctx: REPLContext) -> str | None:
         return None
 
     if sub == "allow-all":
-        ctx.client._tool_policy = ToolPolicy.allow_all()  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.allow_all()  # noqa: SLF001
         print_ok("Tool policy: all tools allowed (native + custom).")
     elif sub == "custom-only":
-        ctx.client._tool_policy = ToolPolicy.custom_only()  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.custom_only()  # noqa: SLF001
         print_ok("Tool policy: custom tools only.")
     elif sub == "allow" and rest:
-        ctx.client._tool_policy = ToolPolicy.restricted(rest)  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.restricted(rest)  # noqa: SLF001
         print_ok(f"Tool policy: only {', '.join(rest)} allowed.")
     elif sub == "deny" and rest:
-        ctx.client._tool_policy = ToolPolicy.blocked(rest)  # type: ignore[attr-defined]
+        ctx.client._tool_policy = ToolPolicy.blocked(rest)  # noqa: SLF001
         print_ok(f"Tool policy: {', '.join(rest)} blocked.")
     elif sub == "reset":
-        ctx.client._tool_policy = None  # type: ignore[attr-defined]
+        ctx.client._tool_policy = None  # noqa: SLF001
         print_ok("Tool policy reset to default.")
     else:
         print_info(

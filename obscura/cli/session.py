@@ -25,7 +25,7 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, replace as _dc_replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -86,15 +86,16 @@ from obscura.cli.widgets import (
     render_notification_banner,
 )
 from obscura.core.cleanup import run_cleanup
-from obscura.core.client import ObscuraClient
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.compaction import should_auto_compact
+from obscura.core.context_window import get_context_window
 from obscura.core.context import load_obscura_memory
 from obscura.core.cost_tracker import get_cost_tracker
 from obscura.core.deep_log import dlog
 from obscura.core.enums.agent import AgentEventKind, Backend
 from obscura.core.enums.lifecycle import SessionStatus
-from obscura.core.event_store import SQLiteEventStore
+from obscura.core.db_factory import DatabaseFactory
+from obscura.core.event_store import EventStoreProtocol
 from obscura.core.paths import resolve_obscura_global_home, resolve_obscura_home
 from obscura.core.permission_modes import PermissionMode, PermissionModeEngine
 from obscura.core.session_utils import generate_session_title
@@ -123,28 +124,10 @@ from obscura.memory_channels import (
     load_channels_from_config,
 )
 from obscura.plugins.builtins import list_builtin_plugin_ids
-from obscura.plugins.capabilities import resolve_allowed_tools_from_config
-from obscura.plugins.loader import (
-    PluginLoader,
-    _load_plugin_config_flag,  # pyright: ignore[reportPrivateUsage]
-    get_all_builtin_tool_specs,
-    get_capability_map,
-    get_filtered_builtin_tool_specs,
-)
 from obscura.plugins.registries.capability_index import CapabilityIndex
-from obscura.tools.arbiter_tools import get_arbiter_tool_specs
-from obscura.tools.browser import get_browser_tool_specs
-from obscura.tools.goal_tools import get_goal_tool_specs
-from obscura.tools.lsp import get_lsp_tool_specs
-from obscura.tools.memory_tools import (
-    build_channels_prompt_section,
-    make_memory_tool_specs,
-)
-from obscura.tools.profile_tools import get_profile_tool_specs
-from obscura.tools.system import Session, UI, get_system_tool_specs
+from obscura.tools.memory_tools import build_channels_prompt_section
+from obscura.tools.system import Session, UI
 from obscura.tools.system.file_state import record_file_access
-from obscura.tools.task_tools import get_task_tool_specs
-from obscura.tools.worktree import get_worktree_tool_specs
 
 _log = logging.getLogger("obscura.cli.session")
 
@@ -270,10 +253,10 @@ class ObscuraSession:
 
     # Populated by create()
     _config: SessionConfig
-    _store: SQLiteEventStore
+    _store: EventStoreProtocol
     _sid: str
     _ctx: REPLContext
-    _client: ObscuraClient
+    _client: Any  # AgentSession (was ObscuraClient pre-absorption)
     _client_cm: Any  # the async-context-manager wrapper
     _vector_store: Any
     context_router: Any
@@ -289,6 +272,7 @@ class ObscuraSession:
     _daemon_task: asyncio.Task[None] | None
     _uds_inbox: Any
     _background_tasks: set[asyncio.Task[str]]
+    _composition_session: Any  # obscura.composition.session.AgentSession
 
     # ── Factory ────────────────────────────────────────────────────────────
 
@@ -311,7 +295,7 @@ class ObscuraSession:
         self._tip_scheduler = None
         self._background_tasks = set()
 
-        self._store = SQLiteEventStore(resolve_obscura_home() / "events.db")
+        self._store = DatabaseFactory.create_event_store()
         self._sid = config.session_id or uuid.uuid4().hex
 
         await self._load_env(config)
@@ -323,20 +307,50 @@ class ObscuraSession:
         self._tool_count = tool_count
         project_hooks = self._wire_callbacks_and_hooks(config, system_tools)
 
-        # Build client
-        client = ObscuraClient(
-            config.backend,
+        # Build session via composition (was direct ObscuraClient before).
+        # AgentSession quacks the same way ObscuraSession's downstream
+        # code expects (.send / .stream / .run_loop / .resume_session /
+        # .register_tool / .stop replaced by .aclose).
+        from obscura.composition.core import build_core_session as _bcs
+        from obscura.composition.session import SessionConfig as _CSC
+
+        comp_config = _CSC(
+            backend=config.backend,
             model=config.model,
             system_prompt=combined_system,
-            tools=system_tools or None,
-            mcp_servers=mcp_configs or None,
+            mcp_servers=mcp_configs or [],
+            inject_claude_context=False,
+        )
+        session = await _bcs(
+            comp_config,
+            surface="repl",
+            preregistered_tools=system_tools or None,
             hooks=project_hooks,
         )
-        self._client_cm = client
-        await client.__aenter__()
-        self._client = client
+        self._client_cm = session
+        self._client = session
 
-        # Tool router
+        # Plugin registration via composition. We wrap the already-built
+        # client in an AgentSession so install_plugin_tools can register
+        # plugin specs onto session.registry (and mirror to backend).
+        # The session's capability_resolver is then available to
+        # _wire_tool_router below — eliminating the duplicate PluginLoader
+        # pass that used to live inline.
+        from obscura.composition.blocks.browser_bridge import install_browser_bridge
+        from obscura.composition.blocks.plugins import install_plugin_tools
+        from obscura.composition.blocks.system_tools import install_system_tools
+
+        # The composition session built above IS the canonical session;
+        # no need to wrap it again. Forward _vector_store onto it so
+        # downstream blocks see it.
+        self._composition_session = session
+        if self._vector_store is not None:
+            session.vector_store = self._vector_store
+        await install_plugin_tools(self._composition_session, comp_config)
+        await install_system_tools(self._composition_session, comp_config)
+        await install_browser_bridge(self._composition_session, comp_config)
+
+        # Tool router (reads cap index from self._composition_session)
         self._wire_tool_router(config)
 
         # Session resume
@@ -350,7 +364,7 @@ class ObscuraSession:
 
         # Build REPL context
         self._ctx = REPLContext(
-            client=client,
+            client=session,
             store=self._store,
             session_id=self._sid,
             backend=config.backend,
@@ -390,7 +404,7 @@ class ObscuraSession:
         return self._ctx
 
     @property
-    def client(self) -> ObscuraClient:
+    def client(self) -> Any:  # AgentSession (was ObscuraClient)
         return self._client
 
     @property
@@ -398,7 +412,7 @@ class ObscuraSession:
         return self._sid
 
     @property
-    def store(self) -> SQLiteEventStore:
+    def store(self) -> EventStoreProtocol:
         return self._store
 
     @property
@@ -493,9 +507,13 @@ class ObscuraSession:
             return True
 
         # ── Token-aware auto-compact ──────────────────────────────────────
-        _context_window = ctx.client.context_window
+        _context_window = (
+            getattr(ctx.client, "context_window", 0) if ctx.client else 0
+        ) or get_context_window(ctx.model or ctx.backend)
         _compact_threshold = int(_context_window * 0.60)
-        _warn_threshold = ctx.client.context_warn_threshold
+        _warn_threshold = (
+            getattr(ctx.client, "context_warn_threshold", 0) if ctx.client else 0
+        )
 
         # ── Vector memory pre-search ──────────────────────────────────────
         augmented_text = text
@@ -816,7 +834,7 @@ class ObscuraSession:
             try:
                 title = await generate_session_title(
                     text,
-                    ctx.client._backend,  # pyright: ignore[reportPrivateUsage]
+                    ctx.client._backend,  # noqa: SLF001
                 )
                 if title:
                     await ctx.store.update_session(ctx.session_id, summary=title)
@@ -987,11 +1005,17 @@ class ObscuraSession:
 
             logging.getLogger("obscura.agent.daemon_agent").setLevel(logging.WARNING)
 
-            daemon_client = ObscuraClient(
-                agent_def.model,
-                system_prompt=agent_def.system_prompt,
+            from obscura.composition.core import build_core_session as _bcs2
+            from obscura.composition.session import SessionConfig as _CSC2
+
+            daemon_client = await _bcs2(
+                _CSC2(
+                    backend=agent_def.model,
+                    system_prompt=agent_def.system_prompt,
+                    inject_claude_context=False,
+                ),
+                surface="a2a",
             )
-            await daemon_client.__aenter__()
 
             # Load persisted schedules
             try:
@@ -1196,120 +1220,19 @@ class ObscuraSession:
 
     def _assemble_tools(
         self,
-        config: SessionConfig,
+        config: SessionConfig,  # noqa: ARG002
     ) -> tuple[list[Any], int]:
-        """Gather and filter system tools.  Returns (tools, count)."""
-        system_tools: list[Any] = []
-        if not config.tools_enabled:
-            return system_tools, 0
+        """Return an empty preregistered-tools list.
 
-        try:
-            system_tools = get_system_tool_specs()
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Memory tools
-        if self._vector_store is not None:
-            try:
-                system_tools.extend(make_memory_tool_specs(self._cli_user))
-            except Exception:
-                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Worktree tools
-        try:
-            system_tools.extend(get_worktree_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Task tools
-        try:
-            system_tools.extend(get_task_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Goal tools
-        try:
-            system_tools.extend(get_goal_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Arbiter tools
-        try:
-            system_tools.extend(get_arbiter_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Profile tools
-        try:
-            system_tools.extend(get_profile_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # LSP tool
-        try:
-            system_tools.extend(get_lsp_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Browser tool
-        try:
-            system_tools.extend(get_browser_tool_specs())
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Builtin plugin tools
-        try:
-            existing_names = {t.name for t in system_tools}
-            _ws_include = (
-                getattr(config.compiled_ws, "plugin_include", None)
-                if config.compiled_ws
-                else None
-            )
-            _ws_exclude = (
-                getattr(config.compiled_ws, "plugin_exclude", None)
-                if config.compiled_ws
-                else None
-            )
-
-            if _ws_include or _ws_exclude:
-                plugin_tools = get_filtered_builtin_tool_specs(_ws_include, _ws_exclude)
-            else:
-                plugin_tools = get_all_builtin_tool_specs()
-
-            for tool in plugin_tools:
-                if tool.name not in existing_names:
-                    system_tools.append(tool)
-                    existing_names.add(tool.name)
-        except Exception:
-            _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Backfill capability metadata
-        if system_tools:
-            try:
-                _cap_map = get_capability_map()
-                system_tools = [
-                    _dc_replace(t, capability=_cap_map[t.name])
-                    if not getattr(t, "capability", "") and t.name in _cap_map
-                    else t
-                    for t in system_tools
-                ]
-            except Exception:
-                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        # Filter by capability grants
-        if system_tools:
-            try:
-                _allowed = resolve_allowed_tools_from_config()
-                if _allowed is not None:
-                    system_tools = [
-                        t
-                        for t in system_tools
-                        if not getattr(t, "capability", "") or t.name in _allowed
-                    ]
-            except Exception:
-                _log.debug("suppressed exception in _assemble_tools", exc_info=True)
-
-        return system_tools, len(system_tools)
+        System + plugin tool registration moved to the composition layer:
+            - obscura.composition.blocks.system_tools.install_system_tools
+            - obscura.composition.blocks.plugins.install_plugin_tools
+        Both run from create() after the client is built (via the
+        AgentSession wrapper). This collapses the previous
+        ``_assemble_tools`` duplication of REPL behaviour onto the single
+        canonical pipeline. Drift defence lives in tests/composition/.
+        """
+        return [], 0
 
     def _wire_callbacks_and_hooks(
         self,
@@ -1503,23 +1426,27 @@ class ObscuraSession:
         return project_hooks
 
     def _wire_tool_router(self, config: SessionConfig) -> None:
-        """Wire eval-driven tool router after client creation."""
+        """Wire eval-driven tool router after client creation.
+
+        Reads the capability index from the AgentSession built by the
+        composition pipeline (set on ``self._composition_session`` during
+        ``create()``) — no duplicate PluginLoader pass.
+        """
         if not config.tools_enabled:
             return
         try:
             _routing_config = ToolRoutingConfig()
             _score_index = ToolScoreIndex()
 
-            _cap_index = CapabilityIndex()
-            _pl = PluginLoader()
-            _all_pspecs: list[Any] = []
-            if _load_plugin_config_flag("load_builtins"):
-                _all_pspecs.extend(_pl.discover_builtins())
-            _all_pspecs.extend(_pl.discover_local())
-            _all_pspecs.extend(_pl.discover_user())
-            for _ps in _all_pspecs:
-                for _cap in _ps.capabilities:
-                    _cap_index.register(_cap, _ps.id)
+            comp_session = getattr(self, "_composition_session", None)
+            if (
+                comp_session is not None
+                and comp_session.capability_resolver is not None
+            ):
+                _cap_index = comp_session.capability_resolver.capability_index
+            else:
+                # Plugins block opted out — empty index keeps router construction clean
+                _cap_index = CapabilityIndex()
 
             _router = ToolRouter.from_capability_index(
                 config=_routing_config,
@@ -1528,7 +1455,7 @@ class ObscuraSession:
                 backend=config.backend,
             )
 
-            backend = self._client._backend  # pyright: ignore[reportPrivateUsage]
+            backend = self._client._backend  # noqa: SLF001
             if isinstance(backend, ToolRouterCapable):
                 backend.set_tool_router(_router)
             self._tool_router_ref = _router

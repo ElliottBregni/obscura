@@ -305,9 +305,9 @@ async def memory_watch_websocket(
     _memory_watch_clients[namespace].append(websocket)
 
     try:
-        from obscura.memory import MemoryStore
+        from obscura.memory import create_memory_store
 
-        store = MemoryStore.for_user(user)
+        store = create_memory_store(user)
         keys = store.list_keys(namespace=namespace)
 
         await websocket.send_json(

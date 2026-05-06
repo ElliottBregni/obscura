@@ -153,7 +153,7 @@ async def _collect_heartbeat(ctx: REPLContext) -> HeartbeatReport:
 
     # 3. Events DB health
     try:
-        db_path: Path = ctx.store._db_path  # type: ignore[attr-defined]
+        db_path = cast("Path", ctx.store._db_path)  # type: ignore[attr-defined]  # noqa: SLF001
         if db_path.exists():
             report.events_db_ok = True
             report.events_db_size_kb = db_path.stat().st_size / 1024.0
