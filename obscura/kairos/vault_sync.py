@@ -30,6 +30,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -552,6 +553,51 @@ class VaultSync:
             logger.debug("Vector ingest failed", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Page rendering — single source of truth for vault frontmatter
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _render_page(
+        *,
+        page_type: str,
+        page_id: str,
+        body: str,
+        created_at: str = "",
+        updated_at: str = "",
+        generated_at: str = "",
+        extra_fields: dict[str, Any] | None = None,
+    ) -> str:
+        """Render a vault page with consistent frontmatter.
+
+        Two timestamp conventions:
+          - Entity pages (a goal, a task, a profile)  → ``created_at``
+            and ``updated_at``. ``generated_at`` is omitted.
+          - Snapshot pages (queue depth, latest verdicts) → ``generated_at``
+            only. ``created_at`` / ``updated_at`` are omitted.
+
+        Frontmatter ordering is fixed so consecutive sync ticks produce
+        byte-identical output when nothing changed (no spurious diffs).
+
+        ``extra_fields`` keys are appended after the canonical block in
+        their dict order. Values must be YAML-serializable.
+        """
+        ordered: dict[str, Any] = {"id": page_id, "type": page_type}
+        if generated_at:
+            ordered["generated_at"] = generated_at
+        if created_at:
+            ordered["created_at"] = created_at
+        if updated_at:
+            ordered["updated_at"] = updated_at
+        if extra_fields:
+            for key, val in extra_fields.items():
+                if key in ordered:
+                    continue
+                ordered[key] = val
+        fm = yaml.dump(ordered, default_flow_style=False, sort_keys=False)
+        body_text = body.rstrip()
+        return f"---\n{fm}---\n\n{body_text}\n" if body_text else f"---\n{fm}---\n"
+
+    # ------------------------------------------------------------------
     # Export (Obscura stores → agent zone)
     # ------------------------------------------------------------------
 
@@ -574,14 +620,16 @@ class VaultSync:
         """Export active goals to vault/agent/goals/.
 
         Reads from GoalStore (SQLite kairos.db) as the canonical source.
-        Falls back to GoalBoard (markdown files) for goals not yet in SQLite.
+        Falls back to GoalBoard (markdown files) for goals not yet in
+        SQLite. Each page goes through :meth:`_render_page` so the
+        frontmatter shape is uniform regardless of source.
+
+        Stale files (goals that no longer exist) are removed AFTER we've
+        written the live set, so other vault pages with backlinks to a
+        goal page won't observe a deletion mid-sync.
         """
         goals_dir = self.vault_dir / "agent" / "goals"
         goals_dir.mkdir(parents=True, exist_ok=True)
-
-        # Clean stale exports.
-        for old in goals_dir.glob("*.md"):
-            old.unlink()
 
         count = 0
         exported_ids: set[str] = set()
@@ -612,17 +660,32 @@ class VaultSync:
                         if hasattr(goal.created_at, "isoformat")
                         else str(goal.created_at)
                     )
-                    data = {
-                        "id": goal.goal_id,
+                    # KAIROS Goals don't carry a separate updated_at —
+                    # the closest semantic timestamp is the most recent
+                    # state-change marker, which for an active goal is
+                    # started_at (work began) when set.
+                    updated_iso = ""
+                    started_at = getattr(goal, "started_at", None)
+                    if started_at is not None:
+                        updated_iso = (
+                            started_at.isoformat()
+                            if hasattr(started_at, "isoformat")
+                            else str(started_at)
+                        )
+                    extra: dict[str, Any] = {
                         "title": goal.title,
                         "status": status_val,
-                        "created_at": created_iso,
                         "success_criteria": list(goal.success_criteria),
                         "tags": list(goal.tags),
                     }
-                    fm = yaml.dump(data, default_flow_style=False, sort_keys=False)
-                    body = goal.description or ""
-                    content = f"---\n{fm}---\n\n{body}\n"
+                    content = self._render_page(
+                        page_type="goal",
+                        page_id=goal.goal_id,
+                        body=goal.description or "",
+                        created_at=created_iso,
+                        updated_at=updated_iso,
+                        extra_fields=extra,
+                    )
                     (goals_dir / f"{goal.goal_id}.md").write_text(
                         content, encoding="utf-8"
                     )
@@ -634,7 +697,6 @@ class VaultSync:
             )
 
         # --- Fallback / supplement: GoalBoard (markdown files) ---
-        # Export any goal whose ID isn't already covered by GoalStore above.
         try:
             board = GoalBoard()
             for goal in board.load_all():
@@ -642,28 +704,58 @@ class VaultSync:
                     continue
                 if goal.status in ("completed", "abandoned"):
                     continue
-                data = {
-                    "id": goal.id,
+                # Render linked tasks as a body section if any exist —
+                # currently no per-task page, so we list IDs as plain
+                # bullets. When per-task vault pages land, swap the
+                # bullet body for [[../tasks/<task_id>]] backlinks.
+                body_parts: list[str] = []
+                if goal.body:
+                    body_parts.append(goal.body)
+                if goal.tasks:
+                    body_parts.append("## Linked tasks")
+                    body_parts.extend(f"- {tid}" for tid in goal.tasks)
+                body = "\n\n".join(body_parts)
+
+                extra = {
                     "title": goal.title,
                     "status": goal.status,
                     "priority": goal.priority,
                     "progress": goal.progress,
-                    "created_at": goal.created,
-                    "updated_at": goal.updated,
                     "acceptance_criteria": list(goal.acceptance_criteria),
                     "tasks": list(goal.tasks),
                 }
-                fm = yaml.dump(data, default_flow_style=False, sort_keys=False)
-                content = f"---\n{fm}---\n\n{goal.body or ''}\n"
+                content = self._render_page(
+                    page_type="goal",
+                    page_id=goal.id,
+                    body=body,
+                    created_at=goal.created,
+                    updated_at=goal.updated,
+                    extra_fields=extra,
+                )
                 (goals_dir / f"{goal.id}.md").write_text(content, encoding="utf-8")
+                exported_ids.add(goal.id)
                 count += 1
         except Exception:
             logger.debug("GoalBoard export failed", exc_info=True)
 
+        # Sweep stale exports — files for goal IDs we did NOT just write.
+        # Done after writes so backlinks to live goals stay valid all the
+        # way through the export cycle.
+        for old in goals_dir.glob("*.md"):
+            if old.stem not in exported_ids:
+                with contextlib.suppress(OSError):
+                    old.unlink()
+
         return count
 
     def _export_queue_snapshot(self) -> int:
-        """Export pending tasks to vault/agent/tasks/queue-snapshot.md."""
+        """Export pending tasks to vault/agent/tasks/queue-snapshot.md.
+
+        The snapshot lists priority-bucket counts AND, when there are
+        few enough pending tasks, the top items linked back to their
+        goal page (``[[../goals/<goal_id>]]``). This gives the user a
+        navigable entry point from the snapshot to the goal context.
+        """
         try:
             q = TaskQueue()
             snapshot_path = self.vault_dir / "agent" / "tasks" / "queue-snapshot.md"
@@ -671,20 +763,16 @@ class VaultSync:
 
             depth = q.queue_depth()
             total = sum(depth.values())
+            now_iso = datetime.now(UTC).isoformat()
 
-            lines = [
-                "---",
-                "type: queue_snapshot",
-                f"generated: {datetime.now(UTC).isoformat()}",
-                f"total_pending: {total}",
-                "---",
-                "",
+            body_lines: list[str] = [
                 "# Task Queue Snapshot",
                 "",
                 f"**{total} pending tasks** across {len(depth)} priority levels.",
                 "",
+                "## By priority",
+                "",
             ]
-
             for prio_str, cnt in sorted(depth.items(), key=lambda x: int(x[0])):
                 prio_label = {
                     "0": "critical",
@@ -693,9 +781,33 @@ class VaultSync:
                     "75": "low",
                     "100": "lowest",
                 }.get(prio_str, f"p{prio_str}")
-                lines.append(f"- **{prio_label}**: {cnt} task(s)")
+                body_lines.append(f"- **{prio_label}**: {cnt} task(s)")
 
-            content = "\n".join(lines) + "\n"
+            # Top pending tasks with goal-page backlinks. Cap so the
+            # snapshot stays readable even when the queue is very deep.
+            top_tasks = self._top_pending_tasks(q, limit=20)
+            if top_tasks:
+                body_lines.extend(["", "## Top pending", ""])
+                for task in top_tasks:
+                    subject = str(task.get("subject", "")).strip() or task.get(
+                        "task_id", "?"
+                    )
+                    goal_id = str(task.get("goal_id", "")).strip()
+                    backlink = f" → [[../goals/{goal_id}]]" if goal_id else ""
+                    body_lines.append(
+                        f"- `{task.get('task_id', '?')}` {subject}{backlink}"
+                    )
+
+            content = self._render_page(
+                page_type="queue_snapshot",
+                page_id="queue-snapshot",
+                body="\n".join(body_lines),
+                generated_at=now_iso,
+                extra_fields={
+                    "total_pending": total,
+                    "priority_buckets": {k: v for k, v in depth.items()},
+                },
+            )
         except Exception:
             logger.debug("Queue snapshot export failed", exc_info=True)
             return 0
@@ -703,6 +815,38 @@ class VaultSync:
         # Write outside the data-fetch try/except so transient I/O errors can be retried.
         snapshot_path.write_text(content, encoding="utf-8")
         return 1
+
+    @staticmethod
+    def _top_pending_tasks(
+        _q: TaskQueue, *, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Return up to *limit* highest-priority pending tasks.
+
+        Reads directly through the queue's internal connection helper
+        (the *_q* arg is held for API symmetry with future TaskQueue
+        refactors that expose a public "list pending" method) — for now,
+        TaskQueue's public surface only offers next_ready (which claims),
+        so we open a read-only connection. The select is bounded by
+        *limit* so deep queues stay readable in the snapshot.
+        """
+        try:
+            from obscura.core import task_queue as _tq
+            from obscura.core.enums.lifecycle import TaskQueueStatus
+
+            conn = _tq._open()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            try:
+                rows = conn.execute(
+                    "SELECT task_id, subject, goal_id, priority "
+                    "FROM tasks WHERE status = ? "
+                    "ORDER BY priority ASC, created_at ASC LIMIT ?",
+                    (TaskQueueStatus.PENDING.value, limit),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("top_pending_tasks read failed", exc_info=True)
+            return []
 
     def _export_arbiter_verdicts(self) -> int:
         """Export recent Arbiter verdicts to vault/agent/arbiter/."""
@@ -734,12 +878,8 @@ class VaultSync:
             else:
                 trend_label = "insufficient data"
 
-            lines = [
-                "---",
-                "type: arbiter_verdicts",
-                f"generated: {datetime.now(UTC).isoformat()}",
-                "---",
-                "",
+            now_iso = datetime.now(UTC).isoformat()
+            body_lines = [
                 "# Recent Arbiter Verdicts",
                 "",
                 f"**{stats.get('total', 0)} total** evaluations "
@@ -747,12 +887,14 @@ class VaultSync:
                 f"Score trend (last 5 vs prev 5): **{trend_label}**"
                 f" — last5={avg_last5:.3f}, prev5={avg_prev5:.3f}",
                 "",
+                "## By verdict",
+                "",
             ]
 
             by_verdict = stats.get("by_verdict", {})
             for v, cnt in sorted(by_verdict.items()):
-                lines.append(f"- **{v}**: {cnt}")
-            lines.append("")
+                body_lines.append(f"- **{v}**: {cnt}")
+            body_lines.extend(["", "## Recent", ""])
 
             for row in recent[:10]:
                 verdict = row.get("verdict", "?")
@@ -761,13 +903,23 @@ class VaultSync:
                 session = row.get("session_id", "")
                 score = row.get("composite", 0)
                 feedback = (row.get("feedback") or "")[:80]
-                session_suffix = f" session={session}" if session else ""
-                lines.append(
+                session_suffix = f" session=`{session}`" if session else ""
+                body_lines.append(
                     f"- [{verdict}] {kind} `{target}`{session_suffix}"
                     f" (score={score:.2f}) {feedback}"
                 )
 
-            content = "\n".join(lines) + "\n"
+            content = self._render_page(
+                page_type="arbiter_verdicts",
+                page_id="latest-verdicts",
+                body="\n".join(body_lines),
+                generated_at=now_iso,
+                extra_fields={
+                    "total_evaluations": stats.get("total", 0),
+                    "avg_composite_score": stats.get("avg_composite_score", 0),
+                    "trend": trend_label,
+                },
+            )
         except Exception:
             logger.debug("Arbiter verdict export failed", exc_info=True)
             return 0
@@ -788,9 +940,11 @@ class VaultSync:
 
             out = self.vault_dir / "agent" / "profile-summary.md"
             out.parent.mkdir(parents=True, exist_ok=True)
-            content = (
-                f"---\ntype: profile_summary\n"
-                f"generated: {datetime.now(UTC).isoformat()}\n---\n\n{summary}\n"
+            content = self._render_page(
+                page_type="profile_summary",
+                page_id="profile-summary",
+                body=summary,
+                generated_at=datetime.now(UTC).isoformat(),
             )
         except Exception:
             logger.debug("Profile summary export failed", exc_info=True)
