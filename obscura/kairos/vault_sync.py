@@ -48,7 +48,7 @@ from obscura.auth.cli_user import current_cli_user
 from obscura.core.kairos.goal_store import create_goal_store
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.task_queue import TaskQueue
-from obscura.kairos.goals import GoalBoard
+from obscura.kairos.goals import GoalBoard, is_valid_status_transition
 from obscura.profile.builder import ProfileBuilder
 from obscura.profile.store import ProfileStore
 from obscura.vector_memory.vector_memory import VectorMemoryStore
@@ -185,6 +185,10 @@ class VaultSync:
         self.dry_run = bool(dry_run)
         self._prev_hashes: dict[str, str] = {}
         self._hash_file = self.vault_dir / ".sync_state.json"
+        # (goal_id, requested_status) pairs we've already info-logged about
+        # being illegal transitions. Without this, every sync tick re-logs
+        # the same WARNING as the in-memory FSM rejects the bad request.
+        self._logged_invalid_transitions: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------------
     # Bootstrap
@@ -386,12 +390,31 @@ class VaultSync:
             if conflicting is not None:
                 self._archive_conflict(conflicting)
 
-            # User file wins — overwrite in-memory version unconditionally.
+            # User file wins for content — but the lifecycle FSM still
+            # governs the status field. If the user's file requests an
+            # illegal transition (e.g. completed → in_progress because
+            # the markdown is older than the in-memory completion), we
+            # skip the status update rather than firing the GoalBoard
+            # validator's WARNING on every sync tick.
             fields: dict[str, Any] = {}
             if meta.frontmatter.get("priority"):
                 fields["priority"] = meta.frontmatter["priority"]
-            if meta.frontmatter.get("status"):
-                fields["status"] = meta.frontmatter["status"]
+            requested_status = meta.frontmatter.get("status")
+            if requested_status:
+                if is_valid_status_transition(existing.status, str(requested_status)):
+                    fields["status"] = requested_status
+                else:
+                    pair = (goal_id, str(requested_status))
+                    if pair not in self._logged_invalid_transitions:
+                        logger.info(
+                            "[vault] Skipping illegal status transition for goal %s: "
+                            "file requests %r but in-memory status is %r. "
+                            "Update the markdown frontmatter to clear this notice.",
+                            goal_id,
+                            requested_status,
+                            existing.status,
+                        )
+                        self._logged_invalid_transitions.add(pair)
             if meta.frontmatter.get("acceptance_criteria"):
                 fields["acceptance_criteria"] = meta.frontmatter["acceptance_criteria"]
             if meta.body:

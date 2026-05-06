@@ -49,6 +49,20 @@ _TRANSITIONS: dict[str, set[str]] = {
 }
 
 
+def is_valid_status_transition(current: str, new: str) -> bool:
+    """Return True if moving a goal from *current* to *new* is allowed.
+
+    Same identity (``current == new``) is treated as valid since it is a
+    no-op rather than an actual transition. Producers (e.g. vault sync)
+    should call this *before* attempting an update with a status field
+    so they can skip illegal transitions instead of relying on the
+    GoalBoard.update validator to reject (and log a warning every tick).
+    """
+    if current == new:
+        return True
+    return new in _TRANSITIONS.get(current, set())
+
+
 @dataclass(frozen=True)
 class Goal:
     """A single goal parsed from its markdown file."""
