@@ -117,7 +117,6 @@ class TestVaultSyncIllegalTransition:
 
             def get_if_newer(self, _goal_id: str, *, since: str) -> None:
                 _ = since
-                return None
 
             def update(self, _goal_id: str, **fields: object) -> SimpleNamespace:
                 captured_updates.append(fields)
@@ -143,7 +142,9 @@ class TestVaultSyncIllegalTransition:
             caplog.at_level(logging.INFO),
         ):
             sync._ingest_goal(meta)  # pyright: ignore[reportPrivateUsage]
-            sync._ingest_goal(meta)  # second tick — same illegal transition  # pyright: ignore[reportPrivateUsage]
+            sync._ingest_goal(
+                meta
+            )  # second tick — same illegal transition  # pyright: ignore[reportPrivateUsage]
             sync._ingest_goal(meta)  # third tick  # pyright: ignore[reportPrivateUsage]
 
         # Status was filtered out of every update call.
@@ -190,7 +191,6 @@ class TestVaultSyncIllegalTransition:
 
             def get_if_newer(self, _goal_id: str, *, since: str) -> None:
                 _ = since
-                return None
 
             def update(self, _goal_id: str, **fields: object) -> SimpleNamespace:
                 captured.append(fields)

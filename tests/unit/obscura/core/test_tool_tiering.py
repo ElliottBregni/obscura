@@ -45,9 +45,13 @@ def _spec(name: str, description: str = "") -> ToolSpec:
 def test_core_set_includes_essentials() -> None:
     """The core set must include the tools the model needs without discovery."""
     expected = {
-        "read_text_file", "write_text_file", "grep_files",
-        "run_shell", "which_command",
-        "web_fetch", "web_search",
+        "read_text_file",
+        "write_text_file",
+        "grep_files",
+        "run_shell",
+        "which_command",
+        "web_fetch",
+        "web_search",
         "tool_search",  # MUST be core — entry point to the rest.
     }
     assert expected <= CORE_TOOL_NAMES
@@ -62,18 +66,21 @@ def test_is_core_round_trip() -> None:
 
 def test_split_preserves_order_within_each_tier() -> None:
     tools = [
-        _spec("read_text_file"),       # core
-        _spec("jira_create_issue"),    # deferred
-        _spec("grep_files"),           # core
+        _spec("read_text_file"),  # core
+        _spec("jira_create_issue"),  # deferred
+        _spec("grep_files"),  # core
         _spec("postman_run_collection"),  # deferred
-        _spec("write_text_file"),      # core
+        _spec("write_text_file"),  # core
     ]
     core, deferred = split_by_tier(tools)
     assert [s.name for s in core] == [
-        "read_text_file", "grep_files", "write_text_file",
+        "read_text_file",
+        "grep_files",
+        "write_text_file",
     ]
     assert [s.name for s in deferred] == [
-        "jira_create_issue", "postman_run_collection",
+        "jira_create_issue",
+        "postman_run_collection",
     ]
 
 
@@ -183,10 +190,10 @@ def test_bind_discovered_tools_isolates_each_block() -> None:
 def test_filter_visible_drops_deferred_keeps_core() -> None:
     _reset_discovered()
     tools = [
-        _spec("read_text_file"),       # core — stays
-        _spec("jira_create_issue"),    # deferred — drops
-        _spec("write_text_file"),      # core — stays
-        _spec("postman_run"),          # deferred — drops
+        _spec("read_text_file"),  # core — stays
+        _spec("jira_create_issue"),  # deferred — drops
+        _spec("write_text_file"),  # core — stays
+        _spec("postman_run"),  # deferred — drops
     ]
     with bind_discovered_tools():
         visible = filter_visible(tools)
@@ -245,7 +252,9 @@ def test_parse_extra_core_patterns_empty() -> None:
 
 
 def test_parse_extra_core_patterns_strips_and_splits() -> None:
-    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": " jira_*, supabase_query ,, foo "}):
+    with patch.dict(
+        os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": " jira_*, supabase_query ,, foo "}
+    ):
         assert parse_extra_core_patterns() == ("jira_*", "supabase_query", "foo")
 
 
@@ -256,7 +265,9 @@ def test_effective_core_names_with_no_extras_returns_core() -> None:
 
 
 def test_effective_core_names_includes_exact_extras() -> None:
-    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_create_issue,foo_bar"}):
+    with patch.dict(
+        os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_create_issue,foo_bar"}
+    ):
         result = effective_core_names()
         assert "jira_create_issue" in result
         assert "foo_bar" in result

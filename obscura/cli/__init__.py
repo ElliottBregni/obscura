@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Literal, cast
 
 import click
 
@@ -119,16 +119,16 @@ class _SubcommandAwareGroup(click.Group):
     cleanly.
     """
 
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:  # pyright: ignore[reportImplicitOverride]
         for tok in args:
             if tok.startswith("-"):
                 continue
             if tok in self.commands:
                 # Pop the prompt argument so it doesn't consume `tok`.
                 self.params = [
-                    p for p in self.params if not (
-                        isinstance(p, click.Argument) and p.name == "prompt"
-                    )
+                    p
+                    for p in self.params
+                    if not (isinstance(p, click.Argument) and p.name == "prompt")
                 ]
             break
         return super().parse_args(ctx, args)
@@ -652,11 +652,17 @@ def tui(  # noqa: PLR0913 — Click options are individual params on purpose.
         supervise=supervise,
         full_screen=full_screen,
         show_thinking=show_thinking,
-        log_level=log_level,
+        log_level=cast(
+            "Literal['DEBUG', 'INFO', 'WARNING', 'ERROR']",
+            log_level.upper(),
+        ),
     )
     try:
         exit_code = asyncio.run(run_tui(cfg))
     except KeyboardInterrupt:
+        # 130 is the conventional shell exit code for SIGINT; the user
+        # hit Ctrl-C, that's expected and not worth a traceback.
+        _log.debug("tui interrupted by SIGINT", exc_info=True)
         exit_code = 130
     raise SystemExit(exit_code)
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -54,6 +55,8 @@ from obscura.cli.tui.state import (
     ToolApprovalRequest,
     TUIState,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ApprovalAction",
@@ -109,6 +112,13 @@ def _format_args(tool_input: dict[str, object]) -> str:
     try:
         body = json.dumps(tool_input, indent=2, default=str, sort_keys=True)
     except (TypeError, ValueError):
+        # Tool inputs are usually JSON-clean but custom objects can
+        # slip through; the overlay falls back to ``repr`` to keep
+        # the modal usable. Logged so deep logs surface the cause.
+        logger.debug(
+            "tui overlays: json.dumps failed for tool_input, falling back to repr",
+            exc_info=True,
+        )
         body = repr(tool_input)
     return _truncate_lines(body, max_lines=20)
 
@@ -703,7 +713,9 @@ class PlanApprovalOverlay:
         finally:
             # Only clear the banner if it's still our plan-approval banner.
             current = self._state.banner
-            if current is not None and current.kind == "plan_approval":
+            # ``state.banner`` is typed non-Optional but mutators
+            # may set it to None mid-flow; the guard is defensive.
+            if current is not None and current.kind == "plan_approval":  # pyright: ignore[reportUnnecessaryComparison]
                 self._state.banner = None
             self._fut = None
 

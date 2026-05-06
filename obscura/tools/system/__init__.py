@@ -706,7 +706,8 @@ class Registry:
                     # registered it — calling it will fail. Warn the model
                     # so it can stop and tell the user how to fix it.
                     if phase3_on and not is_effectively_core(
-                        str(spec.name), all_names,
+                        str(spec.name),
+                        all_names,
                     ):
                         uncallable_warnings.append(str(spec.name))
 

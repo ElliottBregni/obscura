@@ -61,9 +61,7 @@ def _make_session(
         metadata=metadata,
         status=SimpleNamespace(value="completed"),
         created_at=base,
-        updated_at=datetime(
-            2026, 5, 1, 12, updated_offset_minutes, 0, tzinfo=UTC
-        ),
+        updated_at=datetime(2026, 5, 1, 12, updated_offset_minutes, 0, tzinfo=UTC),
     )
 
 
@@ -77,9 +75,7 @@ def _make_event(kind: AgentEventKind, **payload: Any) -> SimpleNamespace:
 
 
 class TestRenderSessionPage:
-    def test_basic_session_renders_with_full_frontmatter(
-        self, tmp_path: Path
-    ) -> None:
+    def test_basic_session_renders_with_full_frontmatter(self, tmp_path: Path) -> None:
         sync = VaultSync(vault_dir=tmp_path)
         sess = _make_session(
             "sess-1",
@@ -121,9 +117,7 @@ class TestRenderSessionPage:
         assert "[[../../agent/goals/g-events]]" in body
         assert "Refactor the event store" in body
 
-    def test_session_with_events_counts_turns_and_tools(
-        self, tmp_path: Path
-    ) -> None:
+    def test_session_with_events_counts_turns_and_tools(self, tmp_path: Path) -> None:
         sync = VaultSync(vault_dir=tmp_path)
         sess = _make_session("sess-2")
 
@@ -174,9 +168,7 @@ class TestRenderSessionPage:
 
 
 class TestExportSessionPages:
-    def test_writes_one_file_per_session_and_sweeps_stale(
-        self, tmp_path: Path
-    ) -> None:
+    def test_writes_one_file_per_session_and_sweeps_stale(self, tmp_path: Path) -> None:
         sync = VaultSync(vault_dir=tmp_path)
         sessions_dir = tmp_path / "shared" / "sessions"
         sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -236,9 +228,7 @@ class TestScanDeepLogTail:
         assert stats["errors"] == 0
         assert stats["by_tool"] == {}
 
-    def test_counts_by_kind_and_tool(
-        self, tmp_path: Path
-    ) -> None:
+    def test_counts_by_kind_and_tool(self, tmp_path: Path) -> None:
         log_dir = tmp_path / ".obscura" / "logs"
         log_dir.mkdir(parents=True)
         log_path = log_dir / "deep.jsonl"
@@ -292,7 +282,9 @@ class TestExportSessionDigest:
 
         sync = VaultSync(vault_dir=tmp_path / "vault")
         sessions = [
-            _make_session("sess-x", summary="Investigate vault", updated_offset_minutes=5),
+            _make_session(
+                "sess-x", summary="Investigate vault", updated_offset_minutes=5
+            ),
             _make_session("sess-y", summary="Fix login bug", updated_offset_minutes=10),
         ]
 
@@ -356,6 +348,4 @@ class TestExportSessionLogs:
         # 1 per-session page + 1 digest = 2.
         assert count == 2
         assert (tmp_path / "v" / "shared" / "sessions" / "only-one.md").exists()
-        assert (
-            tmp_path / "v" / "shared" / "sessions" / "recent-activity.md"
-        ).exists()
+        assert (tmp_path / "v" / "shared" / "sessions" / "recent-activity.md").exists()

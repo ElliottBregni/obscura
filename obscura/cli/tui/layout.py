@@ -195,7 +195,19 @@ def build_layout(
     # with ``IndexError: list index out of range`` from
     # ``fragment_lines[lineno]`` in controls.py.
     def _last_line_index() -> int:
-        nl = sum(txt.count("\n") for _, txt in transcript_text(state))
+        # FormattedText's element shape is OneStyleAndTextTuple — at
+        # runtime always a 2- or 3-tuple where index 1 is the text.
+        # Pyright's stubs widen it past simple unpacking, so iterate
+        # by index instead and let pyright stay happy.
+        nl = 0
+        for tup in transcript_text(state):
+            text = tup[1] if len(tup) > 1 else ""
+            # ``text`` is typed as ``str`` here but
+            # OneStyleAndTextTuple is a positional alias whose middle
+            # field can technically be a callable in some
+            # prompt-toolkit versions; the guard keeps us safe.
+            if isinstance(text, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+                nl += text.count("\n")
         return max(0, nl)
 
     transcript_control = FormattedTextControl(

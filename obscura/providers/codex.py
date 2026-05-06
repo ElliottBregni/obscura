@@ -450,7 +450,8 @@ class CodexBackend(BackendToolHostMixin):
                         if total is not None:
                             usage_data = {
                                 "input_tokens": getattr(total, "input_tokens", 0) or 0,
-                                "output_tokens": getattr(total, "output_tokens", 0) or 0,
+                                "output_tokens": getattr(total, "output_tokens", 0)
+                                or 0,
                                 "cached_input_tokens": getattr(
                                     total,
                                     "cached_input_tokens",

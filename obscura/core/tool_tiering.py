@@ -159,7 +159,9 @@ def effective_core_names(
     return frozenset(matched)
 
 
-def is_effectively_core(tool_name: str, all_tool_names: Iterable[str] | None = None) -> bool:
+def is_effectively_core(
+    tool_name: str, all_tool_names: Iterable[str] | None = None
+) -> bool:
     """Return True if ``tool_name`` is core OR matches an EXTRA_CORE pattern."""
     if tool_name in CORE_TOOL_NAMES:
         return True
@@ -235,7 +237,7 @@ def mark_discovered(tool_name: str) -> None:
     discovered.add(tool_name)
 
 
-@contextmanager
+@contextmanager  # pyright: ignore[reportDeprecated]
 def bind_discovered_tools() -> Iterator[set[str]]:
     """Bind a fresh per-task discovery set for the duration of the with-block.
 
@@ -262,7 +264,11 @@ def bind_discovered_tools() -> Iterator[set[str]]:
         try:
             DISCOVERED_TOOLS.reset(token)
         except ValueError:
-            pass
+            logger.debug(
+                "DISCOVERED_TOOLS.reset: token not from this context — "
+                "the with-block's frame is already gone, no-op",
+                exc_info=True,
+            )
 
 
 def filter_visible(tools: list[ToolSpec]) -> list[ToolSpec]:

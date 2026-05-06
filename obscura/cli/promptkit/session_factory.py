@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """obscura.cli.promptkit.session_factory — PromptSession assembly + prompts.
 
 Wires the highlighter, completer, key bindings, style, and status
@@ -89,7 +90,7 @@ class PromptHUDState:
     )
 
 
-def _build_prompt_message_html(
+def _build_prompt_message_html(  # pyright: ignore[reportUnusedFunction]
     width: int,
     model_text: str,
     cfg: PromptLayoutConfig,

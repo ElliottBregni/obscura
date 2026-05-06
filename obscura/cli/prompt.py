@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """obscura.cli.prompt — back-compat shim for the prompt-toolkit widget kit.
 
 The widgets that used to live here are now in ``obscura.cli.promptkit``.

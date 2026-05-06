@@ -174,7 +174,8 @@ def create_deep_log_sink(name: str | None = None) -> DeepLogSink:
     if chosen in ("none", "null", "off"):
         return NullSink()
     logger.warning(
-        "unknown OBSCURA_DEEP_LOG_SINK=%r, falling back to jsonl", raw,
+        "unknown OBSCURA_DEEP_LOG_SINK=%r, falling back to jsonl",
+        raw,
     )
     return JSONLSink()
 

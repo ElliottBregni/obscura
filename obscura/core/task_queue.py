@@ -336,7 +336,9 @@ class TaskQueue:
                 stale_threshold,
             ]
             if project_root is not None:
-                where += "\n                     AND (project_root = ? OR project_root = '')"
+                where += (
+                    "\n                     AND (project_root = ? OR project_root = '')"
+                )
                 params.append(project_root)
             where += "\n                   ORDER BY priority ASC, created_at ASC"
             where += "\n                   LIMIT 50"

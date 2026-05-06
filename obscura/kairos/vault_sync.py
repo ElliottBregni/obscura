@@ -85,9 +85,20 @@ def _run_async[T](coro: Awaitable[T]) -> T:
     thread's own loop. Without a running loop, fall back to
     ``asyncio.run`` (the simple path that tests / CLI scripts hit).
     """
+    in_loop = True
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        # No running loop on this thread — the simple path. Logged at
+        # debug because ``RuntimeError`` from ``get_running_loop`` is a
+        # signal, not a failure; we explicitly distinguish the two
+        # paths and want the choice to show up in deep logs.
+        logger.debug(
+            "_run_async: no running loop, using asyncio.run",
+            exc_info=True,
+        )
+        in_loop = False
+    if not in_loop:
         return asyncio.run(cast("Any", coro))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(asyncio.run, cast("Any", coro))

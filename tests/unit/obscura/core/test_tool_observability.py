@@ -144,4 +144,6 @@ def test_observer_exception_does_not_break_emit(
     # The non-broken observer still got the stats.
     assert len(after) == 1
     # And the breakage was logged at debug level.
-    assert any("observer" in r.message and "raised" in r.message for r in caplog.records)
+    assert any(
+        "observer" in r.message and "raised" in r.message for r in caplog.records
+    )

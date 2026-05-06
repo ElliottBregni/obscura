@@ -111,7 +111,7 @@ class KeywordHighlighter(Processor):
         return Transformation(cast(Any, new_fragments))
 
 
-def _keyword_gradient_styles() -> dict[str, str]:
+def _keyword_gradient_styles() -> dict[str, str]:  # pyright: ignore[reportUnusedFunction]
     """Build style entries for the gradient character classes."""
     styles: dict[str, str] = {}
     for i, color in enumerate(_GRADIENT):

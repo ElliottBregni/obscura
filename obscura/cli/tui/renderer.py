@@ -37,6 +37,7 @@ Design notes
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -62,6 +63,8 @@ from obscura.cli.tui.state import (
 )
 from obscura.core.enums.agent import AgentEventKind
 from obscura.core.types import AgentEvent
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["TUIRenderer"]
 
@@ -271,7 +274,7 @@ class TUIRenderer:
             self._handle_status(rendered)
         elif isinstance(rendered, Notification):
             self._handle_notification(rendered)
-        elif isinstance(rendered, Banner):
+        elif isinstance(rendered, Banner):  # pyright: ignore[reportUnnecessaryIsInstance]
             self._handle_banner(rendered)
 
         # Cheap, idempotent — drop expired toasts on every tick.
@@ -717,5 +720,9 @@ class TUIRenderer:
         except Exception:
             # The Application owns the callback; if it raises mid-frame
             # the renderer must not propagate or it would corrupt the
-            # event loop.
-            pass
+            # event loop. Logged at debug so deep logs still surface
+            # the misbehaving invalidate callback.
+            logger.debug(
+                "tui renderer: invalidate callback raised",
+                exc_info=True,
+            )

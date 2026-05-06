@@ -311,6 +311,7 @@ class ObscuraTUIApp:
             )
         except (EOFError, KeyboardInterrupt):
             # Clean exit — Ctrl-D / Ctrl-C at the top-level binding.
+            logger.debug("tui: exited via top-level Ctrl-C/Ctrl-D", exc_info=True)
             self._exit_code = 0
         except Exception:
             logger.exception("tui: application crashed")
@@ -972,6 +973,10 @@ class ObscuraTUIApp:
                         self._handle.session.list_tools(),
                     )
                 except Exception:
+                    logger.debug(
+                        "tui: list_tools failed during agents-tick",
+                        exc_info=True,
+                    )
                     new_tool_count = self._state.hud.tool_count
                 if new_tool_count != self._state.hud.tool_count:
                     self._state.hud.tool_count = new_tool_count
@@ -981,6 +986,10 @@ class ObscuraTUIApp:
                     self._state.hud.mcp_servers = new_mcp
                     self._invalidate()
         except asyncio.CancelledError:
+            # Background tick task got cancelled (TUI shutting down).
+            # Logged at debug so deep logs show the lifecycle; nothing
+            # actionable for the user.
+            logger.debug("tui: tick task cancelled", exc_info=True)
             return
 
     async def _spinner_tick(self) -> None:
@@ -994,6 +1003,10 @@ class ObscuraTUIApp:
                 live.spinner_idx = (live.spinner_idx + 1) % 1024
                 self._invalidate()
         except asyncio.CancelledError:
+            # Background tick task got cancelled (TUI shutting down).
+            # Logged at debug so deep logs show the lifecycle; nothing
+            # actionable for the user.
+            logger.debug("tui: tick task cancelled", exc_info=True)
             return
 
     async def _reveal_tick(self) -> None:
@@ -1056,6 +1069,10 @@ class ObscuraTUIApp:
                 if drained or advanced:
                     self._invalidate()
         except asyncio.CancelledError:
+            # Background tick task got cancelled (TUI shutting down).
+            # Logged at debug so deep logs show the lifecycle; nothing
+            # actionable for the user.
+            logger.debug("tui: tick task cancelled", exc_info=True)
             return
 
     @staticmethod
@@ -1075,6 +1092,10 @@ class ObscuraTUIApp:
                 if removed:
                     self._invalidate()
         except asyncio.CancelledError:
+            # Background tick task got cancelled (TUI shutting down).
+            # Logged at debug so deep logs show the lifecycle; nothing
+            # actionable for the user.
+            logger.debug("tui: tick task cancelled", exc_info=True)
             return
 
     # ------------------------------------------------------------------

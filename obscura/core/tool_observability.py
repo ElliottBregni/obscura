@@ -77,7 +77,8 @@ def unregister_observer(callback: Callable[[TurnToolStats], None]) -> None:
         _observers.remove(callback)
     except ValueError:
         logger.debug(
-            "tool_observability: unregister %r not in observer list", callback,
+            "tool_observability: unregister %r not in observer list",
+            callback,
         )
         return
 
@@ -100,5 +101,7 @@ def emit_turn_tool_stats(stats: TurnToolStats) -> None:
             cb(stats)
         except Exception:
             logger.debug(
-                "tool_observability: observer %r raised", cb, exc_info=True,
+                "tool_observability: observer %r raised",
+                cb,
+                exc_info=True,
             )

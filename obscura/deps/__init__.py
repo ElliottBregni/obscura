@@ -91,9 +91,7 @@ class ClientFactory:
             else None
         )
 
-        api_extras: SessionExtras = (
-            {"model_alias": model_alias} if model_alias else {}
-        )
+        api_extras: SessionExtras = {"model_alias": model_alias} if model_alias else {}
         config = SessionConfig(
             backend=backend,
             model=model,

@@ -88,13 +88,58 @@ _BINARY_QUESTION_RE = re.compile(
 # on "can you use it", "is the file there", etc.
 _BINARY_QUESTION_STOPWORDS: frozenset[str] = frozenset(
     {
-        "it", "that", "this", "the", "a", "an", "any", "some", "one",
-        "to", "for", "on", "at", "in", "of", "with", "by", "from",
-        "i", "me", "you", "we", "they", "he", "she",
-        "yes", "no", "ok", "okay", "sure",
-        "code", "tool", "tools", "files", "data", "stuff", "things",
-        "been", "have", "had", "is", "are", "was", "were", "do", "does",
-        "did", "can", "could", "should", "would", "will",
+        "it",
+        "that",
+        "this",
+        "the",
+        "a",
+        "an",
+        "any",
+        "some",
+        "one",
+        "to",
+        "for",
+        "on",
+        "at",
+        "in",
+        "of",
+        "with",
+        "by",
+        "from",
+        "i",
+        "me",
+        "you",
+        "we",
+        "they",
+        "he",
+        "she",
+        "yes",
+        "no",
+        "ok",
+        "okay",
+        "sure",
+        "code",
+        "tool",
+        "tools",
+        "files",
+        "data",
+        "stuff",
+        "things",
+        "been",
+        "have",
+        "had",
+        "is",
+        "are",
+        "was",
+        "were",
+        "do",
+        "does",
+        "did",
+        "can",
+        "could",
+        "should",
+        "would",
+        "will",
     },
 )
 
@@ -234,8 +279,8 @@ def _build_python_import_check(m: Match[str]) -> PreflightMatch | None:
         tool_input={
             "command": (
                 f"python3 -c 'import importlib, sys; "
-                f"m = importlib.import_module(\"{quoted}\"); "
-                f"print(getattr(m, \"__version__\", \"unknown\"))' 2>&1"
+                f'm = importlib.import_module("{quoted}"); '
+                f'print(getattr(m, "__version__", "unknown"))\' 2>&1'
             ),
         },
         reason=(

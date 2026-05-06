@@ -80,7 +80,7 @@ def _expand_thinking_action() -> None:
         logger.debug("suppressed exception in _expand_thinking_action", exc_info=True)
 
 
-def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:
+def _make_key_bindings(expand_key: str = "c-p") -> KeyBindings:  # pyright: ignore[reportUnusedFunction]
     """Enter submits, Escape+Enter inserts newline for multiline.
 
     expand_key may be a prompt_toolkit key spec (default Ctrl-P -> 'c-p').

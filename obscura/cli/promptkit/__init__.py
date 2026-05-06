@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """obscura.cli.promptkit — shared prompt_toolkit widget kit.
 
 This package holds the prompt_toolkit-based widget building blocks that

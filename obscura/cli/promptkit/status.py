@@ -133,7 +133,7 @@ class PromptStatus:
     task_count: int = 0
 
 
-def _get_git_branch() -> str:
+def _get_git_branch() -> str:  # pyright: ignore[reportUnusedFunction]
     """Return the current git branch name, or '' if not in a repo."""
     try:
         result = subprocess.run(
@@ -215,7 +215,7 @@ def print_status_banner(status: PromptStatus) -> None:
         )
 
 
-def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:
+def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:  # pyright: ignore[reportUnusedFunction]
     """Build the bottom toolbar: status line + optional agent panel.
 
     Line 1: session · model · context % · hints

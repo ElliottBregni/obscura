@@ -65,6 +65,10 @@ def _extract_sdk_tool_result(data: Any) -> tuple[str, bool, bool]:
             try:
                 text = json.dumps(result_dict)
             except (TypeError, ValueError):
+                logger.debug(
+                    "_extract_sdk_tool_result: json.dumps(result dict) failed",
+                    exc_info=True,
+                )
                 text = str(result_dict)
     else:
         # Pydantic-style model (Copilot SDK ``ToolExecutionCompleteResult``):
@@ -79,6 +83,10 @@ def _extract_sdk_tool_result(data: Any) -> tuple[str, bool, bool]:
             try:
                 text = json.dumps(raw_result, default=str)
             except (TypeError, ValueError):
+                logger.debug(
+                    "_extract_sdk_tool_result: json.dumps(model) failed",
+                    exc_info=True,
+                )
                 text = str(cast(object, raw_result))
 
     return text or "", True, bool(success)

@@ -25,6 +25,7 @@ Design rules
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -54,6 +55,8 @@ from obscura.cli.tui.state import (
 )
 from obscura.core.enums.agent import AgentEventKind
 from obscura.core.types import AgentEvent
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "format_banner",
@@ -180,6 +183,13 @@ def _format_tool_input(name: str, input_dict: dict[str, Any]) -> str:
     try:
         compact = json.dumps(input_dict, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
+        # Tool inputs are usually JSON-clean but pydantic models /
+        # custom objects can slip through. Falling back to ``repr``
+        # keeps the renderer alive; deep logs surface the cause.
+        logger.debug(
+            "tui formatter: json.dumps failed for tool input, falling back to repr",
+            exc_info=True,
+        )
         compact = repr(input_dict)
     if len(compact) > 120:
         compact = compact[:117] + "..."

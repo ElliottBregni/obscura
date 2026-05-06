@@ -47,7 +47,8 @@ def _spec(name: str) -> ToolSpec:
 # logic copied into copilot.py and claude.py session builders.
 def _phase3_filter_copilot(tools: list[ToolSpec]) -> list[ToolSpec]:
     return [
-        t for t in tools
+        t
+        for t in tools
         if t.name in CORE_TOOL_NAMES
         or (
             t.name.startswith("mcp__")
@@ -68,9 +69,9 @@ def _phase3_filter_claude(tools: list[ToolSpec]) -> list[ToolSpec]:
 
 def test_copilot_filter_keeps_core_drops_deferred() -> None:
     tools = [
-        _spec("read_text_file"),       # core
-        _spec("jira_create_issue"),    # deferred
-        _spec("grep_files"),           # core
+        _spec("read_text_file"),  # core
+        _spec("jira_create_issue"),  # deferred
+        _spec("grep_files"),  # core
     ]
     kept = _phase3_filter_copilot(tools)
     assert sorted(t.name for t in kept) == ["grep_files", "read_text_file"]
@@ -79,9 +80,9 @@ def test_copilot_filter_keeps_core_drops_deferred() -> None:
 def test_copilot_filter_keeps_mcp_aliases_for_core_names() -> None:
     """mcp__obs__run_shell should survive — its suffix matches a core name."""
     tools = [
-        _spec("mcp__obs__run_shell"),    # core via suffix
-        _spec("mcp__jira__list_issues"), # deferred suffix
-        _spec("read_text_file"),         # core direct
+        _spec("mcp__obs__run_shell"),  # core via suffix
+        _spec("mcp__jira__list_issues"),  # deferred suffix
+        _spec("read_text_file"),  # core direct
     ]
     kept = _phase3_filter_copilot(tools)
     names = sorted(t.name for t in kept)
@@ -111,7 +112,10 @@ def test_claude_filter_keeps_only_core() -> None:
 
 def _phase3_enabled() -> bool:
     return os.environ.get("OBSCURA_PHASE3_SDK_TIER", "").strip().lower() in {
-        "1", "true", "yes", "on",
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 

@@ -149,9 +149,7 @@ class TestGoalExportStructure:
         assert fm["created_at"] == "2026-01-01T00:00:00"
         assert fm["updated_at"] == "2026-01-02T00:00:00"
 
-    def test_stale_goal_pages_swept_after_writes(
-        self, tmp_path: Path
-    ) -> None:
+    def test_stale_goal_pages_swept_after_writes(self, tmp_path: Path) -> None:
         """A goal page that was exported in a prior run but is no longer
         in either source should be removed AFTER the live set is written
         (so any in-flight reader sees a consistent state)."""
@@ -163,9 +161,16 @@ class TestGoalExportStructure:
         stale.write_text("---\nid: old-goal\n---\n")
         # Live goal that should remain.
         live_goal = SimpleNamespace(
-            id="live", title="Live", status="active", priority="medium",
-            progress=0, created="", updated="", acceptance_criteria=(),
-            tasks=(), body="",
+            id="live",
+            title="Live",
+            status="active",
+            priority="medium",
+            progress=0,
+            created="",
+            updated="",
+            acceptance_criteria=(),
+            tasks=(),
+            body="",
         )
 
         class _FakeBoard:
@@ -201,7 +206,12 @@ class TestQueueSnapshotBacklinks:
                 return {"50": 2}
 
         fake_tasks = [
-            {"task_id": "t1", "subject": "Fix login", "goal_id": "g-auth", "priority": 50},
+            {
+                "task_id": "t1",
+                "subject": "Fix login",
+                "goal_id": "g-auth",
+                "priority": 50,
+            },
             {"task_id": "t2", "subject": "Write tests", "goal_id": "", "priority": 50},
         ]
 

@@ -81,7 +81,9 @@ def check_stream_guards(
     total_calls = sum(log.values())
     if total_calls >= MAX_TOTAL_CALLS:
         logger.warning(
-            "Tool budget exhausted for %s after %d calls", name, total_calls,
+            "Tool budget exhausted for %s after %d calls",
+            name,
+            total_calls,
         )
         return {
             "ok": False,
@@ -99,7 +101,9 @@ def check_stream_guards(
     seen = log.get(cache_key, 0)
     if seen >= MAX_DUPLICATE_CALLS:
         logger.warning(
-            "Duplicate tool call refused: %s (seen %d times)", name, seen,
+            "Duplicate tool call refused: %s (seen %d times)",
+            name,
+            seen,
         )
         return {
             "ok": False,
@@ -149,4 +153,9 @@ def bind_stream_log() -> Generator[dict[tuple[str, str], int]]:
         try:
             STREAM_TOOL_LOG.reset(token)
         except ValueError:
-            pass
+            logger.debug(
+                "STREAM_TOOL_LOG.reset: token not from this context — "
+                "async generator finalised in a different Context, "
+                "no-op",
+                exc_info=True,
+            )

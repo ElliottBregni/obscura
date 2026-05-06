@@ -829,9 +829,7 @@ class OpenAIBackend(BackendToolHostMixin):
                     backend="openai",
                     registry_total=registry_total,
                     core_count=sum(1 for n in sent_names if n in CORE_TOOL_NAMES),
-                    discovered_count=sum(
-                        1 for n in sent_names if n in discovered_set
-                    ),
+                    discovered_count=sum(1 for n in sent_names if n in discovered_set),
                     sent_count=len(tools_to_send),
                     dropped=dropped_names,
                 ),
@@ -1004,9 +1002,7 @@ class OpenAIBackend(BackendToolHostMixin):
                     backend="openai",
                     registry_total=registry_total,
                     core_count=sum(1 for n in sent_names if n in CORE_TOOL_NAMES),
-                    discovered_count=sum(
-                        1 for n in sent_names if n in discovered_set
-                    ),
+                    discovered_count=sum(1 for n in sent_names if n in discovered_set),
                     sent_count=len(tools_to_send),
                     dropped=dropped_names,
                 ),

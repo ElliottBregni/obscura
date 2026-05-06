@@ -141,7 +141,7 @@ class TranscriptEntry(BaseModel):
     kind: TranscriptKind
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    runs: list[StyledRun] = Field(default_factory=list)
+    runs: list[StyledRun] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
     """The styled text content. Each run becomes a (style, text) tuple."""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -353,7 +353,7 @@ class HUDState(BaseModel):
 
     # Activity counters
     task_count: int = 0
-    running_agents: list[RunningAgentSnapshot] = Field(default_factory=list)
+    running_agents: list[RunningAgentSnapshot] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Capability surface — tools registered with the session and MCP
     # servers connected for it. Populated at app startup and refreshed
@@ -390,13 +390,13 @@ class TUIState(BaseModel):
 
     # Permanent scrollback. Append-only; the layout truncates to the
     # configured retention size before rendering.
-    transcript: list[TranscriptEntry] = Field(default_factory=list)
+    transcript: list[TranscriptEntry] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Ephemeral spinner / thinking-preview row.
     live: LiveRegionState = Field(default_factory=LiveRegionState)
 
     # Auto-dismissing toast stack. Bottom-most is newest.
-    notifications: list[NotificationItem] = Field(default_factory=list)
+    notifications: list[NotificationItem] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
 
     # Sticky callout (None = no banner).
     banner: BannerState | None = None

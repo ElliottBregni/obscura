@@ -1,3 +1,4 @@
+# pyright: reportPrivateUsage=false
 """obscura.cli.promptkit.style — prompt_toolkit Style + small helpers.
 
 Owns the shared ``PROMPT_STYLE`` (merging the keyword gradient classes
@@ -45,7 +46,7 @@ PROMPT_STYLE = Style.from_dict(
 )
 
 
-def _make_prompt_message() -> HTML:
+def _make_prompt_message() -> HTML:  # pyright: ignore[reportUnusedFunction]
     return HTML("<prompt>\u276f </prompt>")
 
 

@@ -61,9 +61,7 @@ class TestSourceHardening:
         chunks = asyncio.run(_drain(bridge))
         text_chunks = [c for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
         assert text_chunks == []
-        assert any(
-            "missing delta_content" in rec.message for rec in caplog.records
-        )
+        assert any("missing delta_content" in rec.message for rec in caplog.records)
 
     def test_bare_string_event_still_works(self) -> None:
         """Codex et al. emit bare-string events as a degenerate path."""
@@ -99,9 +97,7 @@ class TestPrefixExtensionGuard:
         # Reassembled, must be the final cumulative content — no duplication.
         assert "".join(texts) == "# A bc def"
         # And the warning fired on the second cumulative delta.
-        assert any(
-            "cumulative snapshot" in rec.message for rec in caplog.records
-        )
+        assert any("cumulative snapshot" in rec.message for rec in caplog.records)
 
     def test_independent_chunks_are_not_falsely_collapsed(self) -> None:
         """If the next delta does NOT start with the prior cumulative text,

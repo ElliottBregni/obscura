@@ -61,9 +61,7 @@ class TestEnqueueIdempotency:
         b = isolated_queue.enqueue("Fix login bug")
         assert a != b
 
-    def test_same_dedupe_key_returns_existing(
-        self, isolated_queue: TaskQueue
-    ) -> None:
+    def test_same_dedupe_key_returns_existing(self, isolated_queue: TaskQueue) -> None:
         key = TaskQueue.derive_dedupe_key("/repo", "g1", "Fix login bug")
         a = isolated_queue.enqueue("Fix login bug", dedupe_key=key)
         b = isolated_queue.enqueue("Fix login bug", dedupe_key=key)
