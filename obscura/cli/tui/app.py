@@ -51,7 +51,6 @@ from obscura.cli.tui.state import (
 from obscura.cli.renderer.channels import Severity
 from obscura.core.db_factory import DatabaseFactory
 from obscura.core.enums.agent import AgentEventKind
-from obscura.core.event_store import EventStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +86,25 @@ class ObscuraTUIApp:
             self._state, invalidate=self._invalidate
         )
 
+        # A persistent REPLContext drives BOTH slash-command dispatch and
+        # the input completer's ``@command``/``$skill`` discovery. Built
+        # once at startup; ``REPLContext.discover_*`` methods are cheap
+        # (lazy file-walks via inner loaders) and safe to call per
+        # keystroke for completion.
+        self._slash_event_store = DatabaseFactory.create_event_store()
+        self._repl_ctx: REPLContext = REPLContext(
+            client=handle.session,
+            store=self._slash_event_store,
+            session_id=handle.session_id,
+            backend=handle.config.backend,
+            model=handle.config.model,
+            system_prompt=handle.config.system,
+            max_turns=handle.config.max_turns,
+            tools_enabled=handle.config.tools_enabled,
+            mcp_configs=[],
+            confirm_enabled=handle.config.confirm_enabled,
+        )
+
         # Overlays first so we can attach their callables onto the engine
         # handle before the layout consults them. ``command_names`` is a
         # zero-arg callable so the palette picks up ``set_secret_menu_visibility``
@@ -97,8 +115,15 @@ class ObscuraTUIApp:
         )
         self._wire_overlay_callbacks()
 
-        # Layout consumes a slash-command completer + an on_submit hook.
-        self._completer = SlashCommandCompleter(_COMMAND_COMPLETIONS)
+        # Layout consumes the completer + an on_submit hook. The
+        # completer is wired with @command and $skill suppliers so tab
+        # completion works for the full input grammar (slash / at /
+        # dollar) — matching the bordered REPL.
+        self._completer = SlashCommandCompleter(
+            _COMMAND_COMPLETIONS,
+            at_command_names=self._repl_ctx.discover_at_commands,
+            dollar_skill_names=self._repl_ctx.discover_dollar_skills,
+        )
         self._layout = build_layout(
             self._state,
             completer=self._completer,
@@ -110,10 +135,6 @@ class ObscuraTUIApp:
         self._background_tasks: list[asyncio.Task[None]] = []
         self._stream_task: asyncio.Task[None] | None = None
         self._exit_code: int = 0
-
-        # Lazy-initialised on first slash command — avoids creating a DB
-        # connection for every TUI launch when the user never runs one.
-        self._slash_event_store: EventStoreProtocol | None = None
 
     # ------------------------------------------------------------------
     # Public surface
@@ -548,29 +569,16 @@ class ObscuraTUIApp:
         self._invalidate()
 
     def _make_repl_context(self) -> REPLContext:
-        """Build a minimal :class:`REPLContext` for slash-command dispatch.
+        """Return the persistent :class:`REPLContext` shared across the app.
 
-        The TUI doesn't replay the full :class:`REPLContext` lifecycle —
-        it just synthesizes the fields :func:`handle_command` reads when
-        invoking a slash command. Anything a command writes back onto the
-        context is intentionally discarded; commands that *need* to
-        mutate session state (``/backend``, ``/clear``) still reach the
-        live :class:`AgentSession` via ``ctx.client``.
+        Built once in :meth:`__init__`; reused for both slash-command
+        dispatch and tab-completion (``@command``/``$skill`` discovery).
+        Commands that mutate session state (``/backend``, ``/clear``)
+        still reach the live :class:`AgentSession` via ``ctx.client`` —
+        their mutations land on the shared context and are visible to
+        subsequent commands within the same TUI session.
         """
-        if self._slash_event_store is None:
-            self._slash_event_store = DatabaseFactory.create_event_store()
-        return REPLContext(
-            client=self._handle.session,
-            store=self._slash_event_store,
-            session_id=self._handle.session_id,
-            backend=self._handle.config.backend,
-            model=self._handle.config.model,
-            system_prompt=self._handle.config.system,
-            max_turns=self._handle.config.max_turns,
-            tools_enabled=self._handle.config.tools_enabled,
-            mcp_configs=[],
-            confirm_enabled=self._handle.config.confirm_enabled,
-        )
+        return self._repl_ctx
 
     # ------------------------------------------------------------------
     # Awaitable typing helper (kept for clarity at call sites)
