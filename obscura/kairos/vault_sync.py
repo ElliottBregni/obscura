@@ -462,7 +462,12 @@ class VaultSync:
             )
 
     def _ingest_task(self, meta: FileMeta) -> None:
-        """Create a task from a user-zone markdown file."""
+        """Create a task from a user-zone markdown file.
+
+        Vault sync runs on every tick over the same files, so the enqueue
+        is keyed on the source path (the natural fingerprint here). Two
+        ticks → one open task, not two duplicates.
+        """
         q = TaskQueue()
         subject = str(
             meta.frontmatter.get("title", meta.path.stem.replace("-", " ").title())
@@ -470,12 +475,16 @@ class VaultSync:
         priority_map = {"critical": 0, "high": 25, "medium": 50, "low": 75}
         priority = priority_map.get(str(meta.frontmatter.get("priority", "medium")), 50)
         goal_id = str(meta.frontmatter.get("goal_id", ""))
+        # Each markdown file maps to exactly one open task — key on
+        # absolute path (resilient to title edits between ticks).
+        dedupe_key = f"vault-task|{meta.path.resolve()}"
 
         q.enqueue(
             subject,
             description=meta.body,
             priority=priority,
             goal_id=goal_id,
+            dedupe_key=dedupe_key,
         )
         logger.debug("Vault ingest: created task '%s' from %s", subject, meta.path.name)
 

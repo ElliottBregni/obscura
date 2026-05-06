@@ -269,7 +269,13 @@ class GoalBoard:
         return updated
 
     def _auto_decompose(self, goal: Goal) -> None:
-        """Push acceptance criteria as tasks into the queue and link them."""
+        """Push acceptance criteria as tasks into the queue and link them.
+
+        Idempotent: re-running decomposition on the same goal returns the
+        existing task ids rather than creating new copies of every
+        criterion. Each criterion is keyed on
+        ``(project_root, goal_id, criterion-text)``.
+        """
         try:
             q = TaskQueue()
             priority = goal.priority_rank * 25  # critical=0, high=25, medium=50, low=75
@@ -286,6 +292,9 @@ class GoalBoard:
                     goal_id=goal.id,
                     blocked_by=blocked_by,
                     project_root=goal.project_root,
+                    dedupe_key=TaskQueue.derive_dedupe_key(
+                        goal.project_root, goal.id, criterion
+                    ),
                 )
                 task_ids.append(task_id)
                 prev_id = task_id
