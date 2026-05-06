@@ -7,17 +7,23 @@ backends to filter their per-turn tool payloads.
 
 from __future__ import annotations
 
+import os
 from typing import Any
+from unittest.mock import patch
 
 from obscura.core.tool_tiering import (
     CORE_TOOL_NAMES,
     DISCOVERED_TOOLS,
     bind_discovered_tools,
     deferred_listing,
+    effective_core_names,
     filter_visible,
     is_core,
+    is_effectively_core,
+    is_phase3_active,
     is_visible,
     mark_discovered,
+    parse_extra_core_patterns,
     split_by_tier,
 )
 from obscura.core.types import ToolSpec
@@ -206,3 +212,91 @@ def test_filter_visible_no_context_returns_all() -> None:
     tools = [_spec("read_text_file"), _spec("jira_create_issue")]
     visible = filter_visible(tools)
     assert len(visible) == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 env helpers (is_phase3_active, parse_extra_core_patterns,
+# effective_core_names, is_effectively_core)
+# ---------------------------------------------------------------------------
+
+
+def test_is_phase3_active_default_off() -> None:
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("OBSCURA_PHASE3_SDK_TIER", None)
+        assert is_phase3_active() is False
+
+
+def test_is_phase3_active_truthy_values() -> None:
+    for v in ("1", "true", "TRUE", "yes", "on"):
+        with patch.dict(os.environ, {"OBSCURA_PHASE3_SDK_TIER": v}):
+            assert is_phase3_active() is True
+
+
+def test_is_phase3_active_falsy_values() -> None:
+    for v in ("0", "false", "no", "off", ""):
+        with patch.dict(os.environ, {"OBSCURA_PHASE3_SDK_TIER": v}):
+            assert is_phase3_active() is False
+
+
+def test_parse_extra_core_patterns_empty() -> None:
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("OBSCURA_PHASE3_EXTRA_CORE", None)
+        assert parse_extra_core_patterns() == ()
+
+
+def test_parse_extra_core_patterns_strips_and_splits() -> None:
+    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": " jira_*, supabase_query ,, foo "}):
+        assert parse_extra_core_patterns() == ("jira_*", "supabase_query", "foo")
+
+
+def test_effective_core_names_with_no_extras_returns_core() -> None:
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("OBSCURA_PHASE3_EXTRA_CORE", None)
+        assert effective_core_names() == CORE_TOOL_NAMES
+
+
+def test_effective_core_names_includes_exact_extras() -> None:
+    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_create_issue,foo_bar"}):
+        result = effective_core_names()
+        assert "jira_create_issue" in result
+        assert "foo_bar" in result
+        # Core still in.
+        assert "read_text_file" in result
+
+
+def test_effective_core_names_expands_globs_with_universe() -> None:
+    universe = ["jira_create", "jira_view", "postman_run", "supabase_query"]
+    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_*,supabase_query"}):
+        result = effective_core_names(universe)
+        assert "jira_create" in result
+        assert "jira_view" in result
+        assert "supabase_query" in result
+        assert "postman_run" not in result
+
+
+def test_effective_core_names_drops_globs_without_universe() -> None:
+    """Without all_tool_names, globs can't be expanded — silently dropped."""
+    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_*"}):
+        result = effective_core_names()
+        # CORE only — glob couldn't expand.
+        assert result == CORE_TOOL_NAMES
+
+
+def test_is_effectively_core_for_core_tool() -> None:
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("OBSCURA_PHASE3_EXTRA_CORE", None)
+        assert is_effectively_core("read_text_file") is True
+
+
+def test_is_effectively_core_for_exact_extra() -> None:
+    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_create_issue"}):
+        assert is_effectively_core("jira_create_issue") is True
+        assert is_effectively_core("postman_run") is False
+
+
+def test_is_effectively_core_for_glob_match() -> None:
+    universe = ["jira_create", "jira_view", "postman_run"]
+    with patch.dict(os.environ, {"OBSCURA_PHASE3_EXTRA_CORE": "jira_*"}):
+        assert is_effectively_core("jira_create", universe) is True
+        assert is_effectively_core("jira_view", universe) is True
+        assert is_effectively_core("postman_run", universe) is False

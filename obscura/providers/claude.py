@@ -727,19 +727,25 @@ class ClaudeBackend(BackendToolHostMixin):
             # Off by default: the Claude Agent SDK commits the tool list
             # at session creation, so filtered-out tools are uncallable
             # until session recreate. Same caveat as Copilot.
-            import os as _os
+            #
+            # Set ``OBSCURA_PHASE3_EXTRA_CORE`` to keep specific tools
+            # callable even with phase-3 on (comma-separated names or
+            # fnmatch globs).
+            from obscura.core.tool_tiering import (
+                effective_core_names,
+                is_phase3_active,
+            )
 
-            if _os.environ.get("OBSCURA_PHASE3_SDK_TIER", "").strip().lower() in {
-                "1", "true", "yes", "on",
-            }:
+            if is_phase3_active():
                 from obscura.core.tool_observability import (
                     TurnToolStats,
                     emit_turn_tool_stats,
                 )
-                from obscura.core.tool_tiering import CORE_TOOL_NAMES
 
+                all_names = [t.name for t in filtered]
+                core_set = effective_core_names(all_names)
                 pre_phase3 = list(filtered)
-                filtered = [t for t in filtered if t.name in CORE_TOOL_NAMES]
+                filtered = [t for t in filtered if t.name in core_set]
                 kept_names = {t.name for t in filtered}
                 dropped = tuple(t.name for t in pre_phase3 if t.name not in kept_names)
                 emit_turn_tool_stats(

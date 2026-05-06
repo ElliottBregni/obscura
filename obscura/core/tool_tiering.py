@@ -37,18 +37,25 @@ deferred.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
     from obscura.core.types import ToolSpec
 
 
 logger = logging.getLogger(__name__)
+
+
+# Truthy tokens accepted by env-var gates — kept in one place so every
+# Phase-3 callsite agrees on what "on" means.
+_TRUTHY: frozenset[str] = frozenset({"1", "true", "yes", "on"})
 
 
 # Tools that always get full schemas in the system prompt.
@@ -94,6 +101,81 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset(
 def is_core(tool_name: str) -> bool:
     """Return True if the tool should appear with full schema in the prompt."""
     return tool_name in CORE_TOOL_NAMES
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 SDK-tier env helpers
+# ---------------------------------------------------------------------------
+
+
+def is_phase3_active() -> bool:
+    """Return True if ``OBSCURA_PHASE3_SDK_TIER`` is set truthy.
+
+    When on, Copilot/Claude session-time filters drop deferred tools
+    from the SDK config. ``tool_search`` uses this to warn the model
+    that surfaced deferred tools may be uncallable until the session
+    is recreated with the tool added to ``OBSCURA_PHASE3_EXTRA_CORE``.
+    """
+    return os.environ.get("OBSCURA_PHASE3_SDK_TIER", "").strip().lower() in _TRUTHY
+
+
+def parse_extra_core_patterns() -> tuple[str, ...]:
+    """Parse ``OBSCURA_PHASE3_EXTRA_CORE`` into a tuple of patterns.
+
+    Comma-separated. Each entry is either an exact tool name or a
+    :mod:`fnmatch` glob (``jira_*``, ``mcp__obs__*``). Empty / unset →
+    empty tuple.
+    """
+    raw = os.environ.get("OBSCURA_PHASE3_EXTRA_CORE", "").strip()
+    if not raw:
+        return ()
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
+def effective_core_names(
+    all_tool_names: Iterable[str] | None = None,
+) -> frozenset[str]:
+    """Return the effective core set: CORE plus any extras parsed from env.
+
+    When extras include glob patterns, ``all_tool_names`` is needed to
+    expand them. If a glob pattern is supplied without a tool universe
+    (e.g. for a quick is-this-name-core check) it's silently dropped —
+    callers that need glob support pass the universe explicitly.
+
+    Exact-name extras (no glob characters) are always included even
+    without ``all_tool_names``.
+    """
+    extras = parse_extra_core_patterns()
+    if not extras:
+        return CORE_TOOL_NAMES
+    matched: set[str] = set(CORE_TOOL_NAMES)
+    universe: list[str] = list(all_tool_names) if all_tool_names is not None else []
+    for pattern in extras:
+        if any(c in pattern for c in "*?["):
+            if universe:
+                matched.update(fnmatch.filter(universe, pattern))
+        else:
+            matched.add(pattern)
+    return frozenset(matched)
+
+
+def is_effectively_core(tool_name: str, all_tool_names: Iterable[str] | None = None) -> bool:
+    """Return True if ``tool_name`` is core OR matches an EXTRA_CORE pattern."""
+    if tool_name in CORE_TOOL_NAMES:
+        return True
+    extras = parse_extra_core_patterns()
+    if not extras:
+        return False
+    universe = list(all_tool_names) if all_tool_names is not None else [tool_name]
+    if tool_name not in universe:
+        universe = [*universe, tool_name]
+    for pattern in extras:
+        if any(c in pattern for c in "*?["):
+            if fnmatch.fnmatch(tool_name, pattern):
+                return True
+        elif tool_name == pattern:
+            return True
+    return False
 
 
 def split_by_tier(

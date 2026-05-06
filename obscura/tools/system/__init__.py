@@ -679,10 +679,17 @@ class Registry:
         # discovered so subsequent per-turn tool lists include the tool
         # for backends that filter by tier.
         if query.startswith("select:"):
-            from obscura.core.tool_tiering import mark_discovered
+            from obscura.core.tool_tiering import (
+                is_effectively_core,
+                is_phase3_active,
+                mark_discovered,
+            )
 
             names = [n.strip() for n in query[7:].split(",") if n.strip()]
             found: list[dict[str, Any]] = []
+            uncallable_warnings: list[str] = []
+            phase3_on = is_phase3_active()
+            all_names = [str(s.name) for s in all_specs]
             for name in names:
                 spec = registry.get(name)
                 if spec is not None:
@@ -694,19 +701,37 @@ class Registry:
                             "parameters": spec.parameters,
                         },
                     )
-            return json.dumps(
-                {
-                    "ok": True,
-                    "query": query,
-                    "matches": found,
-                    "total_tools": len(all_specs),
-                    "hint": (
-                        "Schemas loaded — call the tool by its exact name."
-                        if found
-                        else "No tools matched. Try fuzzy search without 'select:'."
-                    ),
-                },
-            )
+                    # When phase-3 SDK tier is active and this tool isn't
+                    # in the effective core set, the SDK session won't have
+                    # registered it — calling it will fail. Warn the model
+                    # so it can stop and tell the user how to fix it.
+                    if phase3_on and not is_effectively_core(
+                        str(spec.name), all_names,
+                    ):
+                        uncallable_warnings.append(str(spec.name))
+
+            response: dict[str, Any] = {
+                "ok": True,
+                "query": query,
+                "matches": found,
+                "total_tools": len(all_specs),
+                "hint": (
+                    "Schemas loaded — call the tool by its exact name."
+                    if found
+                    else "No tools matched. Try fuzzy search without 'select:'."
+                ),
+            }
+            if uncallable_warnings:
+                names_csv = ", ".join(repr(n) for n in uncallable_warnings)
+                response["warning"] = (
+                    f"OBSCURA_PHASE3_SDK_TIER=1 is active and these tools "
+                    f"were not loaded into the current SDK session: "
+                    f"{names_csv}. Calling them will fail. To use them: "
+                    "restart obscura without OBSCURA_PHASE3_SDK_TIER, or "
+                    "add them to OBSCURA_PHASE3_EXTRA_CORE (comma-separated, "
+                    "fnmatch globs allowed) and restart."
+                )
+            return json.dumps(response)
 
         terms = query.lower().split()
         scored: list[tuple[float, Any]] = []

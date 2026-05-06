@@ -826,25 +826,31 @@ class CopilotBackend(BackendToolHostMixin):
             # uncallable until session recreate. Enabling this trades
             # mid-session callability for ~80%+ token savings on the
             # initial system message.
-            import os as _os
+            #
+            # Set ``OBSCURA_PHASE3_EXTRA_CORE`` to keep specific tools
+            # callable even with phase-3 on (comma-separated names or
+            # fnmatch globs, e.g. ``jira_*,supabase_query``).
+            from obscura.core.tool_tiering import (
+                effective_core_names,
+                is_phase3_active,
+            )
 
-            if _os.environ.get("OBSCURA_PHASE3_SDK_TIER", "").strip().lower() in {
-                "1", "true", "yes", "on",
-            }:
+            if is_phase3_active():
                 from obscura.core.tool_observability import (
                     TurnToolStats,
                     emit_turn_tool_stats,
                 )
-                from obscura.core.tool_tiering import CORE_TOOL_NAMES
 
+                all_names = [t.name for t in filtered]
+                core_set = effective_core_names(all_names)
                 pre_phase3 = list(filtered)
                 filtered = [
                     t for t in filtered
-                    if t.name in CORE_TOOL_NAMES
+                    if t.name in core_set
                     or (
                         t.name.startswith("mcp__")
                         and (t.name.rsplit("__", 1)[-1] if "__" in t.name else "")
-                        in CORE_TOOL_NAMES
+                        in core_set
                     )
                 ]
                 kept_names = {t.name for t in filtered}
