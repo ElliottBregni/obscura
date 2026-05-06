@@ -19,6 +19,7 @@ from obscura.core.kairos import (
     GoalStoreProtocol,
     create_goal_store,
 )
+from obscura.core.paths import resolve_obscura_home
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,8 +34,9 @@ router = APIRouter(prefix="/api/v1", tags=["goals"])
 
 
 def _get_store() -> GoalStoreProtocol:
-    """Return a fresh goal store bound to the default kairos.db path."""
-    return create_goal_store()
+    """Return a fresh goal store bound to the standard obscura home db path."""
+    db_path = resolve_obscura_home() / "kairos.db"
+    return create_goal_store(str(db_path))
 
 
 def _safe_get_goal(store: GoalStoreProtocol, goal_id: str) -> Goal | None:
