@@ -652,7 +652,7 @@ class PlanApprovalOverlay:
         out.append(
             (
                 f"fg:{GREEN.hex} bold",
-                "[y] approve   ",
+                "[y] / [Enter] approve   ",
             )
         )
         out.append(
@@ -688,6 +688,10 @@ class PlanApprovalOverlay:
         @kb.add("escape", filter=cond, eager=True)
         def _(event: KeyPressEvent) -> None:
             self._resolve(False)
+
+        @kb.add("enter", filter=cond, eager=True)
+        def _(event: KeyPressEvent) -> None:
+            self._resolve(True)
 
         return kb
 

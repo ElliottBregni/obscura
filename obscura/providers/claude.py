@@ -7,6 +7,7 @@ unified interface. Claude's async-iterator model maps naturally to our
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any, cast
 
@@ -109,6 +110,12 @@ class ClaudeBackend(BackendToolHostMixin):
         # Tool routing
         self._tool_router: Any | None = None
 
+        # TUI plan-approval callback — when set, intercepts Claude Code's
+        # built-in ExitPlanMode tool via can_use_tool and routes through
+        # the TUI PlanApprovalOverlay instead of the CLI's own (invisible)
+        # approval dialog.
+        self._plan_approval_callback: Any = None
+
         # Session tracking
         self._session_store = SessionStore()
 
@@ -123,6 +130,19 @@ class ClaudeBackend(BackendToolHostMixin):
     def set_tool_router(self, router: Any) -> None:
         """Attach a :class:`ToolRouter` for per-turn tool selection."""
         self._tool_router = router
+
+    def set_plan_approval_callback(self, cb: Any) -> None:
+        """Register an async callable for plan-mode approval.
+
+        When set, Claude Code's built-in ``ExitPlanMode`` tool is
+        intercepted via the SDK's ``can_use_tool`` hook and the callback
+        is awaited to obtain an approval decision, rather than delegating
+        to the CLI's own (pipe-invisible) approval dialog.
+
+        The callable signature must match
+        ``async (plan_summary: str) -> bool``.
+        """
+        self._plan_approval_callback = cb
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -769,6 +789,43 @@ class ClaudeBackend(BackendToolHostMixin):
         # Extended thinking (set at session level, not per-query)
         if self._max_thinking_tokens and self._max_thinking_tokens > 0:
             opts["max_thinking_tokens"] = self._max_thinking_tokens
+
+        # Plan-approval bridge: intercept Claude Code's built-in ExitPlanMode
+        # via can_use_tool so the TUI PlanApprovalOverlay handles it instead
+        # of the CLI's own dialog (which renders to a pipe and is invisible).
+        if self._plan_approval_callback is not None:
+            _approval_cb = self._plan_approval_callback
+
+            async def _can_use_tool(
+                tool_name: str,
+                tool_input: dict[str, Any],
+                _ctx: Any,
+            ) -> Any:
+                from claude_agent_sdk.types import (
+                    PermissionResultAllow,
+                    PermissionResultDeny,
+                )
+
+                if tool_name == "ExitPlanMode":
+                    summary: str = tool_input.get("plan_summary", "") or ""
+                    try:
+                        approved = _approval_cb(summary)
+                        if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
+                            approved = await approved
+                    except Exception:
+                        logger.debug(
+                            "can_use_tool: plan_approval_callback raised",
+                            exc_info=True,
+                        )
+                        approved = False
+                    if approved:
+                        return PermissionResultAllow()
+                    return PermissionResultDeny(
+                        message="Plan not approved by user.", interrupt=False
+                    )
+                return PermissionResultAllow()
+
+            opts["can_use_tool"] = _can_use_tool
 
         opts.update(overrides)
         return ClaudeAgentOptions(**opts)

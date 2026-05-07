@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.application import Application
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import Window
+from prompt_toolkit.output import DummyOutput
 
 from obscura.cli.tui.overlays import (
     ApprovalAction,
@@ -119,3 +125,165 @@ async def test_ask_user_overlay_returns_typed_text() -> None:
 
     assert result == "yes please"
     assert ask.visible is False
+
+
+async def test_plan_approval_resolves_true_on_y_keypress() -> None:
+    """Regression: merge_key_bindings must wire overlay bindings into the
+    Application or pressing y/n/Enter/Esc is silently ignored.
+
+    This test builds a minimal Application with the same
+    ``merge_key_bindings([app_kb] + overlays.all_key_bindings())`` pattern
+    that ``ObscuraTUIApp._build_application()`` uses, then feeds a ``y``
+    key through the live event loop and confirms the plan-approval Future
+    resolves to ``True``.
+    """
+    state = _make_state()
+    overlays = build_overlays(state, command_names=lambda: [])
+
+    app_kb = KeyBindings()
+    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+
+    with create_pipe_input() as pipe_input:
+        app = Application(
+            layout=Layout(Window()),
+            key_bindings=merged,
+            input=pipe_input,
+            output=DummyOutput(),
+        )
+
+        async def feed_approve() -> None:
+            # Wait for app.run_async() to enter its loop, then start the
+            # overlay request (which sets state.banner), inject 'y', and
+            # exit the app.
+            await asyncio.sleep(0.05)
+            approval_fut = asyncio.ensure_future(
+                overlays.plan_approval.request("my plan summary")
+            )
+            await asyncio.sleep(0.02)
+            assert overlays.plan_approval.visible, "overlay should be visible after request()"
+            pipe_input.send_text("y")
+            result = await asyncio.wait_for(approval_fut, timeout=2.0)
+            assert result is True
+            app.exit()
+
+        feeder = asyncio.create_task(feed_approve())
+        try:
+            await asyncio.wait_for(app.run_async(), timeout=5.0)
+        finally:
+            feeder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await feeder
+
+
+async def test_plan_approval_resolves_true_on_enter_keypress() -> None:
+    """Enter (added alongside y) also approves the plan."""
+    state = _make_state()
+    overlays = build_overlays(state, command_names=lambda: [])
+
+    app_kb = KeyBindings()
+    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+
+    with create_pipe_input() as pipe_input:
+        app = Application(
+            layout=Layout(Window()),
+            key_bindings=merged,
+            input=pipe_input,
+            output=DummyOutput(),
+        )
+
+        async def feed_enter() -> None:
+            await asyncio.sleep(0.05)
+            approval_fut = asyncio.ensure_future(
+                overlays.plan_approval.request("enter test")
+            )
+            await asyncio.sleep(0.02)
+            pipe_input.send_text("\r")  # Enter
+            result = await asyncio.wait_for(approval_fut, timeout=2.0)
+            assert result is True
+            app.exit()
+
+        feeder = asyncio.create_task(feed_enter())
+        try:
+            await asyncio.wait_for(app.run_async(), timeout=5.0)
+        finally:
+            feeder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await feeder
+
+
+async def test_plan_approval_resolves_false_on_n_keypress() -> None:
+    """n rejects the plan."""
+    state = _make_state()
+    overlays = build_overlays(state, command_names=lambda: [])
+
+    app_kb = KeyBindings()
+    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+
+    with create_pipe_input() as pipe_input:
+        app = Application(
+            layout=Layout(Window()),
+            key_bindings=merged,
+            input=pipe_input,
+            output=DummyOutput(),
+        )
+
+        async def feed_reject() -> None:
+            await asyncio.sleep(0.05)
+            approval_fut = asyncio.ensure_future(
+                overlays.plan_approval.request("reject test")
+            )
+            await asyncio.sleep(0.02)
+            pipe_input.send_text("n")
+            result = await asyncio.wait_for(approval_fut, timeout=2.0)
+            assert result is False
+            app.exit()
+
+        feeder = asyncio.create_task(feed_reject())
+        try:
+            await asyncio.wait_for(app.run_async(), timeout=5.0)
+        finally:
+            feeder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await feeder
+
+
+async def test_tool_approval_resolves_on_y_keypress() -> None:
+    """ToolApprovalOverlay y-key fires through the merged Application bindings."""
+    state = _make_state()
+    overlays = build_overlays(state, command_names=lambda: [])
+
+    app_kb = KeyBindings()
+    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+
+    req = ToolApprovalRequest(
+        tool_use_id="tu-kb-test",
+        tool_name="run_shell",
+        tool_input={"script": "echo hi"},
+    )
+
+    with create_pipe_input() as pipe_input:
+        app = Application(
+            layout=Layout(Window()),
+            key_bindings=merged,
+            input=pipe_input,
+            output=DummyOutput(),
+        )
+
+        async def feed_allow() -> None:
+            await asyncio.sleep(0.05)
+            approval_fut = asyncio.ensure_future(overlays.tool_approval.request(req))
+            await asyncio.sleep(0.02)
+            assert overlays.tool_approval.visible
+            pipe_input.send_text("y")
+            result = await asyncio.wait_for(approval_fut, timeout=2.0)
+            assert isinstance(result, ApprovalAction)
+            assert result.decision == "allow"
+            app.exit()
+
+        feeder = asyncio.create_task(feed_allow())
+        try:
+            await asyncio.wait_for(app.run_async(), timeout=5.0)
+        finally:
+            feeder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await feeder

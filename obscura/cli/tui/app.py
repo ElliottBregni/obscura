@@ -32,7 +32,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal, cast
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent, merge_key_bindings
 from prompt_toolkit.layout.containers import FloatContainer
 
 from obscura.agent.agents import AgentStatus
@@ -430,6 +430,20 @@ class ObscuraTUIApp:
         self._handle.user_interact_cb = _user_interact_cb
         self._handle.permission_mode_cb = _permission_mode_cb
 
+        # Bridge Claude Code's built-in ExitPlanMode through the TUI overlay.
+        # The SDK's can_use_tool hook fires before the CLI renders its own
+        # (pipe-invisible) approval dialog — we intercept it here.
+        try:
+            from obscura.providers.claude import ClaudeBackend
+
+            _backend = self._handle.session.backend
+            if isinstance(_backend, ClaudeBackend):
+                _backend.set_plan_approval_callback(plan_approval_cb)
+        except Exception:
+            logger.debug(
+                "TUI: could not wire plan_approval to ClaudeBackend", exc_info=True
+            )
+
         host = dict(self._handle.session.host_callbacks)
         host["ask_user_callback"] = ask_user_cb
         host["plan_approval_callback"] = plan_approval_cb
@@ -537,7 +551,7 @@ class ObscuraTUIApp:
 
         return Application(
             layout=self._layout.layout,
-            key_bindings=kb,
+            key_bindings=merge_key_bindings([kb] + self._overlays.all_key_bindings()),
             full_screen=cfg.full_screen,
             mouse_support=False,
             style=PROMPT_STYLE,
