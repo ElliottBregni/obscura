@@ -590,7 +590,7 @@ class PlanApprovalOverlay:
     """
 
     WIDTH = 76
-    HEIGHT = 12
+    HEIGHT = 16
 
     def __init__(self, state: TUIState) -> None:
         self._state = state
@@ -646,7 +646,7 @@ class PlanApprovalOverlay:
         out: list[tuple[str, str]] = []
         if b.title:
             out.append((f"fg:{LAVENDER.hex} bold", f"{b.title}\n\n"))
-        body = _truncate_lines(b.body, 8)
+        body = _truncate_lines(b.body, 10)
         out.append((f"fg:{TEXT.hex}", body + "\n"))
         out.append(("", "\n"))
         out.append(
