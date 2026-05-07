@@ -124,6 +124,22 @@ async def install_repl_callbacks(
     try:
         Session.set_plan_approval_callback(_plan_approval_handler)
         session.host_callbacks["plan_approval_callback"] = _plan_approval_handler
+        # Also wire directly onto ClaudeBackend so the SDK's can_use_tool hook
+        # intercepts ExitPlanMode in REPL mode (not just via ToolContext).
+        try:
+            from obscura.providers.claude import ClaudeBackend as _CB
+
+            _backend = getattr(session, "backend", None)
+            if isinstance(_backend, _CB):
+                _backend.set_plan_approval_callback(_plan_approval_handler)
+                _pm_cb = session.host_callbacks.get("permission_mode_callback")
+                if _pm_cb is not None:
+                    _backend.set_permission_mode_callback(_pm_cb)
+        except Exception:
+            logger.debug(
+                "install_repl_callbacks: ClaudeBackend plan_approval wiring failed",
+                exc_info=True,
+            )
     except Exception:
         logger.debug(
             "install_repl_callbacks: plan_approval wiring failed",

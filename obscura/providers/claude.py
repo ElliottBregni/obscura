@@ -852,6 +852,12 @@ class ClaudeBackend(BackendToolHostMixin):
 
             if tool_name == "ExitPlanMode":
                 _cb = _self._plan_approval_callback
+                if _cb is None:
+                    # Fallback: REPL path sets Session.plan_approval_callback
+                    # but doesn't call set_plan_approval_callback on the backend.
+                    from obscura.tools.system._session import Session as _Session
+
+                    _cb = _Session.plan_approval_callback
                 if _cb is not None:
                     summary: str = tool_input.get("plan_summary", "") or ""
                     try:

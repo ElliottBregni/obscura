@@ -104,3 +104,50 @@ async def test_can_use_tool_does_not_call_mode_cb_on_exit_plan_mode_denied() -> 
 
     assert isinstance(result, PermissionResultDeny)
     assert calls == []  # mode stays "plan"
+
+
+async def test_can_use_tool_falls_back_to_session_plan_approval_callback() -> None:
+    """When ClaudeBackend._plan_approval_callback is None (REPL path),
+    can_use_tool falls back to Session.plan_approval_callback so the REPL
+    still gets an approval gate instead of auto-approving."""
+    import obscura.tools.system._session as _session_mod
+    from claude_agent_sdk.types import PermissionResultAllow
+
+    calls: list[str] = []
+    original_cb = _session_mod.Session.plan_approval_callback
+
+    try:
+        _session_mod.Session.plan_approval_callback = lambda summary: (  # type: ignore[assignment]
+            calls.append(summary) or True
+        )
+        backend = _make_backend()
+        # _plan_approval_callback stays None — simulates REPL path
+        assert backend._plan_approval_callback is None
+
+        can_use_tool = _extract_can_use_tool(backend)
+        result = await can_use_tool("ExitPlanMode", {"plan_summary": "ship it"}, None)
+
+        assert isinstance(result, PermissionResultAllow)
+        assert calls == ["ship it"]
+    finally:
+        _session_mod.Session.plan_approval_callback = original_cb
+
+
+async def test_can_use_tool_auto_allows_when_no_callbacks_registered() -> None:
+    """ExitPlanMode is allowed without any dialog when neither
+    ClaudeBackend._plan_approval_callback nor Session.plan_approval_callback
+    is set (e.g., in scripted / non-interactive contexts)."""
+    import obscura.tools.system._session as _session_mod
+    from claude_agent_sdk.types import PermissionResultAllow
+
+    original_cb = _session_mod.Session.plan_approval_callback
+    try:
+        _session_mod.Session.plan_approval_callback = None  # type: ignore[assignment]
+        backend = _make_backend()
+
+        can_use_tool = _extract_can_use_tool(backend)
+        result = await can_use_tool("ExitPlanMode", {}, None)
+
+        assert isinstance(result, PermissionResultAllow)
+    finally:
+        _session_mod.Session.plan_approval_callback = original_cb

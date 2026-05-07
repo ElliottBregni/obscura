@@ -267,7 +267,7 @@ class ToolApprovalOverlay:
 
     async def request(self, req: ToolApprovalRequest) -> ApprovalAction:
         """Open the modal, wait for a decision, clear state, return result."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._fut = loop.create_future()
         self._state.pending_approval = req
         try:
@@ -449,7 +449,7 @@ class CommandPaletteOverlay:
 
     async def request(self) -> str:
         """Open palette, await selection. Returns selected command (no slash)."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._fut = loop.create_future()
         self.open()
         try:
@@ -564,7 +564,7 @@ class AskUserOverlay:
     # ---- public ------------------------------------------------------------
 
     async def request(self, prompt: str) -> str:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._fut = loop.create_future()
         self._prompt = prompt
         self._buffer.text = ""
@@ -704,7 +704,7 @@ class PlanApprovalOverlay:
     # ---- public ------------------------------------------------------------
 
     async def request(self, summary: str) -> bool:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._fut = loop.create_future()
         self._state.banner = BannerState(
             kind="plan_approval",
