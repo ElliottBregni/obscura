@@ -116,6 +116,12 @@ class ClaudeBackend(BackendToolHostMixin):
         # approval dialog.
         self._plan_approval_callback: Any = None
 
+        # TUI permission-mode callback — called by the can_use_tool closure
+        # when EnterPlanMode / ExitPlanMode fire so the TUI HUD stays in sync.
+        # Note: only updates the display (HUDState.permission_mode); the SDK
+        # session owns the live runtime mode and doesn't need to be notified.
+        self._permission_mode_callback: Any = None
+
         # Session tracking
         self._session_store = SessionStore()
 
@@ -143,6 +149,21 @@ class ClaudeBackend(BackendToolHostMixin):
         ``async (plan_summary: str) -> bool``.
         """
         self._plan_approval_callback = cb
+
+    def set_permission_mode_callback(self, cb: Any) -> None:
+        """Register a callable to sync the TUI HUD when permission mode changes.
+
+        Called by the TUI after start() so the can_use_tool closure can
+        update ``HUDState.permission_mode`` when Claude Code's built-in
+        ``EnterPlanMode`` / ``ExitPlanMode`` tools fire through the SDK
+        bridge.
+
+        Signature: ``(mode: str) -> None | Awaitable[None]``
+
+        Note: this only updates the display layer. The SDK session owns
+        the live runtime permission mode and does not need to be notified.
+        """
+        self._permission_mode_callback = cb
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -239,7 +260,7 @@ class ClaudeBackend(BackendToolHostMixin):
         def _pre_tool_hook(
             tool_name: str = "",
             tool_input: dict[str, Any] | None = None,
-            **kw: Any,
+            **_kw: Any,  # noqa: ARG002
         ) -> dict[str, Any] | None:
             if not confirm_fn(tool_name, tool_input or {}):
                 return {"denied": True, "reason": "Tool call denied by user."}
@@ -804,12 +825,30 @@ class ClaudeBackend(BackendToolHostMixin):
         async def _can_use_tool(
             tool_name: str,
             tool_input: dict[str, Any],
-            _ctx: Any,
+            _ctx: Any,  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
         ) -> Any:
             from claude_agent_sdk.types import (
                 PermissionResultAllow,
                 PermissionResultDeny,
             )
+
+            async def _notify_mode(mode: str) -> None:
+                _mcb = _self._permission_mode_callback
+                if _mcb is not None:
+                    try:
+                        r = _mcb(mode)
+                        if asyncio.iscoroutine(r) or asyncio.isfuture(r):
+                            await r
+                    except Exception:
+                        logger.debug(
+                            "can_use_tool: permission_mode_callback raised",
+                            exc_info=True,
+                        )
+
+            if tool_name == "EnterPlanMode":
+                # No user approval needed — just sync the TUI display.
+                await _notify_mode("plan")
+                return PermissionResultAllow()
 
             if tool_name == "ExitPlanMode":
                 _cb = _self._plan_approval_callback
@@ -826,6 +865,7 @@ class ClaudeBackend(BackendToolHostMixin):
                         )
                         approved = False
                     if approved:
+                        await _notify_mode("default")
                         return PermissionResultAllow()
                     return PermissionResultDeny(
                         message="Plan not approved by user.", interrupt=False

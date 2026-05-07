@@ -439,6 +439,7 @@ class ObscuraTUIApp:
             _backend = self._handle.session.backend
             if isinstance(_backend, ClaudeBackend):
                 _backend.set_plan_approval_callback(plan_approval_cb)
+                _backend.set_permission_mode_callback(_permission_mode_cb)
         except Exception:
             logger.debug(
                 "TUI: could not wire plan_approval to ClaudeBackend", exc_info=True
