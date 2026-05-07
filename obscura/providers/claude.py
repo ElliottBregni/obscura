@@ -793,23 +793,30 @@ class ClaudeBackend(BackendToolHostMixin):
         # Plan-approval bridge: intercept Claude Code's built-in ExitPlanMode
         # via can_use_tool so the TUI PlanApprovalOverlay handles it instead
         # of the CLI's own dialog (which renders to a pipe and is invisible).
-        if self._plan_approval_callback is not None:
-            _approval_cb = self._plan_approval_callback
+        #
+        # IMPORTANT: _build_options() is called in start() before the TUI
+        # wires _plan_approval_callback via set_plan_approval_callback().
+        # The closure captures `self` (late-binding) so it reads the
+        # callback at invocation time, not at options-build time.  When no
+        # callback is registered the hook is a transparent pass-through.
+        _self = self
 
-            async def _can_use_tool(
-                tool_name: str,
-                tool_input: dict[str, Any],
-                _ctx: Any,
-            ) -> Any:
-                from claude_agent_sdk.types import (
-                    PermissionResultAllow,
-                    PermissionResultDeny,
-                )
+        async def _can_use_tool(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            _ctx: Any,
+        ) -> Any:
+            from claude_agent_sdk.types import (
+                PermissionResultAllow,
+                PermissionResultDeny,
+            )
 
-                if tool_name == "ExitPlanMode":
+            if tool_name == "ExitPlanMode":
+                _cb = _self._plan_approval_callback
+                if _cb is not None:
                     summary: str = tool_input.get("plan_summary", "") or ""
                     try:
-                        approved = _approval_cb(summary)
+                        approved = _cb(summary)
                         if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
                             approved = await approved
                     except Exception:
@@ -823,9 +830,9 @@ class ClaudeBackend(BackendToolHostMixin):
                     return PermissionResultDeny(
                         message="Plan not approved by user.", interrupt=False
                     )
-                return PermissionResultAllow()
+            return PermissionResultAllow()
 
-            opts["can_use_tool"] = _can_use_tool
+        opts["can_use_tool"] = _can_use_tool
 
         opts.update(overrides)
         return ClaudeAgentOptions(**opts)
