@@ -57,38 +57,128 @@ default_grant = true
 
 [[tools]]
 name = "run_shell"
-description = "Execute a shell command"
+description = "Execute a shell command via /bin/zsh -lc and return stdout/stderr/exit_code. Set run_in_background=true for long-running commands; returns a task_id that can be checked later."
 capability = "shell.exec"
 side_effects = "write"
 handler = "obscura.tools.system:run_shell"
 
+[tools.parameters]
+type = "object"
+
+[tools.parameters.properties.script]
+type = "string"
+description = "Shell script to execute."
+
+[tools.parameters.properties.command]
+type = "string"
+description = "Alias for script (LLM compat)."
+
+[tools.parameters.properties.cwd]
+type = "string"
+
+[tools.parameters.properties.timeout_seconds]
+type = "number"
+
+[tools.parameters.properties.description]
+type = "string"
+description = "User-facing description of what this command does."
+
+[tools.parameters.properties.run_in_background]
+type = "boolean"
+description = "Run async and return a task_id immediately."
+
 [[tools]]
 name = "read_text_file"
-description = "Read a text file"
+description = "Read a file. Supports text, images (PNG/JPG/GIF/WebP as base64), PDFs (text extraction), and Jupyter notebooks (.ipynb cell parsing). Use offset/limit for large text files."
 capability = "file.read"
 side_effects = "read"
 handler = "obscura.tools.system:read_text_file"
 
+[tools.parameters]
+type = "object"
+required = ["path"]
+
+[tools.parameters.properties.path]
+type = "string"
+
+[tools.parameters.properties.max_bytes]
+type = "integer"
+description = "Max bytes for text files (default 200K)."
+
+[tools.parameters.properties.offset]
+type = "integer"
+description = "Line number to start reading from (1-indexed)."
+
+[tools.parameters.properties.limit]
+type = "integer"
+description = "Number of lines to read."
+
+[tools.parameters.properties.pages]
+type = "string"
+description = "Page range for PDFs (e.g. '1-5', '3', '10-20')."
+
 [[tools]]
 name = "list_directory"
-description = "List directory contents"
+description = "List files/directories at a path."
 capability = "file.read"
 side_effects = "read"
 handler = "obscura.tools.system:list_directory"
 
+[tools.parameters]
+type = "object"
+required = ["path"]
+
+[tools.parameters.properties.path]
+type = "string"
+
 [[tools]]
 name = "write_text_file"
-description = "Write or create a text file"
+description = "Write UTF-8 text to a file (overwrites by default). For existing files, rejects stale writes if the file was modified externally since the last read. Returns a structured diff."
 capability = "file.write"
 side_effects = "write"
 handler = "obscura.tools.system:write_text_file"
 
+[tools.parameters]
+type = "object"
+required = ["path", "text"]
+
+[tools.parameters.properties.path]
+type = "string"
+
+[tools.parameters.properties.text]
+type = "string"
+
+[tools.parameters.properties.overwrite]
+type = "boolean"
+
+[tools.parameters.properties.create_dirs]
+type = "boolean"
+
 [[tools]]
 name = "edit_text_file"
-description = "Edit a text file with search/replace"
+description = "Perform a surgical find-and-replace edit in a file. Replaces the first (or all) occurrence(s) of old_text with new_text. The file must have been read first — rejects stale edits if the file was modified externally since the last read."
 capability = "file.write"
 side_effects = "write"
 handler = "obscura.tools.system:edit_text_file"
+
+[tools.parameters]
+type = "object"
+required = ["path", "old_text", "new_text"]
+
+[tools.parameters.properties.path]
+type = "string"
+
+[tools.parameters.properties.old_text]
+type = "string"
+description = "Text to find (exact match)."
+
+[tools.parameters.properties.new_text]
+type = "string"
+description = "Replacement text."
+
+[tools.parameters.properties.replace_all]
+type = "boolean"
+description = "Replace all occurrences (default: false)."
 
 [[tools]]
 name = "git"
@@ -97,19 +187,144 @@ capability = "git.ops"
 side_effects = "write"
 handler = "obscura.tools.system:git"
 
+[tools.parameters]
+type = "object"
+required = ["action"]
+
+[tools.parameters.properties.action]
+type = "string"
+enum = ["status", "diff", "log", "commit", "branch", "push", "tag"]
+description = "Git operation to perform."
+
+[tools.parameters.properties.message]
+type = "string"
+description = "Commit message (commit) or tag annotation (tag create)."
+
+[tools.parameters.properties.files]
+type = "array"
+description = "Files to stage (commit). Use ['.'] for all changes."
+
+[tools.parameters.properties.files.items]
+type = "string"
+
+[tools.parameters.properties.ref]
+type = "string"
+description = "Ref/branch/tag name. Used by diff, log, branch, tag."
+
+[tools.parameters.properties.remote]
+type = "string"
+description = "Remote name for push (default 'origin')."
+
+[tools.parameters.properties.sub_action]
+type = "string"
+description = "Sub-operation: branch='list|create|switch', tag='list|create|delete'."
+
+[tools.parameters.properties.path]
+type = "string"
+description = "File/dir path filter (diff, log)."
+
+[tools.parameters.properties.staged]
+type = "boolean"
+description = "Show staged changes (diff --cached)."
+
+[tools.parameters.properties.stat_only]
+type = "boolean"
+description = "Show diffstat only (diff --stat)."
+
+[tools.parameters.properties.short]
+type = "boolean"
+description = "Short format (status, default true)."
+
+[tools.parameters.properties.max_count]
+type = "integer"
+description = "Number of commits (log, default 10)."
+
+[tools.parameters.properties.oneline]
+type = "boolean"
+description = "One-line format (log, default true)."
+
+[tools.parameters.properties.author]
+type = "string"
+description = "Filter by author (log)."
+
+[tools.parameters.properties.since]
+type = "string"
+description = "Show commits after date (log, e.g. '2024-01-01')."
+
+[tools.parameters.properties.set_upstream]
+type = "boolean"
+description = "Set upstream tracking (push -u)."
+
+[tools.parameters.properties.push_tags]
+type = "boolean"
+description = "Push all tags (push --tags)."
+
+[tools.parameters.properties.cwd]
+type = "string"
+
 [[tools]]
 name = "web_search"
-description = "Search the web"
+description = "Search the web for a query and return concise result items. Optionally filter by allowed_domains or blocked_domains."
 capability = "web.browse"
 side_effects = "read"
 handler = "obscura.tools.system:web_search"
 
+[tools.parameters]
+type = "object"
+required = ["query"]
+
+[tools.parameters.properties.query]
+type = "string"
+
+[tools.parameters.properties.max_results]
+type = "integer"
+
+[tools.parameters.properties.allowed_domains]
+type = "array"
+description = "Only include results from these domains."
+
+[tools.parameters.properties.allowed_domains.items]
+type = "string"
+
+[tools.parameters.properties.blocked_domains]
+type = "array"
+description = "Exclude results from these domains."
+
+[tools.parameters.properties.blocked_domains.items]
+type = "string"
+
 [[tools]]
 name = "fetch_url"
-description = "Fetch a URL"
+description = "Fetch a URL and return the page content. HTML is automatically converted to Markdown (or plain text as fallback). Provide a prompt describing what to extract. Results are cached for 15 minutes."
 capability = "web.browse"
 side_effects = "read"
 handler = "obscura.tools.system:web_fetch"
+
+[tools.parameters]
+type = "object"
+required = ["url"]
+
+[tools.parameters.properties.url]
+type = "string"
+
+[tools.parameters.properties.prompt]
+type = "string"
+description = "What to extract or summarize from the page."
+
+[tools.parameters.properties.method]
+type = "string"
+
+[tools.parameters.properties.headers]
+type = "object"
+
+[tools.parameters.properties.body]
+type = "string"
+
+[tools.parameters.properties.timeout_seconds]
+type = "number"
+
+[tools.parameters.properties.max_bytes]
+type = "integer"
 
 [healthcheck]
 type = "callable"

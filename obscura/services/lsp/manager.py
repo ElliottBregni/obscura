@@ -1,100 +1,262 @@
-"""obscura.services.lsp.manager — Language server lifecycle management.
+"""LSP server manager — starts and manages language server processes.
 
-Manages spawning, health-checking, and shutting down language servers
-per language. Servers are started on first use and cached.
+Provides ``LSPServerManager`` which boots one LSP server process per workspace
+root and routes JSON-RPC requests through it.  Currently supports pyright
+(Python) with automatic fallback to pylsp.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import re
 import shutil
 from pathlib import Path
-
-from obscura.services.lsp.client import LSPClient
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Known language server commands by file extension.
-_SERVER_COMMANDS: dict[str, list[str]] = {
-    ".py": ["pyright-langserver", "--stdio"],
-    ".ts": ["typescript-language-server", "--stdio"],
-    ".tsx": ["typescript-language-server", "--stdio"],
-    ".js": ["typescript-language-server", "--stdio"],
-    ".jsx": ["typescript-language-server", "--stdio"],
-    ".go": ["gopls", "serve"],
-    ".rs": ["rust-analyzer"],
-    ".java": ["jdtls"],
-    ".rb": ["solargraph", "stdio"],
-    ".c": ["clangd"],
-    ".cpp": ["clangd"],
-    ".h": ["clangd"],
-}
+_CONTENT_LENGTH_RE = re.compile(rb"Content-Length:\s*(\d+)", re.IGNORECASE)
 
 
-def _detect_language(file_path: str) -> str:
-    """Detect language from file extension."""
-    return Path(file_path).suffix.lower()
+def _find_workspace_root(file_path: str) -> str:
+    """Walk up from *file_path* to find a workspace root.
+
+    Markers: pyproject.toml, setup.py, setup.cfg, Cargo.toml, package.json, .git.
+    Falls back to the file's parent directory if none is found.
+    """
+    markers = {"pyproject.toml", "setup.py", "setup.cfg", "Cargo.toml", "package.json", ".git"}
+    p = Path(file_path).resolve().parent
+    for parent in [p, *p.parents]:
+        if any((parent / m).exists() for m in markers):
+            return str(parent)
+    return str(p)
+
+
+class LSPClient:
+    """Async JSON-RPC client talking to a language server over stdio."""
+
+    def __init__(self, process: asyncio.subprocess.Process, workspace_root: str) -> None:
+        self._process = process
+        self._workspace_root = workspace_root
+        self._req_id = 0
+        self._initialized = False
+        self._opened_uris: set[str] = set()
+
+    def _next_id(self) -> int:
+        self._req_id += 1
+        return self._req_id
+
+    async def _write(self, msg: dict[str, Any]) -> None:
+        body = json.dumps(msg).encode("utf-8")
+        header = f"Content-Length: {len(body)}\r\n\r\n".encode()
+        assert self._process.stdin is not None  # noqa: S101
+        self._process.stdin.write(header + body)
+        await self._process.stdin.drain()
+
+    async def _read_one(self, timeout: float = 15.0) -> dict[str, Any] | None:
+        """Read one JSON-RPC message from stdout."""
+        assert self._process.stdout is not None  # noqa: S101
+        header = b""
+        while True:
+            try:
+                ch = await asyncio.wait_for(self._process.stdout.read(1), timeout=timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.debug("suppressed exception in _read_one (header read)", exc_info=True)
+                return None
+            if not ch:
+                return None
+            header += ch
+            if header.endswith(b"\r\n\r\n"):
+                break
+        m = _CONTENT_LENGTH_RE.search(header)
+        if not m:
+            return None
+        length = int(m.group(1))
+        body = b""
+        while len(body) < length:
+            try:
+                chunk = await asyncio.wait_for(
+                    self._process.stdout.read(length - len(body)), timeout=timeout
+                )
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.debug("suppressed exception in _read_one (body read)", exc_info=True)
+                break
+            if not chunk:
+                break
+            body += chunk
+        try:
+            return json.loads(body)  # type: ignore[return-value]
+        except json.JSONDecodeError:
+            logger.debug("lsp: malformed JSON body: %r", body[:200])
+            return None
+
+    async def _request(self, method: str, params: Any, timeout: float = 15.0) -> Any:
+        """Send a JSON-RPC request and wait for its response."""
+        req_id = self._next_id()
+        await self._write({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise TimeoutError(f"LSP request '{method}' timed out")
+            msg = await self._read_one(timeout=min(remaining, 5.0))
+            if msg is None:
+                raise TimeoutError(f"LSP request '{method}': no response")
+            if "id" not in msg or msg["id"] != req_id:
+                continue  # skip notifications and other responses
+            if "error" in msg:
+                raise RuntimeError(f"LSP error in '{method}': {msg['error']}")
+            return msg.get("result")
+
+    async def _notify(self, method: str, params: Any) -> None:
+        """Send a JSON-RPC notification (no response expected)."""
+        await self._write({"jsonrpc": "2.0", "method": method, "params": params})
+
+    async def initialize(self) -> None:
+        """Send initialize + initialized (idempotent)."""
+        if self._initialized:
+            return
+        await self._request(
+            "initialize",
+            {
+                "processId": os.getpid(),
+                "rootUri": f"file://{self._workspace_root}",
+                "capabilities": {
+                    "textDocument": {
+                        "definition": {"dynamicRegistration": False},
+                        "references": {"dynamicRegistration": False},
+                        "hover": {
+                            "dynamicRegistration": False,
+                            "contentFormat": ["markdown", "plaintext"],
+                        },
+                        "documentSymbol": {"dynamicRegistration": False},
+                    }
+                },
+                "initializationOptions": {},
+            },
+            timeout=30.0,
+        )
+        await self._notify("initialized", {})
+        self._initialized = True
+
+    async def _open_file(self, file_path: str) -> None:
+        """Send textDocument/didOpen (idempotent per URI)."""
+        uri = f"file://{Path(file_path).resolve()}"
+        if uri in self._opened_uris:
+            return
+        try:
+            text = Path(file_path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            logger.debug("lsp: cannot read %s: %s", file_path, exc)
+            return
+        ext = Path(file_path).suffix.lower()
+        lang_id = {
+            ".py": "python", ".ts": "typescript", ".tsx": "typescriptreact",
+            ".js": "javascript", ".jsx": "javascriptreact",
+            ".go": "go", ".rs": "rust", ".c": "c", ".cpp": "cpp", ".java": "java",
+        }.get(ext, "plaintext")
+        await self._notify(
+            "textDocument/didOpen",
+            {"textDocument": {"uri": uri, "languageId": lang_id, "version": 1, "text": text}},
+        )
+        self._opened_uris.add(uri)
+
+    @staticmethod
+    def _lsp_pos(line: int, character: int) -> dict[str, int]:
+        """Convert 1-based tool coordinates to 0-based LSP positions."""
+        return {"line": max(0, line - 1), "character": max(0, character - 1)}
+
+    async def goto_definition(self, file_path: str, line: int, character: int) -> Any:
+        await self.initialize()
+        await self._open_file(file_path)
+        return await self._request(
+            "textDocument/definition",
+            {"textDocument": {"uri": f"file://{Path(file_path).resolve()}"}, "position": self._lsp_pos(line, character)},
+        )
+
+    async def find_references(self, file_path: str, line: int, character: int) -> Any:
+        await self.initialize()
+        await self._open_file(file_path)
+        return await self._request(
+            "textDocument/references",
+            {
+                "textDocument": {"uri": f"file://{Path(file_path).resolve()}"},
+                "position": self._lsp_pos(line, character),
+                "context": {"includeDeclaration": True},
+            },
+        )
+
+    async def hover(self, file_path: str, line: int, character: int) -> Any:
+        await self.initialize()
+        await self._open_file(file_path)
+        return await self._request(
+            "textDocument/hover",
+            {"textDocument": {"uri": f"file://{Path(file_path).resolve()}"}, "position": self._lsp_pos(line, character)},
+        )
+
+    async def document_symbols(self, file_path: str) -> Any:
+        await self.initialize()
+        await self._open_file(file_path)
+        return await self._request(
+            "textDocument/documentSymbol",
+            {"textDocument": {"uri": f"file://{Path(file_path).resolve()}"}},
+            timeout=30.0,
+        )
+
+    async def shutdown(self) -> None:
+        try:
+            await self._request("shutdown", None, timeout=5.0)
+            await self._notify("exit", None)
+        except Exception:
+            logger.debug("suppressed exception in shutdown (graceful stop)", exc_info=True)
+        try:
+            if self._process.returncode is None:
+                self._process.terminate()
+                await asyncio.wait_for(self._process.wait(), timeout=3.0)
+        except Exception:
+            logger.debug("suppressed exception in shutdown (process terminate)", exc_info=True)
 
 
 class LSPServerManager:
-    """Manages language server lifecycle per language.
+    """Manages one LSPClient per workspace root."""
 
-    Servers are spawned lazily on first use and cached until shutdown.
-
-    Usage::
-
-        mgr = LSPServerManager(root_path="/project")
-        client = await mgr.get_client("src/main.py")
-        result = await client.goto_definition("src/main.py", 10, 5)
-        await mgr.shutdown_all()
-    """
-
-    def __init__(self, root_path: str = "") -> None:
-        self._root = root_path or str(Path.cwd())
-        self._clients: dict[str, LSPClient] = {}  # ext → client
+    def __init__(self) -> None:
+        self._root = str(Path.cwd())
+        self._clients: dict[str, LSPClient] = {}
 
     async def get_client(self, file_path: str) -> LSPClient | None:
-        """Get or create an LSP client for the given file's language."""
-        ext = _detect_language(file_path)
-        if ext in self._clients:
-            return self._clients[ext]
+        """Return a live LSPClient for the workspace containing file_path.
 
-        cmd = _SERVER_COMMANDS.get(ext)
-        if cmd is None:
-            return None
+        Starts a new server if none is running. Returns None if no server binary found.
+        """
+        workspace_root = _find_workspace_root(file_path)
+        existing = self._clients.get(workspace_root)
+        if existing is not None:
+            if existing._process.returncode is None:
+                return existing
+            del self._clients[workspace_root]
 
-        binary = cmd[0]
-        if shutil.which(binary) is None:
-            logger.debug("LSP server %s not found in PATH", binary)
+        server_cmd = shutil.which("pyright") or shutil.which("pylsp")
+        if not server_cmd:
+            logger.warning("lsp: no LSP server found on PATH (tried pyright, pylsp)")
             return None
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
+            process = await asyncio.create_subprocess_exec(
+                server_cmd, "--stdio",
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
+                cwd=workspace_root,
             )
-            client = LSPClient(proc)
-            await client.start(f"file://{self._root}")
-            self._clients[ext] = client
-            logger.info("LSP server started: %s for %s", binary, ext)
-            return client
-        except Exception:
-            logger.warning("Failed to start LSP server: %s", binary, exc_info=True)
+        except OSError as exc:
+            logger.warning("lsp: failed to start %s: %s", server_cmd, exc)
             return None
 
-    async def shutdown_all(self) -> None:
-        """Shutdown all running language servers."""
-        for ext, client in self._clients.items():
-            try:
-                await client.shutdown()
-            except Exception:
-                logger.debug("LSP shutdown error for %s", ext, exc_info=True)
-        self._clients.clear()
-
-    @property
-    def active_servers(self) -> list[str]:
-        """Return list of active server extensions."""
-        return list(self._clients.keys())
+        client = LSPClient(process, workspace_root)
+        self._clients[workspace_root] = client
+        logger.debug("lsp: started %s for %s (pid=%s)", server_cmd, workspace_root, process.pid)
+        return client

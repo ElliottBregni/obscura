@@ -23,6 +23,18 @@ capability = "dev.fzf"
 side_effects = "read"
 handler = "obscura.tools.providers.agent_primitives:fzf_filter"
 
+[tools.parameters]
+type = "object"
+required = ["query", "input_text"]
+
+[tools.parameters.properties.query]
+type = "string"
+description = "fzf filter query string."
+
+[tools.parameters.properties.input_text]
+type = "string"
+description = "Newline-separated list of candidates to filter."
+
 [bootstrap]
 deps = [
     { type = "brew", package = "fzf", optional = true },

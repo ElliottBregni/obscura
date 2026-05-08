@@ -53,6 +53,7 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.widgets import TextArea
 
 from obscura.cli.promptkit.highlighter import KeywordHighlighter
+from obscura.cli.renderer.modern.theme import OVERLAY0
 from obscura.cli.tui.buffers import (
     agent_panel_text,
     banner_text,
@@ -184,11 +185,20 @@ def build_layout(
         keybindings, swap focus, and inject overlay floats.
     """
 
-    # ---- Header (top, 1 row) ---------------------------------------------
+    # ---- Header (top, 1 row) + thin rule ---------------------------------
     header_window = _make_text_window(
         lambda: header_text(state),
         height=Dimension.exact(1),
         style="class:tui.header",
+    )
+    # Single-row separator under the header so the transcript doesn't
+    # butt directly into the session/model line. ``Window(char=...)``
+    # tiles the character across the full available width — no manual
+    # measurement needed.
+    header_separator_window = Window(
+        char="─",
+        height=Dimension.exact(1),
+        style=f"fg:{OVERLAY0.hex}",
     )
 
     # ---- Transcript (weight=1, auto-scroll) ------------------------------
@@ -260,7 +270,14 @@ def build_layout(
             width=Dimension.exact(26),
             style="class:tui.agent-panel",
         ),
-        filter=Condition(lambda: state.show_agent_panel),
+        # Auto-hide when there are zero supervised agents — the "Agents (0)
+        # / no agents running" pane was eating 26 right-hand columns for
+        # nothing. F2 / Ctrl-G still force-shows it (so users can confirm
+        # nothing's running) by keeping ``show_agent_panel`` True alongside
+        # an empty list.
+        filter=Condition(
+            lambda: state.show_agent_panel and len(state.hud.running_agents) > 0
+        ),
     )
     transcript_row = VSplit(
         [
@@ -327,7 +344,6 @@ def build_layout(
         # the supplier results for ~5s so the per-keystroke filesystem
         # walk doesn't show up as input lag.
         complete_while_typing=True,
-        height=Dimension(min=1, max=6, preferred=1),
         accept_handler=_accept,
         focusable=True,
         focus_on_click=True,
@@ -337,6 +353,19 @@ def build_layout(
     input_area.control.key_bindings = key_bindings
     input_window: Window = input_area.window
     input_buffer: Buffer = input_area.buffer
+
+    # Bind the input window's height to the live buffer's line count,
+    # clamped to [1, 6]. Passing ``Dimension(min=1, max=6, preferred=1)``
+    # to TextArea up-front leaves slack that prompt_toolkit's HSplit
+    # distributes back into the input — which is why the input was
+    # appearing 5+ rows tall on idle. A callable height is recomputed
+    # every frame so the box grows with your typing and snaps back to
+    # one row on submit.
+    def _input_height() -> Dimension:
+        line_count = input_buffer.text.count("\n") + 1
+        return Dimension.exact(max(1, min(6, line_count)))
+
+    input_area.window.height = _input_height
 
     # ---- Toolbar (1 row, exact) ------------------------------------------
     toolbar_window = _make_text_window(
@@ -368,6 +397,7 @@ def build_layout(
     body = HSplit(
         [
             header_window,
+            header_separator_window,
             transcript_row,
             input_area,
             live_region_container,

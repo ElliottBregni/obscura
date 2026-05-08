@@ -23,6 +23,18 @@ capability = "dev.ripgrep"
 side_effects = "read"
 handler = "obscura.tools.providers.agent_primitives:rg_search"
 
+[tools.parameters]
+type = "object"
+required = ["pattern"]
+
+[tools.parameters.properties.pattern]
+type = "string"
+description = "Regex pattern to search for."
+
+[tools.parameters.properties.path]
+type = "string"
+description = "File or directory to search in (default: current directory)."
+
 [bootstrap]
 deps = [
     { type = "binary", package = "rg" },
