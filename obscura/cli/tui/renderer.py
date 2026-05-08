@@ -41,6 +41,11 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from io import StringIO
+
+from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+from rich.console import Console as RichConsole
+from rich.markdown import Markdown as RichMarkdown
 
 from obscura.cli.renderer.channels import (
     Banner,
@@ -114,6 +119,48 @@ def _extract_overflow_path(text: str) -> str:
     if match is None:
         return ""
     return match.group(1).strip()
+
+
+_MARKDOWN_RENDER_WIDTH = 100
+_MARKDOWN_CODE_THEME = "monokai"
+
+
+def _markdown_to_runs(text: str, *, fallback_style: str = "") -> list[StyledRun]:
+    """Render ``text`` as Rich Markdown and convert to prompt-toolkit runs.
+
+    Rich emits ANSI escape sequences; prompt_toolkit's :class:`ANSI` class
+    parses those into ``(style, text)`` fragments which map cleanly onto
+    :class:`StyledRun`. If anything raises, falls back to a single
+    plain-text run carrying ``fallback_style`` so the message still shows.
+    """
+    try:
+        buf = StringIO()
+        rich_console = RichConsole(
+            file=buf,
+            force_terminal=True,
+            color_system="truecolor",
+            width=_MARKDOWN_RENDER_WIDTH,
+            legacy_windows=False,
+            highlight=False,
+            soft_wrap=False,
+        )
+        rich_console.print(RichMarkdown(text, code_theme=_MARKDOWN_CODE_THEME))
+        rendered = buf.getvalue()
+        if not rendered:
+            return [StyledRun(text=text, style=fallback_style)]
+        fragments = to_formatted_text(ANSI(rendered))
+        runs: list[StyledRun] = []
+        for frag in fragments:
+            # Fragments are (style, text) or (style, text, mouse_handler).
+            style = str(frag[0]) if len(frag) > 0 else ""
+            run_text = str(frag[1]) if len(frag) > 1 else ""
+            if not run_text:
+                continue
+            runs.append(StyledRun(text=run_text, style=style))
+        return runs
+    except Exception:
+        logger.debug("markdown render failed; falling back to plain", exc_info=True)
+        return [StyledRun(text=text, style=fallback_style)]
 
 
 class TUIRenderer:
@@ -522,16 +569,25 @@ class TUIRenderer:
     # ------------------------------------------------------------------
 
     def _flush_text(self) -> None:
-        """Flush ``_text_buf`` as a single ASSISTANT transcript entry."""
+        """Flush ``_text_buf`` as a single ASSISTANT transcript entry.
+
+        The accumulated text is run through Rich's Markdown renderer so
+        headers, bold/italic, lists, inline code, and syntax-highlighted
+        code blocks land as styled runs in the transcript instead of a
+        single flat string.
+        """
         if not self._text_buf:
             return
         text = "".join(self._text_buf)
         self._text_buf.clear()
         if not text.strip():
             return
+        runs = _markdown_to_runs(text, fallback_style=_STYLE_ASSISTANT)
+        if not runs:
+            runs = [StyledRun(text=text, style=_STYLE_ASSISTANT)]
         entry = TranscriptEntry(
             kind=TranscriptKind.ASSISTANT,
-            runs=[StyledRun(text=text, style=_STYLE_ASSISTANT)],
+            runs=runs,
         )
         self._state.append_transcript(entry)
 

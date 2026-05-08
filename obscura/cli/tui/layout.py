@@ -349,12 +349,16 @@ def build_layout(
     )
 
     # ---- Compose ---------------------------------------------------------
+    # The live region (tool spinner / streaming label) sits BELOW the input
+    # so "running shell_exec..." appears under the prompt the user is
+    # interacting with rather than above it. Toolbar stays at the very
+    # bottom.
     body = HSplit(
         [
             header_window,
             transcript_row,
-            live_region_container,
             input_area,
+            live_region_container,
             toolbar_window,
         ],
     )
