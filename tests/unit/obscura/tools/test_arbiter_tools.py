@@ -11,6 +11,7 @@ Mock strategy:
   - arbiter_appeal calls `from dataclasses import replace as dc_replace` inside
     the function body (local import), so patch dataclasses.replace directly.
 """
+
 from __future__ import annotations
 
 import json
@@ -144,9 +145,7 @@ async def test_arbiter_appeal_calls_evaluate_and_returns_verdict() -> None:
         patch("dataclasses.replace", return_value=MagicMock()),
     ):
         result = json.loads(
-            await arbiter_appeal(
-                target_id="task:abc", reasoning="please reconsider"
-            )
+            await arbiter_appeal(target_id="task:abc", reasoning="please reconsider")
         )
 
     assert result["ok"] is True

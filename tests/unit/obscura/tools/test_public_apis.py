@@ -4,6 +4,7 @@ PublicAPIsProvider dispatches based on kwargs. Tests cover all branches:
   list_persisted, remove_persisted, create_tool, discover (with filters),
   and name_or_link lookup. File I/O is redirected to tmp_path.
 """
+
 from __future__ import annotations
 
 import json
@@ -154,9 +155,7 @@ async def test_discover_with_https_filter() -> None:
 
 @respx.mock
 async def test_discover_network_error_returns_error() -> None:
-    respx.get(f"{_BASE}/entries").mock(
-        side_effect=httpx.ConnectError("no network")
-    )
+    respx.get(f"{_BASE}/entries").mock(side_effect=httpx.ConnectError("no network"))
 
     result = await _pa.PublicAPIsProvider()
 

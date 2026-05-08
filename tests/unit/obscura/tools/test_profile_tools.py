@@ -9,6 +9,7 @@ Mocking strategy:
   - Tests that need the vector store use a _with_store fixture that
     supplies a configured MagicMock.
 """
+
 from __future__ import annotations
 
 import json
@@ -149,9 +150,7 @@ def test_profile_get_include_scores_returns_facts(
 # ---------------------------------------------------------------------------
 
 
-def test_profile_update_appends_fact(
-    mock_profile: MagicMock, no_store: None
-) -> None:
+def test_profile_update_appends_fact(mock_profile: MagicMock, no_store: None) -> None:
     from obscura.tools.profile_tools import profile_update
 
     result = json.loads(profile_update(fact="I like Python"))
@@ -300,7 +299,9 @@ def test_profile_sync_with_store_uses_migration(
 def test_profile_set_stores_fact(mock_store: MagicMock) -> None:
     from obscura.tools.profile_tools import profile_set
 
-    result = json.loads(profile_set(key="identity.name", value="Elliott", category="identity"))
+    result = json.loads(
+        profile_set(key="identity.name", value="Elliott", category="identity")
+    )
 
     assert result["ok"] is True
     assert result["key"] == "identity.name"

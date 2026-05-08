@@ -3,6 +3,7 @@
 Single async @tool function. Patches resolve_obscura_home to tmp_path so
 ~/.obscura is never touched.
 """
+
 from __future__ import annotations
 
 import json

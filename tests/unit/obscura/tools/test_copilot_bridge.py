@@ -4,6 +4,7 @@ All five handler functions are sync. Tests use:
   - Real tmp_path files for view/edit (no subprocess needed for file I/O)
   - subprocess.run mocks for grep and glob (rg/fd/find binaries not required)
 """
+
 from __future__ import annotations
 
 import json

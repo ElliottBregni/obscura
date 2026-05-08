@@ -1,4 +1,5 @@
 """Unit tests for obscura.tools.providers.m365 (M365 CLI wrapper)."""
+
 from __future__ import annotations
 
 import asyncio

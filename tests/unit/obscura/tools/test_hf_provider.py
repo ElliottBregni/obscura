@@ -1,4 +1,5 @@
 """Unit tests for obscura.tools.providers.hf (Hugging Face Hub CLI)."""
+
 from __future__ import annotations
 
 import asyncio

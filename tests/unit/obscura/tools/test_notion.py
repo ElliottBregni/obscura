@@ -3,6 +3,7 @@
 Async handlers using httpx. Mocked with respx.
 NOTION_API_KEY set via monkeypatch (not required for most error paths).
 """
+
 from __future__ import annotations
 
 import httpx

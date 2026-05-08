@@ -3,6 +3,7 @@
 Async handlers using httpx. Mocked with respx.
 X_BEARER_TOKEN set via monkeypatch.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -57,7 +58,9 @@ async def test_handler_search_tweets_http_error_returns_error() -> None:
 @respx.mock
 async def test_handler_get_user_returns_user_data() -> None:
     respx.get(f"{_BASE}/2/users/by/username/testuser").mock(
-        return_value=httpx.Response(200, json={"data": {"id": "123", "username": "testuser"}})
+        return_value=httpx.Response(
+            200, json={"data": {"id": "123", "username": "testuser"}}
+        )
     )
 
     result = await _x._handler_get_user(username="testuser")
@@ -127,7 +130,9 @@ async def test_handler_user_mentions_returns_mentions() -> None:
 @respx.mock
 async def test_handler_post_tweet_creates_tweet() -> None:
     respx.post(f"{_BASE}/2/tweets").mock(
-        return_value=httpx.Response(201, json={"data": {"id": "new-id", "text": "hello"}})
+        return_value=httpx.Response(
+            201, json={"data": {"id": "new-id", "text": "hello"}}
+        )
     )
 
     result = await _x._handler_post_tweet(text="hello")
@@ -141,7 +146,9 @@ async def test_handler_reply_tweet_creates_reply() -> None:
         return_value=httpx.Response(201, json={"data": {"id": "reply-id"}})
     )
 
-    result = await _x._handler_reply_tweet(text="reply", in_reply_to_tweet_id="original-1")
+    result = await _x._handler_reply_tweet(
+        text="reply", in_reply_to_tweet_id="original-1"
+    )
 
     assert "data" in result
 

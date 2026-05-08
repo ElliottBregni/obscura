@@ -55,6 +55,4 @@ def test_tool_spec_name_is_snake_case(spec: ToolSpec) -> None:
     assert spec.name == spec.name.lower(), (
         f"Tool name '{spec.name}' contains uppercase letters"
     )
-    assert " " not in spec.name, (
-        f"Tool name '{spec.name}' contains spaces"
-    )
+    assert " " not in spec.name, f"Tool name '{spec.name}' contains spaces"

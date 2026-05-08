@@ -8,6 +8,7 @@ Coverage targets:
   - duckdb_query: success, bad SQL
   - healthcheck: trivial
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -65,7 +66,9 @@ async def test_http_json_success_json_body() -> None:
 @respx.mock
 async def test_http_json_plain_text_wrapped() -> None:
     respx.get("https://example.com/txt").mock(
-        return_value=httpx.Response(200, text="hello world", headers={"content-type": "text/plain"})
+        return_value=httpx.Response(
+            200, text="hello world", headers={"content-type": "text/plain"}
+        )
     )
 
     result = await _ap._http_json(method="GET", url="https://example.com/txt")
@@ -110,7 +113,9 @@ async def test_http_json_network_error_returns_error() -> None:
             side_effect=httpx.ConnectError("no route")
         )
 
-        result = await _ap._http_json(method="GET", url="https://unreachable.example.com/")
+        result = await _ap._http_json(
+            method="GET", url="https://unreachable.example.com/"
+        )
 
     assert result["ok"] is False
     assert "error" in result
@@ -119,9 +124,7 @@ async def test_http_json_network_error_returns_error() -> None:
 
 @respx.mock
 async def test_http_json_includes_duration() -> None:
-    respx.get("https://example.com/").mock(
-        return_value=httpx.Response(200, json={})
-    )
+    respx.get("https://example.com/").mock(return_value=httpx.Response(200, json={}))
 
     result = await _ap._http_json(method="GET", url="https://example.com/")
 
@@ -236,6 +239,7 @@ def test_fzf_filter_exception_returns_error() -> None:
 
 
 def test_duckdb_query_select_one() -> None:
+    pytest.importorskip("duckdb")
     result = _ap.duckdb_query("SELECT 1 AS n")
 
     assert result["ok"] is True

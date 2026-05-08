@@ -141,7 +141,7 @@ async def test_plan_approval_resolves_true_on_y_keypress() -> None:
     overlays = build_overlays(state, command_names=lambda: [])
 
     app_kb = KeyBindings()
-    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+    merged = merge_key_bindings([app_kb, *overlays.all_key_bindings()])
 
     with create_pipe_input() as pipe_input:
         app = Application(
@@ -160,7 +160,9 @@ async def test_plan_approval_resolves_true_on_y_keypress() -> None:
                 overlays.plan_approval.request("my plan summary")
             )
             await asyncio.sleep(0.02)
-            assert overlays.plan_approval.visible, "overlay should be visible after request()"
+            assert overlays.plan_approval.visible, (
+                "overlay should be visible after request()"
+            )
             pipe_input.send_text("y")
             result = await asyncio.wait_for(approval_fut, timeout=2.0)
             assert result is True
@@ -181,7 +183,7 @@ async def test_plan_approval_resolves_true_on_enter_keypress() -> None:
     overlays = build_overlays(state, command_names=lambda: [])
 
     app_kb = KeyBindings()
-    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+    merged = merge_key_bindings([app_kb, *overlays.all_key_bindings()])
 
     with create_pipe_input() as pipe_input:
         app = Application(
@@ -217,7 +219,7 @@ async def test_plan_approval_resolves_false_on_n_keypress() -> None:
     overlays = build_overlays(state, command_names=lambda: [])
 
     app_kb = KeyBindings()
-    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+    merged = merge_key_bindings([app_kb, *overlays.all_key_bindings()])
 
     with create_pipe_input() as pipe_input:
         app = Application(
@@ -253,7 +255,7 @@ async def test_tool_approval_resolves_on_y_keypress() -> None:
     overlays = build_overlays(state, command_names=lambda: [])
 
     app_kb = KeyBindings()
-    merged = merge_key_bindings([app_kb] + overlays.all_key_bindings())
+    merged = merge_key_bindings([app_kb, *overlays.all_key_bindings()])
 
     req = ToolApprovalRequest(
         tool_use_id="tu-kb-test",

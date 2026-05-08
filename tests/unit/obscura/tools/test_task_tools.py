@@ -147,9 +147,7 @@ async def test_task_update_status() -> None:
     r = json.loads(await task_create(subject="Status update target"))
     task_id = r["task_id"]
 
-    update_result = json.loads(
-        await task_update(task_id=task_id, status="in_progress")
-    )
+    update_result = json.loads(await task_update(task_id=task_id, status="in_progress"))
 
     assert update_result["ok"] is True
     assert "status" in update_result["updated_fields"]
@@ -225,7 +223,12 @@ async def test_queue_next_empty_queue_returns_null_task() -> None:
 
 
 async def test_queue_complete_marks_task_completed() -> None:
-    from obscura.tools.task_tools import task_create, task_get, queue_next, queue_complete
+    from obscura.tools.task_tools import (
+        task_create,
+        task_get,
+        queue_next,
+        queue_complete,
+    )
 
     r = json.loads(await task_create(subject="Will be completed"))
     task_id = r["task_id"]

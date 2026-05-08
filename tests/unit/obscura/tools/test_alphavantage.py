@@ -5,6 +5,7 @@ Mock strategy:
   - Set env var via monkeypatch so _api_key() doesn't raise.
   - Mock httpx via respx.
 """
+
 from __future__ import annotations
 
 import httpx

@@ -8,6 +8,7 @@ Tests cover:
   - Exception from client is caught and returned as JSON error
   - _format_location / _format_locations helpers
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import obscura.tools.lsp as _lsp_mod
-from obscura.tools.lsp import lsp_tool, set_lsp_manager, _format_location, _format_locations
+from obscura.tools.lsp import (
+    lsp_tool,
+    set_lsp_manager,
+    _format_location,
+    _format_locations,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -74,7 +80,7 @@ def test_format_locations_list() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _reset_manager() -> Generator[None, None, None]:
+def _reset_manager() -> Generator[None]:
     original = _lsp_mod._lsp_manager
     yield
     _lsp_mod._lsp_manager = original
@@ -85,8 +91,17 @@ def _reset_manager() -> Generator[None, None, None]:
 # ---------------------------------------------------------------------------
 
 
-async def test_lsp_tool_no_manager_returns_error() -> None:
-    set_lsp_manager(None)
+async def test_lsp_tool_no_manager_returns_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When lazy init cannot produce a manager, lsp_tool returns a clear error."""
+
+    async def _unavailable() -> None:
+        return None
+
+    # Patch _ensure_lsp_manager so it returns None, simulating a failed lazy
+    # init (e.g. LSPServerManager import error or constructor failure).
+    monkeypatch.setattr(_lsp_mod, "_ensure_lsp_manager", _unavailable)
 
     result = json.loads(await lsp_tool("goToDefinition", "/src/main.py"))
 
@@ -119,14 +134,19 @@ async def test_lsp_tool_goto_definition_returns_locations() -> None:
     client = MagicMock()
     client.goto_definition = AsyncMock(
         return_value=[
-            {"uri": "file:///src/defs.py", "range": {"start": {"line": 9, "character": 0}}}
+            {
+                "uri": "file:///src/defs.py",
+                "range": {"start": {"line": 9, "character": 0}},
+            }
         ]
     )
     manager = MagicMock()
     manager.get_client = AsyncMock(return_value=client)
     set_lsp_manager(manager)
 
-    result = json.loads(await lsp_tool("goToDefinition", "/src/main.py", line=5, character=10))
+    result = json.loads(
+        await lsp_tool("goToDefinition", "/src/main.py", line=5, character=10)
+    )
 
     assert result["ok"] is True
     assert result["count"] == 1

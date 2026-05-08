@@ -43,7 +43,9 @@ def _spec(
 
 async def test_sync_handler_called_with_args() -> None:
     result = await call_tool_handler(
-        _spec("t", lambda x: f"got:{x}", params={"x": {"type": "string"}}, required=["x"]),
+        _spec(
+            "t", lambda x: f"got:{x}", params={"x": {"type": "string"}}, required=["x"]
+        ),
         {"x": "hi"},
     )
     assert result == "got:hi"
@@ -204,7 +206,9 @@ async def test_canonical_wins_when_alias_and_canonical_both_present() -> None:
         handler=handler,  # type: ignore[arg-type]
         side_effects=SideEffects.MUTATING,
     )
-    await call_tool_handler(spec, {"path": "/x", "text": "canonical", "content": "alias"})
+    await call_tool_handler(
+        spec, {"path": "/x", "text": "canonical", "content": "alias"}
+    )
     assert received["text"] == "canonical"
 
 
@@ -245,7 +249,7 @@ def test_maybe_truncate_result_large_input(
     tmp_path: object, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """maybe_truncate_result trims >200 KB output and writes full text to disk."""
-    import obscura.core.tool_bridge as tool_bridge
+    from obscura.core import tool_bridge
     from obscura.core.tool_bridge import maybe_truncate_result
 
     monkeypatch.setattr(tool_bridge, "TOOL_RESULT_CACHE_DIR", tmp_path)

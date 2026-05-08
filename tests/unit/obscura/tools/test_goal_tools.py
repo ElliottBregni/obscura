@@ -6,6 +6,7 @@ are monkeypatched to no-ops.  The GoalBoard itself is replaced per-test
 by a MagicMock configured with a minimal ``@dataclass`` Goal stand-in so
 that ``dataclasses.asdict`` (used internally by _goal_dict) works correctly.
 """
+
 from __future__ import annotations
 
 import json
@@ -92,7 +93,7 @@ def test_goal_create_missing_title_returns_error(
 ) -> None:
     from obscura.tools.goal_tools import goal_tool
 
-    monkeypatch.setattr("obscura.tools.goal_tools._board", lambda: MagicMock())
+    monkeypatch.setattr("obscura.tools.goal_tools._board", MagicMock)
 
     result = json.loads(goal_tool(action="create", title=""))
 
@@ -106,7 +107,9 @@ def test_goal_create_strips_path_from_returned_goal(
     from obscura.tools.goal_tools import goal_tool
 
     g = _Goal(id="g-1", title="T", path="/secret/path.md")
-    monkeypatch.setattr("obscura.tools.goal_tools._board", lambda: _make_board(create=g))
+    monkeypatch.setattr(
+        "obscura.tools.goal_tools._board", lambda: _make_board(create=g)
+    )
 
     result = json.loads(goal_tool(action="create", title="T"))
 
@@ -175,9 +178,7 @@ def test_goal_get_returns_goal(monkeypatch: pytest.MonkeyPatch) -> None:
     from obscura.tools.goal_tools import goal_tool
 
     g = _Goal(id="g-99", title="Find me")
-    monkeypatch.setattr(
-        "obscura.tools.goal_tools._board", lambda: _make_board(load=g)
-    )
+    monkeypatch.setattr("obscura.tools.goal_tools._board", lambda: _make_board(load=g))
 
     result = json.loads(goal_tool(action="get", goal_id="g-99"))
 
@@ -190,7 +191,7 @@ def test_goal_get_missing_goal_id_returns_error(
 ) -> None:
     from obscura.tools.goal_tools import goal_tool
 
-    monkeypatch.setattr("obscura.tools.goal_tools._board", lambda: MagicMock())
+    monkeypatch.setattr("obscura.tools.goal_tools._board", MagicMock)
 
     result = json.loads(goal_tool(action="get", goal_id=""))
 
@@ -274,7 +275,9 @@ def test_goal_abandon_returns_updated_goal(monkeypatch: pytest.MonkeyPatch) -> N
         "obscura.tools.goal_tools._board", lambda: _make_board(abandon=g)
     )
 
-    result = json.loads(goal_tool(action="abandon", goal_id="g-1", reason="no longer needed"))
+    result = json.loads(
+        goal_tool(action="abandon", goal_id="g-1", reason="no longer needed")
+    )
 
     assert result["ok"] is True
     assert result["goal"]["status"] == "abandoned"
@@ -303,7 +306,7 @@ def test_goal_add_task_missing_params_returns_error(
 ) -> None:
     from obscura.tools.goal_tools import goal_tool
 
-    monkeypatch.setattr("obscura.tools.goal_tools._board", lambda: MagicMock())
+    monkeypatch.setattr("obscura.tools.goal_tools._board", MagicMock)
 
     result = json.loads(goal_tool(action="add_task", goal_id="g-1", task_id=""))
 
@@ -319,7 +322,7 @@ def test_goal_add_task_missing_params_returns_error(
 def test_unknown_action_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
     from obscura.tools.goal_tools import goal_tool
 
-    monkeypatch.setattr("obscura.tools.goal_tools._board", lambda: MagicMock())
+    monkeypatch.setattr("obscura.tools.goal_tools._board", MagicMock)
 
     result = json.loads(goal_tool(action="fly_to_mars"))
 

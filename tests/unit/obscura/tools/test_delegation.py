@@ -4,6 +4,7 @@ Tests exercise the _task_handler closure via the returned ToolSpec.handler.
 All external dependencies (PeerRegistry, EventStore, inject_subagent_context,
 agent.run_loop) are mocked.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,7 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from obscura.tools.delegation import DelegationContext, make_task_tool, _resolve_by_name_or_id
+from obscura.tools.delegation import (
+    DelegationContext,
+    make_task_tool,
+    _resolve_by_name_or_id,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -81,7 +86,9 @@ async def test_task_tool_target_not_in_allowlist_returns_error() -> None:
 
 async def test_task_tool_target_in_allowlist_proceeds() -> None:
     registry = MagicMock()
-    registry.resolve.return_value = None  # still fails at no_peer_found, but gets past allowlist
+    registry.resolve.return_value = (
+        None  # still fails at no_peer_found, but gets past allowlist
+    )
     registry.discover.return_value = []
     ctx = _make_ctx(delegate_allowlist=["researcher"], peer_registry=registry)
     spec = make_task_tool(ctx)
@@ -175,8 +182,9 @@ async def test_task_tool_success_creates_child_session() -> None:
 
     event_store.create_session.assert_called_once()
     call_kwargs = event_store.create_session.call_args
-    assert call_kwargs[1].get("parent_session_id") == "parent-sess" or \
-        "parent-sess" in str(call_kwargs)
+    assert call_kwargs[1].get(
+        "parent_session_id"
+    ) == "parent-sess" or "parent-sess" in str(call_kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +205,9 @@ async def test_task_tool_inject_failure_aborts_delegation() -> None:
     import obscura.tools.delegation as _del_mod
 
     with patch.object(
-        _del_mod, "inject_subagent_context", side_effect=RuntimeError("injection failed")
+        _del_mod,
+        "inject_subagent_context",
+        side_effect=RuntimeError("injection failed"),
     ):
         result = json.loads(await spec.handler(prompt="task", target="analyst"))
 
@@ -261,7 +271,9 @@ def test_resolve_by_name_or_id_finds_by_id() -> None:
 def test_resolve_by_name_or_id_finds_by_name() -> None:
     agent = MagicMock()
     registry = MagicMock()
-    registry.resolve.side_effect = lambda x: agent if x is not None and hasattr(x, "name") else None
+    registry.resolve.side_effect = lambda x: (
+        agent if x is not None and hasattr(x, "name") else None
+    )
     ref = MagicMock()
     ref.name = "my-researcher"
     registry.discover.return_value = [ref]

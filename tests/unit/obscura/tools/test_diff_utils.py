@@ -3,6 +3,7 @@
 Each test passes string content directly; no subprocess or filesystem
 I/O is involved so the tests run entirely in-process.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -125,9 +126,9 @@ def test_hunk_header_contains_at_signs() -> None:
 def test_multi_line_change_produces_hunk_lines() -> None:
     result = _diff("a\nb\n", "a\nc\n")
     assert any(result["hunks"])
-    all_lines = [l for h in result["hunks"] for l in h["lines"]]
-    assert any(l.startswith("-") for l in all_lines)
-    assert any(l.startswith("+") for l in all_lines)
+    all_lines = [line for h in result["hunks"] for line in h["lines"]]
+    assert any(line.startswith("-") for line in all_lines)
+    assert any(line.startswith("+") for line in all_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +141,7 @@ def test_context_lines_zero_strips_surrounding_context() -> None:
     old = "a\nb\nc\nCHANGE\nd\ne\nf\n"
     new = "a\nb\nc\nNEW\nd\ne\nf\n"
     result = _diff(old, new, context_lines=0)
-    all_lines = [l for h in result["hunks"] for l in h["lines"]]
+    all_lines = [line for h in result["hunks"] for line in h["lines"]]
     # Should only contain the - and + lines, no surrounding context
     for line in all_lines:
         assert line.startswith("-") or line.startswith("+")

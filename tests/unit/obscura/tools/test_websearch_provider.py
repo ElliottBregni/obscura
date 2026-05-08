@@ -2,6 +2,7 @@
 
 All paths route through _run_websearch which calls asyncio.create_subprocess_exec.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -64,7 +65,8 @@ async def test_handler_search_passes_num_results() -> None:
         await _ws._handler_search(query="q", num_results=5)
 
     cmd_str = " ".join(str(a) for a in mock_exec.call_args[0])
-    assert "--num-results" in cmd_str
+    # Binary now uses --max-results (not --num-results subcommand syntax).
+    assert "--max-results" in cmd_str
     assert "5" in cmd_str
 
 
@@ -73,8 +75,10 @@ async def test_handler_search_passes_num_results() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_handler_news_calls_news_subcommand() -> None:
-    proc = _make_proc(0, json.dumps({"news": []}).encode())
+async def test_handler_news_uses_format_json() -> None:
+    # The "news" subcommand was removed in the binary upgrade; news now uses
+    # the same positional-query path as search with --format json.
+    proc = _make_proc(0, json.dumps([{"title": "Breaking"}]).encode())
     mock_exec = AsyncMock(return_value=proc)
 
     with (
@@ -83,7 +87,10 @@ async def test_handler_news_calls_news_subcommand() -> None:
     ):
         await _ws._handler_news(query="breaking")
 
-    assert "news" in mock_exec.call_args[0]
+    cmd_str = " ".join(str(a) for a in mock_exec.call_args[0])
+    assert "--format" in cmd_str
+    assert "json" in cmd_str
+    assert "breaking" in cmd_str
 
 
 # ---------------------------------------------------------------------------
@@ -91,17 +98,19 @@ async def test_handler_news_calls_news_subcommand() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_handler_images_calls_images_subcommand() -> None:
-    proc = _make_proc(0, json.dumps({"images": []}).encode())
-    mock_exec = AsyncMock(return_value=proc)
+async def test_handler_images_returns_unsupported_error() -> None:
+    # Image search is not supported by the current websearch binary version.
+    # The handler must return an error dict without invoking the subprocess.
+    mock_exec = AsyncMock()
 
     with (
         patch.object(_ws.shutil, "which", return_value="/usr/bin/websearch"),
         patch.object(asyncio, "create_subprocess_exec", new=mock_exec),
     ):
-        await _ws._handler_images(query="cats")
+        result = await _ws._handler_images(query="cats")
 
-    assert "images" in mock_exec.call_args[0]
+    assert "error" in result
+    mock_exec.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -116,16 +125,19 @@ async def test_handler_summarize_missing_url_returns_error() -> None:
     assert "url" in result["error"]
 
 
-async def test_handler_summarize_with_url_calls_binary() -> None:
-    proc = _make_proc(0, json.dumps({"summary": "Text"}).encode())
+async def test_handler_summarize_with_url_returns_unsupported_error() -> None:
+    # URL summarization is not supported by the current websearch binary version.
+    # The handler must return an error dict without invoking the subprocess.
+    mock_exec = AsyncMock()
 
     with (
         patch.object(_ws.shutil, "which", return_value="/usr/bin/websearch"),
-        patch.object(asyncio, "create_subprocess_exec", return_value=proc),
+        patch.object(asyncio, "create_subprocess_exec", new=mock_exec),
     ):
         result = await _ws._handler_summarize(url="https://example.com")
 
-    assert "summary" in result
+    assert "error" in result
+    mock_exec.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 Async handlers using httpx. Mocked with respx.
 """
+
 from __future__ import annotations
 
 import httpx

@@ -54,7 +54,9 @@ def _fake_response(
     resp.headers = MagicMock()
     resp.headers.items = MagicMock(return_value=[("Content-Type", content_type)])
     resp.headers.get = MagicMock(
-        side_effect=lambda k, default="": content_type if k == "Content-Type" else default
+        side_effect=lambda k, default="": (
+            content_type if k == "Content-Type" else default
+        )
     )
     resp.__enter__ = MagicMock(return_value=resp)
     resp.__exit__ = MagicMock(return_value=False)

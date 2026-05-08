@@ -7,6 +7,7 @@ prevent state leakage between tests.
 No mocks needed — tests use tmp_path files and os.utime() to force
 mtime changes that are reliable across all filesystems.
 """
+
 from __future__ import annotations
 
 import os
@@ -25,7 +26,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clear_state() -> Generator[None, None, None]:
+def _clear_state() -> Generator[None]:
     from obscura.tools.system.file_state import clear
 
     clear()

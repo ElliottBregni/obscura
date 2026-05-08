@@ -113,7 +113,9 @@ async def test_create_tool_name_conflict_with_builtin_returns_error() -> None:
     )
 
     assert result["ok"] is False
-    assert "conflicts" in result.get("error", "").lower() or "name_conflicts" in result.get("error", "")
+    assert "conflicts" in result.get(
+        "error", ""
+    ).lower() or "name_conflicts" in result.get("error", "")
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +159,7 @@ async def test_call_dynamic_tool_handler_exception_returns_error() -> None:
         code='raise RuntimeError("boom")',
     )
 
-    result = json.loads(
-        await Sandbox.call_dynamic_tool(name="exploding_tool", args={})
-    )
+    result = json.loads(await Sandbox.call_dynamic_tool(name="exploding_tool", args={}))
 
     assert result["ok"] is False
     assert "dynamic_tool_error" in result.get("error", "")

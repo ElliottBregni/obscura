@@ -8,12 +8,12 @@ Mock strategy:
   - policy_probe: uses policy_override parameter → no DB needed for most tests.
     DB-backed tests use the same SQLite helper.
 """
+
 from __future__ import annotations
 
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +28,12 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-def _make_db(db_path: Path, *, sessions: list[dict] | None = None, events: list[dict] | None = None) -> None:  # type: ignore[type-arg]
+def _make_db(
+    db_path: Path,
+    *,
+    sessions: list[dict] | None = None,
+    events: list[dict] | None = None,
+) -> None:  # type: ignore[type-arg]
     """Create a minimal supervisor.db with required tables and optional rows."""
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
@@ -98,7 +103,10 @@ async def test_context_snapshot_no_db_returns_no_db_status(tmp_path: Path) -> No
         result = json.loads(await context_snapshot())
 
     assert result["status"] == "no_db"
-    assert "supervisor.db" in result["message"].lower() or "not found" in result["message"].lower()
+    assert (
+        "supervisor.db" in result["message"].lower()
+        or "not found" in result["message"].lower()
+    )
 
 
 async def test_context_snapshot_empty_db_returns_ok_empty_ids(tmp_path: Path) -> None:
@@ -130,7 +138,9 @@ async def test_context_snapshot_resolves_session_and_run(tmp_path: Path) -> None
     assert result["run_id"] == "run-1"
 
 
-async def test_context_snapshot_include_filter_omits_other_sections(tmp_path: Path) -> None:
+async def test_context_snapshot_include_filter_omits_other_sections(
+    tmp_path: Path,
+) -> None:
     from obscura.tools.system.intelligence import context_snapshot
 
     _make_db(
@@ -221,7 +231,9 @@ async def test_causal_trace_outcome_finds_matching_event(tmp_path: Path) -> None
     )
 
     with patch.object(_intel_mod, "resolve_obscura_home", return_value=tmp_path):
-        result = json.loads(await causal_trace(run_id="r", session_id="s", outcome="drift"))
+        result = json.loads(
+            await causal_trace(run_id="r", session_id="s", outcome="drift")
+        )
 
     assert result["status"] == "ok"
     assert result["terminal_event"] == "drift_detected"
@@ -234,12 +246,19 @@ async def test_causal_trace_include_payloads_adds_payload_field(tmp_path: Path) 
         tmp_path / "supervisor.db",
         sessions=[{"session_id": "s", "run_id": "r"}],
         events=[
-            {"run_id": "r", "seq": 1, "kind": "run_started", "payload_json": '{"info": 1}'},
+            {
+                "run_id": "r",
+                "seq": 1,
+                "kind": "run_started",
+                "payload_json": '{"info": 1}',
+            },
         ],
     )
 
     with patch.object(_intel_mod, "resolve_obscura_home", return_value=tmp_path):
-        result = json.loads(await causal_trace(run_id="r", session_id="s", include_payloads=True))
+        result = json.loads(
+            await causal_trace(run_id="r", session_id="s", include_payloads=True)
+        )
 
     assert result["status"] == "ok"
     assert result["trace"][0]["payload"] == {"info": 1}
