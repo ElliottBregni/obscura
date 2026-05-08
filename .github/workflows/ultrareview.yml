@@ -38,9 +38,25 @@ jobs:
         id: diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # `gh pr diff` rejects diffs over 20k lines. We have full history
+          # (fetch-depth: 0) so fall back to `git diff` against the merge base
+          # when the API path fails.
+          set +e
           gh pr diff ${{ github.event.pull_request.number }} \
-            --repo ${{ github.repository }} > /tmp/pr.diff
+            --repo ${{ github.repository }} > /tmp/pr.diff 2> /tmp/pr.diff.err
+          GH_EXIT=$?
+          set -e
+          if [ "$GH_EXIT" -ne 0 ]; then
+            echo "gh pr diff failed (exit $GH_EXIT):"
+            cat /tmp/pr.diff.err
+            echo "Falling back to local git diff against merge base."
+            git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" || true
+            MERGE_BASE=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+            git diff "$MERGE_BASE" "$HEAD_SHA" > /tmp/pr.diff
+          fi
           DIFF_SIZE=$(wc -c < /tmp/pr.diff)
           echo "diff_size=$DIFF_SIZE" >> "$GITHUB_OUTPUT"
           echo "PR diff: $DIFF_SIZE bytes"
