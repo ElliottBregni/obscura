@@ -6,6 +6,7 @@ All four handler closures are sync.  Tests mock:
   - VectorMemoryStore.for_user → MagicMock vector store
 so no real Qdrant or disk I/O occurs.
 """
+
 from __future__ import annotations
 
 import json
@@ -64,7 +65,12 @@ def test_make_memory_tool_specs_returns_four_specs(mock_user: MagicMock) -> None
 
     assert len(specs) == 4
     names = {s.name for s in specs}
-    assert names == {"store_memory", "recall_memory", "semantic_search", "store_searchable"}
+    assert names == {
+        "store_memory",
+        "recall_memory",
+        "semantic_search",
+        "store_searchable",
+    }
     for spec in specs:
         assert callable(spec.handler)
         assert isinstance(spec.parameters, dict)
@@ -140,9 +146,7 @@ def test_recall_memory_found(mock_user: MagicMock, mock_kv_store: MagicMock) -> 
 def test_semantic_search_no_results(
     mock_user: MagicMock, mock_vector_store: MagicMock
 ) -> None:
-    result = json.loads(
-        _get_handlers(mock_user)["semantic_search"](query="anything")
-    )
+    result = json.loads(_get_handlers(mock_user)["semantic_search"](query="anything"))
 
     assert result["ok"] is True
     assert result["count"] == 0
@@ -207,9 +211,7 @@ def test_semantic_search_deduplicates_project_and_global_results(
     entry = _make_vector_entry()
     mock_vector_store.search_similar.return_value = [entry]
 
-    result = json.loads(
-        _get_handlers(mock_user)["semantic_search"](query="q")
-    )
+    result = json.loads(_get_handlers(mock_user)["semantic_search"](query="q"))
 
     # Both proj + global return same entry key → deduplicated to 1
     assert result["count"] == 1
@@ -293,7 +295,9 @@ def test_build_channels_prompt_section_empty_returns_empty_string() -> None:
     assert build_channels_prompt_section([]) == ""
 
 
-def test_build_channels_prompt_section_with_channel_includes_name_and_namespace() -> None:
+def test_build_channels_prompt_section_with_channel_includes_name_and_namespace() -> (
+    None
+):
     from obscura.tools.memory_tools import build_channels_prompt_section
 
     ch = MagicMock()

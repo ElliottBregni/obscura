@@ -3,6 +3,7 @@
 All tests redirect registry_root() to a temp directory via monkeypatch so
 ~/.obscura/worktrees is never touched.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -292,7 +293,11 @@ def test_prune_missing_paths_keeps_existing_worktree(tmp_path: Path) -> None:
 
 
 def test_worktree_path_for_combines_hash_and_slug() -> None:
-    from obscura.tools.worktree_registry import worktree_path_for, repo_hash, registry_root
+    from obscura.tools.worktree_registry import (
+        worktree_path_for,
+        repo_hash,
+        registry_root,
+    )
 
     path = worktree_path_for("/my/repo", "my-slug")
     expected_hash = repo_hash("/my/repo")

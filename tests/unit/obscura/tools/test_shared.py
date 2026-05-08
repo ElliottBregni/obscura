@@ -1,4 +1,5 @@
 """Unit tests for obscura.tools.system._shared — spec-provider registry."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,7 +11,8 @@ pytestmark = pytest.mark.unit
 
 def test_get_system_tool_specs_no_provider_returns_empty() -> None:
     # Detach any provider registered by previous tests / full module load
-    import obscura.tools.system._shared as _shared
+    from obscura.tools.system import _shared
+
     original = _shared._provider
     _shared._provider = None
     try:
@@ -21,7 +23,7 @@ def test_get_system_tool_specs_no_provider_returns_empty() -> None:
 
 
 def test_set_spec_provider_registers_callable() -> None:
-    import obscura.tools.system._shared as _shared
+    from obscura.tools.system import _shared
 
     original = _shared._provider
     try:
@@ -34,7 +36,7 @@ def test_set_spec_provider_registers_callable() -> None:
 
 
 def test_get_system_tool_specs_calls_provider_each_time() -> None:
-    import obscura.tools.system._shared as _shared
+    from obscura.tools.system import _shared
 
     call_count = 0
 

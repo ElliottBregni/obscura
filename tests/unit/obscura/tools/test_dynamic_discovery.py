@@ -8,6 +8,7 @@ Tests cover:
   - AutoInstallToolProvider.generate_config
   - AutoInstallToolProvider.save_config
 """
+
 from __future__ import annotations
 
 import json
@@ -168,7 +169,9 @@ def test_discover_popular_registry_exception_falls_back() -> None:
 
     with (
         patch.object(
-            discovery.registry_provider, "fetch_top", side_effect=RuntimeError("network")
+            discovery.registry_provider,
+            "fetch_top",
+            side_effect=RuntimeError("network"),
         ),
         patch.object(
             discovery.mcpservers_provider, "fetch_top", return_value=community_entries

@@ -5,6 +5,7 @@ All methods are pure (no I/O). Test strategy:
   - filesystem checks use tmp_path
   - SSRF guard uses OBSCURA_ALLOW_PRIVATE_URLS to bypass DNS lookups in CI
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,12 +22,16 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-def test_env_flag_missing_returns_default_false(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_flag_missing_returns_default_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("MY_FLAG", raising=False)
     assert Policy.env_flag("MY_FLAG") is False
 
 
-def test_env_flag_missing_returns_custom_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_flag_missing_returns_custom_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("MY_FLAG", raising=False)
     assert Policy.env_flag("MY_FLAG", default=True) is True
 

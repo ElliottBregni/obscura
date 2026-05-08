@@ -90,7 +90,9 @@ async def test_exit_plan_mode_approved_calls_mode_callback() -> None:
     def mode_cb(mode: str) -> None:
         mode_received.append(mode)
 
-    ctx = ToolContext(permission_mode_callback=mode_cb, plan_approval_callback=approval_cb)
+    ctx = ToolContext(
+        permission_mode_callback=mode_cb, plan_approval_callback=approval_cb
+    )
     with bind_tool_context(ctx):
         result = json.loads(await Session.exit_plan_mode(plan_summary="do things"))
 
@@ -126,7 +128,9 @@ async def test_exit_plan_mode_denied_does_not_call_mode_callback() -> None:
     def mode_cb(mode: str) -> None:
         mode_received.append(mode)
 
-    ctx = ToolContext(permission_mode_callback=mode_cb, plan_approval_callback=approval_cb)
+    ctx = ToolContext(
+        permission_mode_callback=mode_cb, plan_approval_callback=approval_cb
+    )
     with bind_tool_context(ctx):
         await Session.exit_plan_mode()
 
@@ -139,7 +143,9 @@ async def test_exit_plan_mode_denied_does_not_call_mode_callback() -> None:
 
 
 async def test_context_window_status_returns_token_counts() -> None:
-    Session.update_token_usage(input_tokens=1000, output_tokens=500, context_window=8192)
+    Session.update_token_usage(
+        input_tokens=1000, output_tokens=500, context_window=8192
+    )
 
     result = json.loads(await Session.context_window_status())
 
@@ -164,7 +170,9 @@ async def test_context_window_status_percent_used() -> None:
 
 
 async def test_history_snip_removes_specified_range() -> None:
-    history: list[dict[str, str]] = [{"role": "user", "content": str(i)} for i in range(6)]
+    history: list[dict[str, str]] = [
+        {"role": "user", "content": str(i)} for i in range(6)
+    ]
     ctx = ToolContext(history=history)
     with bind_tool_context(ctx):
         result = json.loads(await Session.history_snip(start_turn=1, end_turn=3))
@@ -182,7 +190,9 @@ async def test_history_snip_no_history_returns_error() -> None:
 
 
 async def test_history_snip_uses_session_fallback() -> None:
-    history: list[dict[str, str]] = [{"role": "user", "content": str(i)} for i in range(4)]
+    history: list[dict[str, str]] = [
+        {"role": "user", "content": str(i)} for i in range(4)
+    ]
     Session.snip_message_history = history
 
     result = json.loads(await Session.history_snip(start_turn=0, end_turn=1))

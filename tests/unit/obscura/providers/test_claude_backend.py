@@ -62,7 +62,7 @@ async def test_can_use_tool_calls_mode_cb_on_enter_plan_mode() -> None:
 
     calls: list[str] = []
     backend = _make_backend()
-    backend._permission_mode_callback = lambda m: calls.append(m)
+    backend._permission_mode_callback = calls.append
 
     can_use_tool = _extract_can_use_tool(backend)
     result = await can_use_tool("EnterPlanMode", {}, None)
@@ -80,7 +80,7 @@ async def test_can_use_tool_calls_mode_cb_on_exit_plan_mode_approved() -> None:
     calls: list[str] = []
     backend = _make_backend()
     backend._plan_approval_callback = lambda summary: True
-    backend._permission_mode_callback = lambda m: calls.append(m)
+    backend._permission_mode_callback = calls.append
 
     can_use_tool = _extract_can_use_tool(backend)
     result = await can_use_tool("ExitPlanMode", {"plan_summary": "do the thing"}, None)
@@ -97,7 +97,7 @@ async def test_can_use_tool_does_not_call_mode_cb_on_exit_plan_mode_denied() -> 
     calls: list[str] = []
     backend = _make_backend()
     backend._plan_approval_callback = lambda summary: False
-    backend._permission_mode_callback = lambda m: calls.append(m)
+    backend._permission_mode_callback = calls.append
 
     can_use_tool = _extract_can_use_tool(backend)
     result = await can_use_tool("ExitPlanMode", {}, None)

@@ -7,6 +7,7 @@ Mock strategy:
   - Patch `os.getcwd` / `os.chdir` to avoid filesystem side-effects
   - Patch `register_cleanup` to avoid real cleanup hooks
 """
+
 from __future__ import annotations
 
 import json
@@ -231,7 +232,9 @@ async def test_exit_worktree_clean_remove_succeeds(tmp_path: Path) -> None:
     with (
         patch.object(_wt_mod.worktree_registry, "get", return_value=entry),
         patch.object(_wt_mod.worktree_observer, "stop"),
-        patch.object(_wt_mod.worktree_observer, "summary", return_value={"files_changed": 0}),
+        patch.object(
+            _wt_mod.worktree_observer, "summary", return_value={"files_changed": 0}
+        ),
         patch.object(
             _wt_mod,
             "_git",

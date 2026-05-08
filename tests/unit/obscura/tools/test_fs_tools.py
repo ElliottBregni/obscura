@@ -148,7 +148,9 @@ async def test_edit_text_file_replace_all(tmp_path: Path) -> None:
     f.write_text("a a a")
 
     result = json.loads(
-        await FsWrite.edit_text_file(path=str(f), old_text="a", new_text="b", replace_all=True)
+        await FsWrite.edit_text_file(
+            path=str(f), old_text="a", new_text="b", replace_all=True
+        )
     )
 
     assert result["ok"] is True

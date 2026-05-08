@@ -31,6 +31,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, cast
 
+from obscura.providers.claude import ClaudeBackend
 from prompt_toolkit.application import Application
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent, merge_key_bindings
 from prompt_toolkit.layout.containers import FloatContainer
@@ -434,8 +435,6 @@ class ObscuraTUIApp:
         # The SDK's can_use_tool hook fires before the CLI renders its own
         # (pipe-invisible) approval dialog — we intercept it here.
         try:
-            from obscura.providers.claude import ClaudeBackend
-
             _backend = self._handle.session.backend
             if isinstance(_backend, ClaudeBackend):
                 _backend.set_plan_approval_callback(plan_approval_cb)
@@ -552,7 +551,7 @@ class ObscuraTUIApp:
 
         return Application(
             layout=self._layout.layout,
-            key_bindings=merge_key_bindings([kb] + self._overlays.all_key_bindings()),
+            key_bindings=merge_key_bindings([kb, *self._overlays.all_key_bindings()]),
             full_screen=cfg.full_screen,
             mouse_support=False,
             style=PROMPT_STYLE,

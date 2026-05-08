@@ -49,7 +49,9 @@ async def test_get_environment_include_values_false_returns_none_values(
     monkeypatch.setenv("OBSCURA_TEST_SECRET", "hidden")
 
     result = json.loads(
-        await Process.get_environment(prefix="OBSCURA_TEST_SECRET", include_values=False)
+        await Process.get_environment(
+            prefix="OBSCURA_TEST_SECRET", include_values=False
+        )
     )
 
     assert result["ok"] is True

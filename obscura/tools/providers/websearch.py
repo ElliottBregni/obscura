@@ -55,23 +55,38 @@ async def _run_websearch(*args: str) -> dict[str, Any]:
 async def _handler_search(**kwargs: Any) -> dict[str, Any]:
     query = kwargs.get("query", "")
     num = str(kwargs.get("num_results", 10))
-    return await _run_websearch("search", "--query", query, "--num-results", num)
+    provider = str(kwargs.get("provider", "duckduckgo"))
+    return await _run_websearch(
+        "--format", "json", "--max-results", num, "--provider", provider, query
+    )
 
 
 async def _handler_news(**kwargs: Any) -> dict[str, Any]:
     query = kwargs.get("query", "")
     num = str(kwargs.get("num_results", 10))
-    return await _run_websearch("news", "--query", query, "--num-results", num)
+    # Default to duckduckgo (no API key required). Callers can pass
+    # provider="brave" or "google" if they have a configured API key.
+    provider = str(kwargs.get("provider", "duckduckgo"))
+    return await _run_websearch(
+        "--format", "json", "--max-results", num, "--provider", provider, query
+    )
 
 
-async def _handler_images(**kwargs: Any) -> dict[str, Any]:
-    query = kwargs.get("query", "")
-    num = str(kwargs.get("num_results", 10))
-    return await _run_websearch("images", "--query", query, "--num-results", num)
+async def _handler_images(**_kwargs: Any) -> dict[str, Any]:
+    # The websearch binary does not support image search.
+    return {
+        "error": "images search is not supported by the installed websearch binary",
+        "hint": "Use web_search or fetch_url to find image URLs manually.",
+    }
 
 
 async def _handler_summarize(**kwargs: Any) -> dict[str, Any]:
     url = kwargs.get("url", "")
     if not url:
         return {"error": "url is required"}
-    return await _run_websearch("summarize", "--url", url)
+    # The websearch binary does not support URL summarization.
+    # Delegate to a plain search query using the URL as context.
+    return {
+        "error": "URL summarization is not supported by the installed websearch binary",
+        "hint": "Use fetch_url to retrieve the page, then summarize its content.",
+    }

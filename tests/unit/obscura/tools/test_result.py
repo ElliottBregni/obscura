@@ -1,4 +1,5 @@
 """Unit tests for obscura.tools.result — ToolResult re-export boundary."""
+
 from __future__ import annotations
 
 import pytest

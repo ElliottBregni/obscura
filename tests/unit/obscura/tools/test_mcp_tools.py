@@ -4,6 +4,7 @@ Both tools are async. Mock strategy:
   - Patch current_tool_context() at the module level.
   - Patch discover_mcp_servers, detect_orphans, cleanup_orphans at the module level.
 """
+
 from __future__ import annotations
 
 import json
@@ -107,7 +108,9 @@ async def test_mcp_cleanup_orphans_dry_run_lists_without_killing() -> None:
     with (
         patch.object(_mcp_mod, "current_tool_context", return_value=ctx),
         patch.object(_mcp_mod, "discover_mcp_servers", return_value=[server_cfg]),
-        patch.object(_mcp_mod, "detect_orphans", return_value={"test-server": [proc1, proc2]}),
+        patch.object(
+            _mcp_mod, "detect_orphans", return_value={"test-server": [proc1, proc2]}
+        ),
     ):
         result = json.loads(await Mcp.mcp_cleanup_orphans(dry_run=True))
 
@@ -143,7 +146,9 @@ async def test_mcp_cleanup_orphans_dry_run_false_calls_cleanup() -> None:
         patch.object(_mcp_mod, "current_tool_context", return_value=ctx),
         patch.object(_mcp_mod, "discover_mcp_servers", return_value=[server_cfg]),
         patch.object(_mcp_mod, "detect_orphans", return_value={"srv": [proc1, proc2]}),
-        patch.object(_mcp_mod, "cleanup_orphans", return_value=cleanup_result) as mock_cleanup,
+        patch.object(
+            _mcp_mod, "cleanup_orphans", return_value=cleanup_result
+        ) as mock_cleanup,
     ):
         result = json.loads(await Mcp.mcp_cleanup_orphans(dry_run=False))
 

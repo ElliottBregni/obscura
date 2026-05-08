@@ -8,6 +8,7 @@ Mock strategy:
   - For SSRF: patch Policy.validate_url to raise ValueError.
   - For HTTP errors: use urllib.error.HTTPError with an io.BytesIO body.
 """
+
 from __future__ import annotations
 
 import io
@@ -31,7 +32,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clear_cache() -> Generator[None, None, None]:
+def _clear_cache() -> Generator[None]:
     Web._cache.clear()
     yield
     Web._cache.clear()
@@ -224,9 +225,7 @@ async def test_web_search_respects_max_results() -> None:
 async def test_web_search_blocked_domain_excluded() -> None:
     cm = _make_url_response(_DDG_HTML, content_type="text/html")
     with patch.object(_web_mod.url_request, "urlopen", return_value=cm):
-        result = json.loads(
-            await Web.web_search("q", blocked_domains=["example.com"])
-        )
+        result = json.loads(await Web.web_search("q", blocked_domains=["example.com"]))
 
     urls = [r["url"] for r in result["results"]]
     assert not any("example.com" in u for u in urls)

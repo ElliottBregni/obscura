@@ -4,6 +4,7 @@ Module-level `_observers` dict is cleared in autouse fixture to prevent
 cross-test contamination. `FileWatcher` is patched to avoid real filesystem
 watch threads.
 """
+
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _clear_observers() -> Generator[None, None, None]:
+def _clear_observers() -> Generator[None]:
     _obs._observers.clear()
     yield
     _obs._observers.clear()

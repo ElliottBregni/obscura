@@ -118,18 +118,14 @@ async def test_remove_path_deletes_file(tmp_path: Path) -> None:
 
 async def test_remove_path_missing_ok_true_returns_ok(tmp_path: Path) -> None:
     result = json.loads(
-        await FsWrite.remove_path(
-            path=str(tmp_path / "ghost.txt"), missing_ok=True
-        )
+        await FsWrite.remove_path(path=str(tmp_path / "ghost.txt"), missing_ok=True)
     )
     assert result["ok"] is True
 
 
 async def test_remove_path_missing_ok_false_returns_error(tmp_path: Path) -> None:
     result = json.loads(
-        await FsWrite.remove_path(
-            path=str(tmp_path / "ghost.txt"), missing_ok=False
-        )
+        await FsWrite.remove_path(path=str(tmp_path / "ghost.txt"), missing_ok=False)
     )
     assert result["ok"] is False
 
@@ -192,9 +188,7 @@ async def test_diff_files_missing_file_returns_error(tmp_path: Path) -> None:
     f1.write_text("hi")
 
     result = json.loads(
-        await FsWrite.diff_files(
-            file_a=str(f1), file_b=str(tmp_path / "missing.txt")
-        )
+        await FsWrite.diff_files(file_a=str(f1), file_b=str(tmp_path / "missing.txt"))
     )
 
     assert result["ok"] is False

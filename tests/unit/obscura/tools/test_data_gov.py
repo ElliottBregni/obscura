@@ -2,6 +2,7 @@
 
 Tests the CKAN API path, the HTML fallback path, and error handling.
 """
+
 from __future__ import annotations
 
 import httpx

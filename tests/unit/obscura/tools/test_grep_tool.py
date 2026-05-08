@@ -4,6 +4,7 @@ Policy bypass: autouse fixture sets OBSCURA_UNSAFE_FULL_ACCESS=1.
 Python-fallback tests use real tmp_path files; ripgrep tests patch
 asyncio.create_subprocess_exec so no rg binary is required.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,7 +63,9 @@ async def test_grep_python_content_mode_finds_match(
     (tmp_path / "target.py").write_text("hello world\nno match here\n")
 
     result = json.loads(
-        await Grep.grep_files(pattern="hello", path=str(tmp_path), output_mode="content")
+        await Grep.grep_files(
+            pattern="hello", path=str(tmp_path), output_mode="content"
+        )
     )
 
     assert result["ok"] is True
@@ -93,9 +96,7 @@ async def test_grep_python_files_with_matches_mode(
     assert "match.py" in files[0]
 
 
-async def test_grep_python_count_mode(
-    tmp_path: Path, _python_fallback: None
-) -> None:
+async def test_grep_python_count_mode(tmp_path: Path, _python_fallback: None) -> None:
     from obscura.tools.system._grep import Grep
 
     (tmp_path / "data.txt").write_text("needle\nneedle\nneedle\n")
@@ -151,9 +152,7 @@ async def test_grep_python_invalid_regex_returns_error(
 
     (tmp_path / "f.txt").write_text("anything\n")
 
-    result = json.loads(
-        await Grep.grep_files(pattern="[unclosed", path=str(tmp_path))
-    )
+    result = json.loads(await Grep.grep_files(pattern="[unclosed", path=str(tmp_path)))
 
     assert result["ok"] is False
     assert "invalid_regex" in result.get("error", "")
@@ -219,9 +218,7 @@ async def test_grep_python_binary_extension_skipped(
     # Write a .pyc file — Python fallback should skip it
     (tmp_path / "compiled.pyc").write_bytes(b"match this binary content match")
 
-    result = json.loads(
-        await Grep.grep_files(pattern="match", path=str(tmp_path))
-    )
+    result = json.loads(await Grep.grep_files(pattern="match", path=str(tmp_path)))
 
     assert result["ok"] is True
     # Binary file skipped → 0 matches (or at least no .pyc match)
@@ -250,9 +247,7 @@ async def test_grep_ripgrep_content_mode_parses_output(tmp_path: Path) -> None:
             new=AsyncMock(return_value=proc),
         ),
     ):
-        result = json.loads(
-            await Grep.grep_files(pattern="hello", path=str(tmp_path))
-        )
+        result = json.loads(await Grep.grep_files(pattern="hello", path=str(tmp_path)))
 
     assert result["ok"] is True
     assert result["count"] >= 1
@@ -301,9 +296,7 @@ async def test_grep_ripgrep_timeout_returns_error(tmp_path: Path) -> None:
             new=AsyncMock(return_value=proc),
         ),
     ):
-        result = json.loads(
-            await Grep.grep_files(pattern="x", path=str(tmp_path))
-        )
+        result = json.loads(await Grep.grep_files(pattern="x", path=str(tmp_path)))
 
     assert result["ok"] is False
 
@@ -333,9 +326,7 @@ async def test_grep_ripgrep_head_limit_truncates(tmp_path: Path) -> None:
 
     (tmp_path / "f.txt").write_text("x\n")
     # Generate 300 fake rg output lines
-    lines = b"".join(
-        f"f.txt:{i}:match {i}\n".encode() for i in range(1, 301)
-    )
+    lines = b"".join(f"f.txt:{i}:match {i}\n".encode() for i in range(1, 301))
     proc = _fake_proc(stdout=lines)
 
     with (
@@ -347,9 +338,7 @@ async def test_grep_ripgrep_head_limit_truncates(tmp_path: Path) -> None:
         ),
     ):
         result = json.loads(
-            await Grep.grep_files(
-                pattern="match", path=str(tmp_path), head_limit=250
-            )
+            await Grep.grep_files(pattern="match", path=str(tmp_path), head_limit=250)
         )
 
     assert result["ok"] is True

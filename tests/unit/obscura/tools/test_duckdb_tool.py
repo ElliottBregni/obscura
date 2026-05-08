@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("duckdb")
+
 # Import system tools first to prime sys.modules and break the circular
 # dependency that agent_primitives → providers.__init__ → tools.system creates.
-from obscura.tools.system import get_system_tool_specs as _  # noqa: F401
-from obscura.tools.providers.agent_primitives import duckdb_query
+from obscura.tools.system import get_system_tool_specs as _  # noqa: E402, F401
+from obscura.tools.providers.agent_primitives import duckdb_query  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -109,8 +111,8 @@ def test_row_truncation_at_1000_rows() -> None:
     result = duckdb_query("SELECT * FROM range(1001) AS r(n)")
 
     assert result["ok"] is True
-    assert result["row_count"] == 1001       # true count
-    assert len(result["rows"]) == 1000       # capped
+    assert result["row_count"] == 1001  # true count
+    assert len(result["rows"]) == 1000  # capped
     assert result["truncated"] is True
 
 

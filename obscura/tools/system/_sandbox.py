@@ -124,6 +124,10 @@ class Sandbox:
             "asyncio": asyncio,
             "base64": __import__("base64"),
             "time": _time,
+            # Documented globals — injected so tool bodies never need import.
+            "os": __import__("os"),
+            "subprocess": __import__("subprocess"),
+            "urllib": __import__("urllib"),
         }
 
         # Wrap user code in an async function
