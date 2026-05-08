@@ -212,11 +212,19 @@ def build_layout(
                 nl += text.count("\n")
         return max(0, nl)
 
+    # The cursor must move with the scroll offset, otherwise prompt_toolkit
+    # auto-scrolls the window to keep the cursor on screen and our manual
+    # offset gets reset every frame. Anchoring the cursor at
+    # (last_line - offset) tells prompt_toolkit "this is the visible line",
+    # so it scrolls there. ``always_hide_cursor`` keeps it invisible.
+    def _cursor_y() -> int:
+        return max(0, _last_line_index() - max(0, state.transcript_scroll_offset))
+
     transcript_control = FormattedTextControl(
         text=lambda: transcript_text(state),
         focusable=False,
         show_cursor=False,
-        get_cursor_position=lambda: Point(x=0, y=_last_line_index()),
+        get_cursor_position=lambda: Point(x=0, y=_cursor_y()),
     )
     transcript_window = Window(
         content=transcript_control,
