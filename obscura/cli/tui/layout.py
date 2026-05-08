@@ -131,18 +131,20 @@ def _make_text_window(
     )
 
 
-def _scroll_to_bottom(window: Window) -> int:
-    """Compute a vertical scroll that pins the window at its last line.
+def _scroll_to_bottom(window: Window, offset_lines: int = 0) -> int:
+    """Compute a vertical scroll that pins the window near its last line.
 
-    Plumbed into :class:`Window`'s ``get_vertical_scroll`` so the
-    transcript pane auto-scrolls as new entries land. We want the
-    bottom-most line visible — so we return ``max(0, content_height -
-    window_height)``.
+    ``offset_lines`` is the user's manual scroll offset: ``0`` keeps the
+    pane auto-pinned to the tail (default), positive values scroll up by
+    that many lines. The caller (transcript window's ``get_vertical_scroll``)
+    closes over the live :class:`TUIState` so PageUp/PageDown keybindings
+    can drive this without rebuilding the layout.
     """
     info = window.render_info
     if info is None:
         return 0
-    return max(0, info.content_height - info.window_height)
+    bottom = max(0, info.content_height - info.window_height)
+    return max(0, bottom - max(0, offset_lines))
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +223,9 @@ def build_layout(
         wrap_lines=True,
         always_hide_cursor=True,
         height=Dimension(weight=1, min=1),
-        get_vertical_scroll=_scroll_to_bottom,
+        get_vertical_scroll=lambda w: _scroll_to_bottom(
+            w, state.transcript_scroll_offset
+        ),
         allow_scroll_beyond_bottom=False,
         style="class:tui.transcript",
     )

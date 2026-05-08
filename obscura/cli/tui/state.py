@@ -422,6 +422,13 @@ class TUIState(BaseModel):
     last_overflow_path: str = ""
     last_overflow_tool: str = ""
 
+    # Manual scroll offset for the transcript window, in lines from the
+    # bottom. ``0`` means "follow the tail" (auto-scroll). When the user
+    # presses PageUp / Up arrow this increments; on PageDown / Down it
+    # decrements; new submissions reset it to zero so the user always
+    # sees their own input echoed at the bottom.
+    transcript_scroll_offset: int = 0
+
     # ---- Mutators -------------------------------------------------------
     # Kept here (not on the renderer) so any caller — runtime, overlay,
     # slash-command — can update state without going through the renderer.

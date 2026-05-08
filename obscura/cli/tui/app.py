@@ -501,7 +501,8 @@ class ObscuraTUIApp:
                     body=(
                         "Ctrl-D quit · Ctrl-C cancel · Ctrl-K palette · "
                         "F1 help · F2 / Ctrl-G toggle-agents · "
-                        "Ctrl-T tool-call filter · Esc+Enter newline"
+                        "Ctrl-T tool-call filter · Esc+Enter newline · "
+                        "PgUp/PgDn or Shift+Up/Down scroll · End jump-to-tail"
                     ),
                     severity=Severity.INFO,
                     source="tui",
@@ -549,6 +550,46 @@ class ObscuraTUIApp:
         kb.add("f2")(_toggle_agents)
         kb.add("c-g")(_toggle_agents)
 
+        # ── Transcript scroll bindings ───────────────────────────────
+        # Drive ``state.transcript_scroll_offset`` (lines from the tail).
+        # _scroll_to_bottom honors this so the user can browse history;
+        # offset == 0 resumes auto-tail. New submissions reset to 0 in
+        # _handle_submit so the user always sees their own input echo.
+        _SCROLL_PAGE_LINES = 10
+        _SCROLL_LINE_STEP = 3
+
+        def _scroll_up_page(event: KeyPressEvent) -> None:
+            self._state.transcript_scroll_offset += _SCROLL_PAGE_LINES
+            self._invalidate()
+
+        def _scroll_down_page(event: KeyPressEvent) -> None:
+            self._state.transcript_scroll_offset = max(
+                0, self._state.transcript_scroll_offset - _SCROLL_PAGE_LINES
+            )
+            self._invalidate()
+
+        def _scroll_up_line(event: KeyPressEvent) -> None:
+            self._state.transcript_scroll_offset += _SCROLL_LINE_STEP
+            self._invalidate()
+
+        def _scroll_down_line(event: KeyPressEvent) -> None:
+            self._state.transcript_scroll_offset = max(
+                0, self._state.transcript_scroll_offset - _SCROLL_LINE_STEP
+            )
+            self._invalidate()
+
+        def _scroll_to_tail(event: KeyPressEvent) -> None:
+            self._state.transcript_scroll_offset = 0
+            self._invalidate()
+
+        kb.add("pageup")(_scroll_up_page)
+        kb.add("pagedown")(_scroll_down_page)
+        # Shift+Up/Down for line-by-line — plain Up/Down stay reserved
+        # for the input area's history navigation.
+        kb.add("s-up")(_scroll_up_line)
+        kb.add("s-down")(_scroll_down_line)
+        kb.add("end")(_scroll_to_tail)
+
         return Application(
             layout=self._layout.layout,
             key_bindings=merge_key_bindings([kb, *self._overlays.all_key_bindings()]),
@@ -576,6 +617,10 @@ class ObscuraTUIApp:
         # strict mode.
         if buffer is not None:  # pyright: ignore[reportUnnecessaryComparison]
             buffer.text = ""
+        # Resume auto-tail so the user sees their own input + the
+        # incoming response. Without this, submitting while scrolled up
+        # would echo the user's message off-screen.
+        self._state.transcript_scroll_offset = 0
         # Schedule the streaming work via the Application's own task
         # registry. ``Application.create_background_task`` runs the
         # coroutine inside the same asyncio Context as the Application's
