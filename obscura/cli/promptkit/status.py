@@ -215,96 +215,127 @@ def print_status_banner(status: PromptStatus) -> None:
         )
 
 
-def _build_toolbar_html(prompt_status: PromptStatus | None) -> str:  # pyright: ignore[reportUnusedFunction]
-    """Build the bottom toolbar: status line + optional agent panel.
+_DEFAULT_TOOLBAR_HINT = (
+    "  <b>!</b> for bash · <b>/help</b> for commands · <b>esc+enter</b> for newline"
+)
+
+
+def _build_toolbar_html(  # pyright: ignore[reportUnusedFunction]
+    prompt_status: PromptStatus | None,
+    streaming_status: StreamingStatus | None = None,
+) -> str:
+    """Build the bottom toolbar: status line + optional agent panel + spinner.
 
     Line 1: session · model · context % · hints
     Line 2+: running agent tree (only when agents are active)
+    Final line: spinner + activity (only while ``streaming_status.active``)
+
+    The spinner line is what surfaces "running tool X..." underneath the
+    prompt input rather than in the scrollback above it.
     """
-    if prompt_status is None:
-        return "  <b>!</b> for bash · <b>/help</b> for commands · <b>esc+enter</b> for newline"
+    streaming_active = streaming_status is not None and streaming_status.active
 
-    left_parts: list[str] = []
-    right_parts: list[str] = []
+    if prompt_status is None and not streaming_active:
+        return _DEFAULT_TOOLBAR_HINT
 
-    # Session title or short ID
-    if prompt_status.session_title:
-        left_parts.append(f"<b>{_html.escape(prompt_status.session_title)}</b>")
-    elif prompt_status.session_id:
-        left_parts.append(
-            f"<style fg='{_C_OVERLAY0.hex}'>"
-            f"{_html.escape(prompt_status.session_id[:8])}</style>"
-        )
+    lines: list[str] = []
 
-    # Model
-    if prompt_status.model:
-        left_parts.append(_html.escape(prompt_status.model))
+    if prompt_status is not None:
+        left_parts: list[str] = []
+        right_parts: list[str] = []
 
-    # Context usage
-    if prompt_status.ctx_pct > 0:
-        pct = prompt_status.ctx_pct
-        if pct >= 80:
-            ctx_str = f"<style fg='{_C_RED.hex}'>{pct}% context</style>"
-        elif pct >= 60:
-            ctx_str = f"<style fg='{_C_PEACH.hex}'>{pct}% context</style>"
-        else:
-            ctx_str = f"{pct}% context"
-        left_parts.append(ctx_str)
+        # Session title or short ID
+        if prompt_status.session_title:
+            left_parts.append(f"<b>{_html.escape(prompt_status.session_title)}</b>")
+        elif prompt_status.session_id:
+            left_parts.append(
+                f"<style fg='{_C_OVERLAY0.hex}'>"
+                f"{_html.escape(prompt_status.session_id[:8])}</style>"
+            )
 
-    # Task count if active
-    if prompt_status.task_count > 0:
-        left_parts.append(f"<b>{prompt_status.task_count}</b> tasks")
+        # Model
+        if prompt_status.model:
+            left_parts.append(_html.escape(prompt_status.model))
 
-    # Agent count
-    if prompt_status.running_agents:
-        n = len(prompt_status.running_agents)
-        left_parts.append(f"<b>{n}</b> agent{'s' if n != 1 else ''}")
+        # Context usage
+        if prompt_status.ctx_pct > 0:
+            pct = prompt_status.ctx_pct
+            if pct >= 80:
+                ctx_str = f"<style fg='{_C_RED.hex}'>{pct}% context</style>"
+            elif pct >= 60:
+                ctx_str = f"<style fg='{_C_PEACH.hex}'>{pct}% context</style>"
+            else:
+                ctx_str = f"{pct}% context"
+            left_parts.append(ctx_str)
 
-    # Shortcut hints (right side)
-    right_parts.append("<b>!</b> bash")
-    right_parts.append("<b>/help</b>")
-    right_parts.append("<b>esc+enter</b> newline")
+        # Task count if active
+        if prompt_status.task_count > 0:
+            left_parts.append(f"<b>{prompt_status.task_count}</b> tasks")
 
-    left = " · ".join(left_parts)
-    right = " · ".join(right_parts)
-    status_line = f"  {left}    {right}"
+        # Agent count
+        if prompt_status.running_agents:
+            n = len(prompt_status.running_agents)
+            left_parts.append(f"<b>{n}</b> agent{'s' if n != 1 else ''}")
 
-    # ── Agent panel (tree-connected lines below status) ─────────────────
-    agents = prompt_status.agent_details
-    if not agents:
-        return status_line
+        # Shortcut hints (right side)
+        right_parts.append("<b>!</b> bash")
+        right_parts.append("<b>/help</b>")
+        right_parts.append("<b>esc+enter</b> newline")
 
-    lines = [status_line]
-    for i, ag in enumerate(agents):
-        is_last = i == len(agents) - 1
-        tree = "└─" if is_last else "├─"
+        left = " · ".join(left_parts)
+        right = " · ".join(right_parts)
+        lines.append(f"  {left}    {right}")
 
-        # Status indicator
-        if ag.status == "running":
-            bullet = "<style fg='#a6e3a1'>●</style>"
-        elif ag.status == "waiting":
-            bullet = "<style fg='#fab387'>○</style>"
-        else:
-            bullet = "<style fg='#6c7086'>◌</style>"
+        # ── Agent panel (tree-connected lines below status) ─────────────
+        for i, ag in enumerate(prompt_status.agent_details):
+            is_last = i == len(prompt_status.agent_details) - 1
+            tree = "└─" if is_last else "├─"
 
-        name_esc = _html.escape(ag.name)
-        elapsed = _html.escape(ag.elapsed_display)
+            if ag.status == "running":
+                bullet = "<style fg='#a6e3a1'>●</style>"
+            elif ag.status == "waiting":
+                bullet = "<style fg='#fab387'>○</style>"
+            else:
+                bullet = "<style fg='#6c7086'>◌</style>"
 
-        agent_line = (
-            f"  <style fg='#45475a'>{tree}</style> "
-            f"{bullet} <b>{name_esc}</b>"
-            f"  <style fg='#6c7086'>{elapsed}</style>"
-        )
+            name_esc = _html.escape(ag.name)
+            elapsed = _html.escape(ag.elapsed_display)
 
-        if ag.iteration_count > 0:
-            agent_line += f"  <style fg='#6c7086'>{ag.iteration_count} turns</style>"
+            agent_line = (
+                f"  <style fg='#45475a'>{tree}</style> "
+                f"{bullet} <b>{name_esc}</b>"
+                f"  <style fg='#6c7086'>{elapsed}</style>"
+            )
+            if ag.iteration_count > 0:
+                agent_line += (
+                    f"  <style fg='#6c7086'>{ag.iteration_count} turns</style>"
+                )
+            lines.append(agent_line)
 
-        lines.append(agent_line)
+            if ag.last_tool and ag.status == "running":
+                pad = "   " if is_last else "<style fg='#45475a'>│</style>  "
+                tool_esc = _html.escape(ag.last_tool)
+                lines.append(f"  {pad}<style fg='#89b4fa'>⍿ {tool_esc}</style>")
 
-        # Last tool activity line
-        if ag.last_tool and ag.status == "running":
-            pad = "   " if is_last else "<style fg='#45475a'>│</style>  "
-            tool_esc = _html.escape(ag.last_tool)
-            lines.append(f"  {pad}<style fg='#89b4fa'>⍿ {tool_esc}</style>")
+    # ── Streaming activity (spinner + tool/thinking text) ──────────────
+    # Renders directly under the prompt input — what the user sees while
+    # a tool is running or the model is thinking. Lives in the bottom
+    # toolbar (not the scrollback) so it doesn't drift to the top of the
+    # terminal as text accumulates above.
+    if streaming_active:
+        assert streaming_status is not None
+        spinner_char = _html.escape(streaming_status.spinner_char)
+        text = _html.escape(streaming_status.text or "")
+        preview = _html.escape(streaming_status.preview or "")
+        parts: list[str] = [
+            f"<style fg='{_C_BLUE.hex}' bg='default'><b>{spinner_char}</b></style>",
+        ]
+        if text:
+            parts.append(f"<b>{text}</b>")
+        if preview:
+            parts.append(f"<style fg='{_C_OVERLAY0.hex}'>{preview}</style>")
+        lines.append("  " + " ".join(parts))
 
+    if not lines:
+        return _DEFAULT_TOOLBAR_HINT
     return "\n".join(lines)

@@ -26,7 +26,11 @@ import sys
 import textwrap
 import time
 from enum import Enum
+from io import StringIO
 from typing import Any
+
+from rich.console import Console as RichConsole
+from rich.markdown import Markdown as RichMarkdown
 
 from obscura.cli.renderer.modern.layout import get_border_chars
 from obscura.cli.renderer.reveal import compute_reveal_burst as _compute_reveal_burst
@@ -100,6 +104,43 @@ def _wrap(text: str, width: int) -> list[str]:
         else:
             wrapped.extend(textwrap.wrap(raw, width=width) or [""])
     return wrapped
+
+
+_CODE_THEME = "monokai"
+
+
+def _render_markdown_lines(text: str, width: int) -> list[str]:
+    """Render ``text`` as Rich Markdown into ANSI-styled lines.
+
+    Falls back to plain word-wrap if Rich rendering raises (so a malformed
+    markdown blob never breaks the live region). Output lines retain their
+    embedded ANSI escapes so the caller can prepend padding without losing
+    styling.
+    """
+    if width <= 0:
+        return [""]
+    try:
+        buf = StringIO()
+        rich_console = RichConsole(
+            file=buf,
+            force_terminal=True,
+            color_system="truecolor",
+            width=width,
+            legacy_windows=False,
+            highlight=False,
+            soft_wrap=False,
+        )
+        rich_console.print(RichMarkdown(text, code_theme=_CODE_THEME))
+        rendered = buf.getvalue().rstrip("\n")
+        if not rendered:
+            return [""]
+        # Strip trailing whitespace per line — Rich pads to width with spaces
+        # for some block elements, which would draw visible boxes once we
+        # prepend the hook indent.
+        return [line.rstrip() for line in rendered.split("\n")]
+    except Exception:
+        logger.debug("markdown render failed; falling back to plain wrap", exc_info=True)
+        return _wrap(text, width)
 
 
 # ---------------------------------------------------------------------------
@@ -633,14 +674,16 @@ class ModernRenderer:
     # ── Flush helpers ─────────────────────────────────────────────────────
 
     def _flush_text(self) -> None:
-        """Commit streaming text permanently."""
+        """Commit streaming text permanently, rendered as Rich Markdown."""
         self._erase_live_region()
         full_text = "".join(self._stream_buf)
         if full_text.strip():
             w = self._width
             # Indent response under the ⎿ hook (like Claude Code)
             hook_prefix = _styled(f"  {_HOOK}  ", STYLE_DIM)
-            content_lines = _wrap(_sanitize(full_text), max(1, w - 5))
+            content_lines = _render_markdown_lines(
+                _sanitize(full_text), max(1, w - 5)
+            )
             lines: list[str] = []
             for i, cl in enumerate(content_lines):
                 if i == 0:
@@ -762,42 +805,11 @@ class ModernRenderer:
         for line in self._render_notifications():
             lines.append(line)
 
-        # 4. Session status bar (shown during active streaming/thinking)
-        if (
-            self._spinner_visible or self._in_thinking or self._stream_buf
-        ) and self._session_title:
-            status_parts: list[str] = []
-            if self._session_title:
-                status_parts.append(self._session_title)
-            if self._session_model:
-                status_parts.append(self._session_model)
-            if self._session_ctx_pct > 0:
-                status_parts.append(f"{self._session_ctx_pct}% context")
-            status_text = "  " + " · ".join(status_parts)
-            if len(status_text) > w:
-                status_text = status_text[:w]
-            lines.append(_styled(status_text, Style(fg=MUTED, dim=True)))
-
-        # 4. Spinner with animated dots + elapsed timer
-        if self._spinner_visible:
-            spinner_char = _SPINNER_FRAMES[self._spinner_idx % len(_SPINNER_FRAMES)]
-            dots = "." * (self._dot_phase + 1)
-            base = self._spinner_text.rstrip(".")
-            elapsed = time.monotonic() - self._spinner_start
-            timer = ""
-            if elapsed >= 1.0:
-                if elapsed < 60:
-                    timer = f"  {elapsed:.1f}s"
-                else:
-                    m, s = divmod(int(elapsed), 60)
-                    timer = f"  {m}m{s:02d}s"
-
-            spinner_line = (
-                _styled(f"  {spinner_char} ", STYLE_ACCENT)
-                + _styled(f"{base}{dots}", STYLE_DIM)
-                + _styled(timer, Style(fg=MUTED, dim=True))
-            )
-            lines.append(spinner_line)
+        # Session status + tool spinner intentionally omitted from the live
+        # region — they're rendered in prompt_toolkit's bottom_toolbar
+        # (driven by ``StreamingStatus``) so they sit *below* the input
+        # rather than drifting to the top of the terminal as scrollback
+        # accumulates above.
 
         return lines
 
