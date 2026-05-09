@@ -29,8 +29,9 @@ def register_vector_memory_hooks(
     *,
     vector_store: VectorMemoryStore | None = None,
     session_id: str = "",
-    top_k: int = 5,
+    top_k: int = 3,
     recency_weight: float = 0.3,
+    inject_vector_memory: bool = True,
 ) -> None:
     """Register vector memory hooks on a supervisor SessionHookManager.
 
@@ -50,12 +51,22 @@ def register_vector_memory_hooks(
     session_id:
         Current session ID for memory namespacing.
     top_k:
-        Number of memories to retrieve per query.
+        Number of memories to retrieve per query. Defaults to 3 (was 5).
     recency_weight:
         Weight for recency in reranking (0=ignore time, 1=most recent only).
+    inject_vector_memory:
+        When False the PRE_BUILD_CONTEXT injection hook is skipped entirely,
+        saving one vector search per turn. The POST_MODEL_TURN save hook is
+        still registered so memories accumulate for future sessions.
     """
     if vector_store is None:
         logger.debug("No vector store provided — skipping vector memory hooks")
+        return
+
+    if not inject_vector_memory:
+        logger.debug("inject_vector_memory=False — skipping PRE_BUILD_CONTEXT hook")
+        # Fall through to register only the save hook below.
+        _register_save_hook_only(hooks, vector_store, session_id)
         return
 
     # -- PRE_BUILD_CONTEXT: inject relevant memories into prompt assembly -----
@@ -139,6 +150,44 @@ def register_vector_memory_hooks(
     logger.info(
         "Registered vector memory hooks (top_k=%d, recency=%.1f)", top_k, recency_weight
     )
+
+
+def _register_save_hook_only(
+    hooks: SessionHookManager,
+    vector_store: VectorMemoryStore,
+    session_id: str,
+) -> None:
+    """Register only the POST_MODEL_TURN save hook (injection disabled)."""
+
+    async def _save_turn_to_memory(context: dict[str, Any]) -> None:
+        """Save significant model turns to vector memory for future recall."""
+        try:
+            agent_event = context.get("agent_event")
+            if agent_event is None:
+                return
+
+            text = getattr(agent_event, "text", "")
+            if not text or len(text) < 50:
+                return
+
+            namespace = f"session:{session_id}" if session_id else "session:unknown"
+            vector_store.set(
+                key=f"turn-{context.get('run_id', 'unknown')}",
+                text=text[:2000],
+                namespace=namespace,
+                metadata={"session_id": session_id, "source": "supervisor"},
+            )
+        except Exception:
+            logger.debug("Failed to save turn to vector memory", exc_info=True)
+
+    hooks.register(
+        SupervisorHookPoint.POST_MODEL_TURN,
+        "after",
+        "vector_memory_save",
+        _save_turn_to_memory,
+        persist=False,
+    )
+    logger.info("Registered vector memory save hook only (injection disabled)")
 
 
 __all__ = ["register_vector_memory_hooks"]
