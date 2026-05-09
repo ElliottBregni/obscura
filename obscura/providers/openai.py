@@ -795,12 +795,45 @@ class OpenAIBackend(BackendToolHostMixin):
         if self._system_prompt and "instructions" not in req:
             req["instructions"] = self._system_prompt
         if self._tools and "tools" not in req:
+            from obscura.core.tool_tiering import (
+                CORE_TOOL_NAMES,
+                DISCOVERED_TOOLS,
+                filter_visible,
+            )
+            from obscura.core.tool_observability import (
+                TurnToolStats,
+                emit_turn_tool_stats,
+            )
+
+            registry_total = len(self._tools)
             tools_to_send = list(self._tools)
 
             # Apply eval-driven tool routing if a router is configured.
             if self._tool_router is not None:
                 result: RoutingResult = self._tool_router.select(prompt, tools_to_send)
                 tools_to_send = result.tools
+
+            # Phase-2 tier filter: drop deferred-and-undiscovered tools
+            # from the per-turn payload. ``tool_search(select:<name>)``
+            # marks deferred tools discovered, so subsequent turns include
+            # them. No-op when no discovery context is bound.
+            pre_filter = list(tools_to_send)
+            tools_to_send = filter_visible(tools_to_send)
+            sent_names = {t.name for t in tools_to_send}
+            dropped_names = tuple(
+                t.name for t in pre_filter if t.name not in sent_names
+            )
+            discovered_set = DISCOVERED_TOOLS.get() or set()
+            emit_turn_tool_stats(
+                TurnToolStats(
+                    backend="openai",
+                    registry_total=registry_total,
+                    core_count=sum(1 for n in sent_names if n in CORE_TOOL_NAMES),
+                    discovered_count=sum(1 for n in sent_names if n in discovered_set),
+                    sent_count=len(tools_to_send),
+                    dropped=dropped_names,
+                ),
+            )
 
             req["tools"] = [
                 ToolCallDefinition(
@@ -936,11 +969,44 @@ class OpenAIBackend(BackendToolHostMixin):
 
         # Register tools as OpenAI function calling format
         if self._tools:
+            from obscura.core.tool_tiering import (
+                CORE_TOOL_NAMES,
+                DISCOVERED_TOOLS,
+                filter_visible,
+            )
+            from obscura.core.tool_observability import (
+                TurnToolStats,
+                emit_turn_tool_stats,
+            )
+
+            registry_total = len(self._tools)
             tools_to_send = list(self._tools)
 
             if self._tool_router is not None:
                 routed: RoutingResult = self._tool_router.select("", tools_to_send)
                 tools_to_send = routed.tools
+
+            # Phase-2 tier filter: drop deferred-and-undiscovered tools
+            # from the per-turn payload. ``tool_search(select:<name>)``
+            # marks deferred tools discovered, so subsequent turns include
+            # them. No-op when no discovery context is bound.
+            pre_filter = list(tools_to_send)
+            tools_to_send = filter_visible(tools_to_send)
+            sent_names = {t.name for t in tools_to_send}
+            dropped_names = tuple(
+                t.name for t in pre_filter if t.name not in sent_names
+            )
+            discovered_set = DISCOVERED_TOOLS.get() or set()
+            emit_turn_tool_stats(
+                TurnToolStats(
+                    backend="openai",
+                    registry_total=registry_total,
+                    core_count=sum(1 for n in sent_names if n in CORE_TOOL_NAMES),
+                    discovered_count=sum(1 for n in sent_names if n in discovered_set),
+                    sent_count=len(tools_to_send),
+                    dropped=dropped_names,
+                ),
+            )
 
             tool_defs = [
                 ToolCallDefinition(

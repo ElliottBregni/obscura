@@ -65,7 +65,9 @@ from obscura.core.enums.agent import APERMode, AgentEventKind, AgentPhase, HookP
 from obscura.core.types import AgentContext
 
 if TYPE_CHECKING:
-    from obscura.core.client import ObscuraClient
+    # Accepts ObscuraClient OR AgentSession — duck-typed
+    from typing import Any as ObscuraClient  # noqa: F401
+
     from obscura.core.context import ContextLoader
 
 __all__ = ["APERLoopAgent", "APERMode"]

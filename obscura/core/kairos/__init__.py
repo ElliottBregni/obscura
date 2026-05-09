@@ -53,7 +53,11 @@ from obscura.core.kairos.errors import (
     TaskNotFoundError,
     TaskRetryLimitError,
 )
-from obscura.core.kairos.goal_store import GoalStore
+from obscura.core.kairos.goal_store import (
+    GoalStore,
+    GoalStoreProtocol,
+    create_goal_store,
+)
 from obscura.core.kairos.kairos import Kairos
 from obscura.core.kairos.plan_engine import PlanEngine
 from obscura.core.kairos.schema import (
@@ -102,8 +106,10 @@ __all__ = [
     "KairosEventKind",
     # Components (for advanced use)
     "GoalStore",
+    "GoalStoreProtocol",
     "PlanEngine",
     "TaskRunner",
+    "create_goal_store",
     # Schema
     "REQUIRED_TABLES",
     "init_kairos_schema",

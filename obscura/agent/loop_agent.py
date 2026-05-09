@@ -6,7 +6,10 @@ new user input or inter-agent messages via an async queue.
 
 Usage::
 
-    from obscura.core.client import ObscuraClient
+    # Accepts ObscuraClient OR AgentSession — both expose run_loop /
+    # send / stream / on_confirm. Typed as Any to avoid coupling the
+    # helper to either concrete class.
+    from typing import Any as ObscuraClient  # noqa: F401
     from obscura.agent.loop_agent import LoopAgent
 
     async with ObscuraClient("copilot", system_prompt="...") as client:
@@ -37,7 +40,10 @@ from obscura.agent.interaction import (
 from obscura.core.enums.agent import AgentEventKind
 
 if TYPE_CHECKING:
-    from obscura.core.client import ObscuraClient
+    # Accepts ObscuraClient OR AgentSession — both expose run_loop /
+    # send / stream / on_confirm. Typed as Any to avoid coupling the
+    # helper to either concrete class.
+    from typing import Any as ObscuraClient  # noqa: F401
 
 __all__ = ["LoopAgent"]
 

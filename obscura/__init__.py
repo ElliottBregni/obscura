@@ -99,7 +99,6 @@ __all__ = [
     "WorkflowRunRequest",
     "bind_tool_context",
     "current_tool_context",
-    "is_v2_enabled",
     "make_agent_loop",
     "tool",
 ]

@@ -23,6 +23,18 @@ capability = "data.duckdb"
 side_effects = "read"
 handler = "obscura.tools.providers.agent_primitives:duckdb_query"
 
+[tools.parameters]
+type = "object"
+required = ["query"]
+
+[tools.parameters.properties.query]
+type = "string"
+description = "SQL query to execute."
+
+[tools.parameters.properties.database]
+type = "string"
+description = "Path to a DuckDB database file, or ':memory:' for in-memory (default)."
+
 [bootstrap]
 deps = [
     { type = "pip", package = "duckdb", optional = true },

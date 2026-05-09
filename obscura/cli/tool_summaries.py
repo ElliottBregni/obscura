@@ -3,10 +3,43 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# Categorical "kind" used by both the bordered REPL and the TUI to
+# colour the tool-call indicator differently per source. Keeps native
+# tools, shell calls, plugin tools, MCP shadows, and sub-agent
+# delegations visually distinguishable in long sessions.
+ToolKind = Literal["native", "shell", "mcp", "plugin", "delegation"]
+
+
+def classify_tool(tool_name: str) -> ToolKind:
+    """Bucket ``tool_name`` into a render-friendly category.
+
+    The categories are visual hints, not semantic guarantees — the
+    rule of thumb is "what colour should the ``⏺`` glyph be". Order
+    matters: MCP and delegation are checked first because their names
+    overlap with the plugin pattern (underscore-separated).
+    """
+    if tool_name.startswith("mcp__"):
+        return "mcp"
+    if tool_name in {"task", "spawn_agents", "spawn_subagent"}:
+        return "delegation"
+    if tool_name in {"run_shell", "run_command", "bash", "shell"}:
+        return "shell"
+    if tool_name in _SUMMARIES:
+        return "native"
+    # Plugin tools are conventionally namespaced as ``<plugin>_<tool>``
+    # (e.g. ``fv-backend_fv_backend_call``, ``jira_jira_call``). The
+    # underscore heuristic is fuzzy — anything unrecognised that has a
+    # multi-segment name renders as "plugin"; everything else falls
+    # back to "native" so the default colour applies.
+    if "_" in tool_name and not tool_name.startswith("_"):
+        return "plugin"
+    return "native"
 
 
 def summarize_tool_call(tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -17,6 +50,8 @@ def summarize_tool_call(tool_name: str, tool_input: dict[str, Any]) -> str:
         grep_files {"pattern": "TODO", "path": "."}  ->  "Searching for 'TODO'"
         run_shell {"script": "ls -la"}  ->  "$ ls -la"
         edit_text_file {"path": "x.py", ...}  ->  "Editing x.py"
+        mcp__supabase__query {"sql": "select 1"}  ->  "supabase.query — select 1"
+        fv-backend_fv_backend_call {"path": "/api/x"}  ->  "fv-backend / fv_backend_call — /api/x"
 
     """
     fn = _SUMMARIES.get(tool_name)
@@ -25,7 +60,47 @@ def summarize_tool_call(tool_name: str, tool_input: dict[str, Any]) -> str:
             return fn(tool_input)
         except Exception:
             logger.debug("suppressed exception in summarize_tool_call", exc_info=True)
+    # MCP shadow names are ``mcp__<server>__<tool>``. Render that as
+    # ``server.tool`` plus the first arg so the user can tell which
+    # MCP fired without parsing the prefix every time.
+    if tool_name.startswith("mcp__"):
+        rest = tool_name[5:]
+        parts = rest.split("__", 1)
+        if len(parts) == 2:
+            server, tool = parts
+            arg_preview = _arg_preview(tool_input)
+            label = f"{server}.{tool}"
+            return f"{label} — {arg_preview}" if arg_preview else label
+    # Plugin-style names are ``<plugin>_<tool>``. Common plugins
+    # (jira, postman, fv-backend) repeat the plugin token in the tool
+    # name (e.g. ``jira_jira_call``); strip that duplication for a
+    # cleaner one-liner so the user sees ``jira / call — METHOD``
+    # rather than ``jira_jira_call(method=METHOD)``.
+    if "_" in tool_name and not tool_name.startswith("_"):
+        plugin, _, tool = tool_name.partition("_")
+        # Drop the duplicated ``<plugin>_`` prefix on the tool half.
+        if tool.startswith(f"{plugin}_"):
+            tool = tool[len(plugin) + 1 :]
+        if plugin and tool:
+            arg_preview = _arg_preview(tool_input)
+            label = f"{plugin} / {tool}"
+            return f"{label} — {arg_preview}" if arg_preview else label
     return _fallback(tool_name, tool_input)
+
+
+def _arg_preview(args: dict[str, Any]) -> str:
+    """Best-effort first-argument preview, ≤50 chars.
+
+    Picks the first non-empty string-looking value; falls back to
+    ``key=value`` for simpler types so the preview is always useful
+    for at-a-glance scanning.
+    """
+    for k, v in args.items():
+        if isinstance(v, str) and v:
+            return _trunc(v.split("\n", 1)[0], 50)
+        if isinstance(v, (int, float, bool)):
+            return f"{k}={v}"
+    return ""
 
 
 def _path_basename(args: dict[str, Any], key: str = "path") -> str:
@@ -265,6 +340,10 @@ _SUMMARIES: dict[str, Any] = {
     "write_text_file": _write,
     "edit_text_file": _edit,
     "append_text_file": _append,
+    # Bash is the Copilot SDK's built-in shell tool; reuse the
+    # ``run_shell`` summary so the rendered preview is identical.
+    "bash": _shell,
+    "shell": _shell,
     "list_directory": _list_dir,
     "tree_directory": _tree_dir,
     "make_directory": _mkdir,

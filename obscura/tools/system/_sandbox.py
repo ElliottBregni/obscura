@@ -73,7 +73,13 @@ class Sandbox:
         clean_name = re.sub(r"[^a-z0-9_]", "_", name.strip().lower())
         if not clean_name:
             return Policy.json_error("invalid_tool_name")
-        if clean_name in {s.name for s in get_system_tool_specs()}:
+        # Block names that collide with true built-ins only.
+        # Dynamic tools (already in Sandbox.dynamic_tools) can be overwritten —
+        # a re-create replaces the old handler in place.
+        builtin_names = {s.name for s in get_system_tool_specs()} - set(
+            Sandbox.dynamic_tools.keys()
+        )
+        if clean_name in builtin_names:
             return Policy.json_error("name_conflicts_with_builtin", name=clean_name)
 
         # Build the async handler function
@@ -124,6 +130,10 @@ class Sandbox:
             "asyncio": asyncio,
             "base64": __import__("base64"),
             "time": _time,
+            # Documented globals — injected so tool bodies never need import.
+            "os": __import__("os"),
+            "subprocess": __import__("subprocess"),
+            "urllib": __import__("urllib"),
         }
 
         # Wrap user code in an async function

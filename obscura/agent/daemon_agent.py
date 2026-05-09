@@ -59,7 +59,8 @@ from obscura.integrations.messaging.store import (
 )
 
 if TYPE_CHECKING:
-    from obscura.core.client import ObscuraClient
+    # Accepts ObscuraClient OR AgentSession — duck-typed
+    from typing import Any as ObscuraClient  # noqa: F401
 
 __all__ = [
     "DaemonAgent",

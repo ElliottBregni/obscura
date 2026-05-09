@@ -1,23 +1,21 @@
 """obscura.core.tool_bridge — Cross-backend tool dispatch helpers.
 
-Lives outside the v1/v2 agent loop split so both can use the same
-parameter-aliasing, structural bridging, JSON-Schema coercion, and
-truncation logic. Extracted from v1's ``agent_loop.AgentLoop._call_handler``
-so it survives the v1 deletion.
+Centralises parameter aliasing, structural bridging, JSON-Schema
+coercion, and large-output truncation so the agent loop and every
+backend wrapper share the same behavior.
 
 Public API:
 
 - :data:`PARAMETER_ALIASES` — provider-specific parameter rename table.
 - :data:`TOOL_BRIDGES` — structural input/output transforms keyed by
   canonical tool name.
-- :func:`call_tool_handler` — the canonical dispatch entry point. Replaces
-  ``obscura.core.agent_loop.call_tool_handler``.
+- :func:`call_tool_handler` — the canonical dispatch entry point.
 - :data:`MAX_TOOL_RESULT_SIZE` / :func:`maybe_truncate_result` — large
   tool output truncation with on-disk persistence.
 
-Internal callers (v1, v2 dispatch, provider wrappers) all funnel through
-:func:`call_tool_handler` so a tool's bridging behavior is identical
-regardless of which path invoked it.
+All internal callers (agent loop dispatch, provider wrappers) funnel
+through :func:`call_tool_handler` so a tool's bridging behavior is
+identical regardless of which path invoked it.
 """
 
 from __future__ import annotations
@@ -210,8 +208,9 @@ TOOL_BRIDGES: dict[
 async def call_tool_handler(spec: ToolSpec, inputs: dict[str, Any]) -> Any:
     """Dispatch a tool call through the shared bridging pipeline.
 
-    Used by both v1's ``AgentLoop._call_handler`` (deprecated) and v2's
-    dispatch path, plus the Claude/Copilot provider wrappers.
+    Used by the agent-loop dispatch path and by the Claude/Copilot
+    provider wrappers, so a tool's bridging behavior is identical
+    regardless of which path invoked it.
 
     Steps in order:
 

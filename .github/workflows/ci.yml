@@ -22,10 +22,18 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # ``main`` cuts releases; ``dev/experimental`` is the integration
+    # branch where most feature work lands before being squashed onto
+    # main, so it gets the same lint+typecheck+test gate. Tags are
+    # always validated regardless of branch.
+    branches: [main, dev/experimental]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    # Catch regressions before they merge onto either long-lived
+    # branch. ``dev/experimental`` PRs run the same pipeline ``main``
+    # PRs do — there's no reason to relax checks just because a PR
+    # isn't immediately release-bound.
+    branches: [main, dev/experimental]
   # Allow other workflows (e.g. release.yml) to reuse this pipeline.
   workflow_call:
 

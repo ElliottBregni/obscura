@@ -205,6 +205,27 @@ class MCPServerInfo:
     transport: MCPTransport
 
 
+@dataclass
+class MCPServerStatus:
+    """Per-server connection state surfaced to the UI surfaces.
+
+    The composition layer's ``install_mcp_servers`` block writes one
+    of these per configured server onto ``AgentSession`` so both the
+    bordered REPL session card and the TUI header can render the
+    same picture: green dot for connected (with a tool count), red
+    for failed (with the error). The raw error message is stashed
+    verbatim — it's already user-facing (``ConnectionRefused``,
+    ``HTTP 401``, etc.) and the diagnose-MCP slash command shows it
+    without further parsing.
+    """
+
+    name: str
+    state: Literal["connected", "failed", "unknown"]
+    transport: str = ""
+    tool_count: int = 0
+    error: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Error Codes (MCP-specific)
 # ---------------------------------------------------------------------------

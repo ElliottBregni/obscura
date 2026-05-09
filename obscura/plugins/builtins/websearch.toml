@@ -26,12 +26,44 @@ capability = "search.web"
 side_effects = "read"
 handler = "obscura.tools.providers.websearch:_handler_search"
 
+[tools.parameters]
+type = "object"
+required = ["query"]
+
+[tools.parameters.properties.query]
+type = "string"
+description = "Search query."
+
+[tools.parameters.properties.num_results]
+type = "integer"
+description = "Number of results to return (default 10)."
+
+[tools.parameters.properties.provider]
+type = "string"
+description = "Search provider: 'duckduckgo' (default), 'brave', 'google'."
+
 [[tools]]
 name = "websearch_news"
 description = "Search news articles"
 capability = "search.web"
 side_effects = "read"
 handler = "obscura.tools.providers.websearch:_handler_news"
+
+[tools.parameters]
+type = "object"
+required = ["query"]
+
+[tools.parameters.properties.query]
+type = "string"
+description = "News search query."
+
+[tools.parameters.properties.num_results]
+type = "integer"
+description = "Number of results to return (default 10)."
+
+[tools.parameters.properties.provider]
+type = "string"
+description = "Search provider: 'duckduckgo' (default), 'brave', 'google'."
 
 [[tools]]
 name = "websearch_images"
@@ -40,12 +72,23 @@ capability = "search.web"
 side_effects = "read"
 handler = "obscura.tools.providers.websearch:_handler_images"
 
+[tools.parameters]
+type = "object"
+
 [[tools]]
 name = "websearch_summarize"
 description = "Summarize a URL"
 capability = "search.web"
 side_effects = "read"
 handler = "obscura.tools.providers.websearch:_handler_summarize"
+
+[tools.parameters]
+type = "object"
+required = ["url"]
+
+[tools.parameters.properties.url]
+type = "string"
+description = "URL to summarize."
 
 [bootstrap]
 deps = [

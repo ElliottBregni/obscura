@@ -31,7 +31,7 @@ from obscura.memory.events import (
     make_event,
 )
 from obscura.memory.postgres_memory import PostgreSQLMemoryStore
-from obscura.memory.types import MemoryEntry, MemoryKey
+from obscura.memory.types import MemoryEntry, MemoryKey, MemoryStoreProtocol
 
 if TYPE_CHECKING:
     from obscura.auth.models import AuthenticatedUser
@@ -221,7 +221,7 @@ class MemoryStore:
             if datetime.now(UTC) > expires:
                 # Rowcount guard: only the thread that actually removes the
                 # row emits the event. Prevents double-emit when lazy-expire
-                # races with the reaper or a concurrent get().
+                # races with a concurrent get() on the same key.
                 if self._delete_row(key):
                     self._emit("expire", key, None, None)
                 return default
@@ -299,8 +299,8 @@ class MemoryStore:
     def clear_expired(self) -> int:
         """Clear all expired entries. Returns count deleted.
 
-        Does NOT emit events. Use :meth:`reap_expired` if you want the
-        reaper-style per-row event emission.
+        Does not emit events; lazy-expire in :meth:`get` handles the
+        per-row notification path. Postgres reaps the same way.
         """
         conn = self._get_conn()
         cursor = conn.execute(
@@ -309,34 +309,6 @@ class MemoryStore:
         )
         conn.commit()
         return cursor.rowcount
-
-    def _expired_keys(self) -> list[MemoryKey]:
-        """Return keys that have passed their ``expires_at``.
-
-        Used by the reaper to select candidates before the delete+emit pair.
-        The actual delete races with other threads; emission is gated on
-        whether *this* caller's delete actually removed the row.
-        """
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT namespace, key FROM memory "
-            "WHERE expires_at IS NOT NULL AND expires_at < ?",
-            (datetime.now(UTC),),
-        ).fetchall()
-        return [MemoryKey(namespace=r["namespace"], key=r["key"]) for r in rows]
-
-    def reap_expired(self) -> int:
-        """Delete expired rows and emit an ``expire`` event for each one.
-
-        Returns the number of rows *this* call reaped (races with lazy-expire
-        in :meth:`get` are resolved via rowcount: whichever deleter wins emits).
-        """
-        reaped = 0
-        for key in self._expired_keys():
-            if self._delete_row(key):
-                self._emit("expire", key, None, None)
-                reaped += 1
-        return reaped
 
     def get_stats(self) -> dict[str, Any]:
         """Get memory usage statistics."""
@@ -401,13 +373,14 @@ class GlobalMemoryStore(MemoryStore):
         super().set(*args, **kwargs)
 
 
-def create_memory_store(user: AuthenticatedUser) -> MemoryStore:
+def create_memory_store(user: AuthenticatedUser) -> MemoryStoreProtocol:
     """Factory: return a PostgreSQL or SQLite memory store based on config.
 
     When ``OBSCURA_DB_TYPE=postgresql``, returns a
     :class:`~obscura.memory.postgres_memory.PostgreSQLMemoryStore`.
     Otherwise returns the default SQLite-backed :class:`MemoryStore`.
+    Both impls satisfy :class:`MemoryStoreProtocol`.
     """
     if is_pg_configured():
-        return PostgreSQLMemoryStore.for_user(user)  # type: ignore[return-value]
+        return PostgreSQLMemoryStore.for_user(user)
     return MemoryStore.for_user(user)

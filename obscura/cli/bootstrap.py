@@ -31,7 +31,6 @@ from obscura.cli.render import (
     print_error,
     print_warning,
 )
-from obscura.core.client import ObscuraClient
 from obscura.tools.swarm import load_agent_configs
 from obscura.integrations.mcp.config_loader import (
     build_runtime_server_configs,
@@ -272,11 +271,20 @@ async def _start_imessage_daemon(  # pyright: ignore[reportUnusedFunction]
 
         bus.on_output(_on_output)
         logging.getLogger("obscura.agent.daemon_agent").setLevel(logging.WARNING)
-        daemon_client = ObscuraClient(
-            agent_def.model,
-            system_prompt=agent_def.system_prompt,
+        # Migrated from direct ObscuraClient construction to composition;
+        # session.run_loop_to_completion / .send / .reset_session quack
+        # the same way DaemonAgent expects.
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
+
+        daemon_client = await build_core_session(
+            SessionConfig(
+                backend=agent_def.model,
+                system_prompt=agent_def.system_prompt,
+                inject_claude_context=False,
+            ),
+            surface="a2a",
         )
-        await daemon_client.__aenter__()
         # Load persisted schedules from ~/.obscura/schedules.json
         try:
             _schedules_path = Path.home() / ".obscura" / "schedules.json"

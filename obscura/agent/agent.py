@@ -34,8 +34,10 @@ from obscura.core.enums.agent import AgentPhase, HookPoint
 from obscura.core.types import AgentContext
 
 if TYPE_CHECKING:
+    # Accepts ObscuraClient OR AgentSession — duck-typed
+    from typing import Any as ObscuraClient  # noqa: F401
+
     from obscura.agent.interaction import InteractionBus, UserResponse
-    from obscura.core.client import ObscuraClient
     from obscura.core.context import ContextLoader
 
 

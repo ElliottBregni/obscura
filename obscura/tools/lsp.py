@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
 
-# Module-level LSP manager (set by REPL/runtime at startup).
+# Module-level LSP manager (set by REPL/runtime at startup, or lazily on
+# first tool call if not pre-initialised by a composition block).
 _lsp_manager: Any = None
 
 
@@ -29,6 +30,23 @@ def set_lsp_manager(manager: Any) -> None:
     """Set the global LSP server manager."""
     global _lsp_manager
     _lsp_manager = manager
+
+
+async def _ensure_lsp_manager() -> Any:
+    """Return the LSP manager, lazily creating one if not yet initialised."""
+    global _lsp_manager
+    if _lsp_manager is not None:
+        return _lsp_manager
+    try:
+        from obscura.services.lsp.manager import LSPServerManager
+
+        _lsp_manager = LSPServerManager()
+        logger.debug(
+            "lsp: lazily initialised LSPServerManager(root=%s)", _lsp_manager._root
+        )
+    except Exception as exc:
+        logger.debug("lsp: failed to lazily initialise LSPServerManager: %s", exc)
+    return _lsp_manager
 
 
 def _format_location(loc: dict[str, Any]) -> str:
@@ -84,16 +102,17 @@ async def lsp_tool(
     line: int = 1,
     character: int = 1,
 ) -> str:
-    if _lsp_manager is None:
+    manager = await _ensure_lsp_manager()
+    if manager is None:
         return json.dumps(
             {
                 "ok": False,
                 "error": "lsp_not_available",
-                "detail": "LSP server manager not initialized",
+                "detail": "LSP server manager could not be initialised",
             },
         )
 
-    client = await _lsp_manager.get_client(file_path)
+    client = await manager.get_client(file_path)
     if client is None:
         return json.dumps(
             {

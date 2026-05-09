@@ -1101,6 +1101,22 @@ def _obscura_ascii_banner() -> None:
     sys.stdout.flush()
 
 
+def _mcp_status_label(srv: dict[str, Any]) -> str:
+    """Format a single MCP server entry for the inline status line.
+
+    Connected → green dot + name; failed → red dot + name; unknown
+    → grey dot + name. Markup is consumed by Rich so the colours
+    apply automatically.
+    """
+    state = str(srv.get("state", "unknown"))
+    name = str(srv.get("name", "?"))
+    if state == "connected":
+        return f"[{OK_COLOR}]●[/] {name}"
+    if state == "failed":
+        return f"[{ERROR_COLOR}]●[/] [dim]{name}[/]"
+    return f"[dim]○[/] [dim]{name}[/]"
+
+
 def print_banner(
     backend: str,
     model: str | None,
@@ -1108,13 +1124,21 @@ def print_banner(
     *,
     tool_count: int = 0,
     mcp_servers: list[str] | None = None,
+    mcp_status: list[dict[str, Any]] | None = None,
     mode: str = "code",
     available_agents: list[str] | None = None,
     agent_infos: list[Any] | None = None,
     health_checks: list[Any] | None = None,
     browser_status: dict[str, Any] | None = None,
 ) -> None:
-    """Print the REPL startup banner."""
+    """Print the REPL startup banner.
+
+    ``mcp_status`` is a list of dicts shaped
+    ``{"name", "state", "transport", "tool_count", "error"}`` —
+    rendered with per-server status badges and an error block for
+    each failed entry. Falls back to ``mcp_servers`` (list of names)
+    for legacy callers that haven't been updated yet.
+    """
     _obscura_ascii_banner()
 
     label = backend
@@ -1124,7 +1148,28 @@ def print_banner(
     info_parts: list[str] = []
     if tool_count:
         info_parts.append(f"[{TOOL_COLOR}]{tool_count} tools[/]")
-    if mcp_servers:
+    if mcp_status:
+        # "OK" = connected OR unknown (clean connection, no failure
+        # error). Only servers in ``MCPBackend.connection_errors``
+        # are "failed" and count against the badge.
+        ok_count = sum(
+            1 for s in mcp_status if s.get("state") in ("connected", "unknown")
+        )
+        failed_count = sum(1 for s in mcp_status if s.get("state") == "failed")
+        total = len(mcp_status)
+        if failed_count == 0 and ok_count > 0:
+            badge_color = OK_COLOR
+        elif failed_count > 0 and ok_count > 0:
+            badge_color = WARN_COLOR
+        elif failed_count > 0:
+            badge_color = ERROR_COLOR
+        else:
+            badge_color = ACCENT
+        names_inline = ", ".join(_mcp_status_label(s) for s in mcp_status)
+        info_parts.append(
+            f"[{badge_color}]MCP {ok_count}/{total}[/]: {names_inline}",
+        )
+    elif mcp_servers:
         info_parts.append(f"[{ACCENT}]MCP: {', '.join(mcp_servers)}[/]")
     if browser_status:
         b_name = browser_status.get("browser") or "browser"
@@ -1139,6 +1184,30 @@ def print_banner(
     console.print(f"  [bold]backend:[/]   [{ACCENT}]{label}[/]")
     if info_line:
         console.print(f"  {info_line}")
+
+    # Per-server failure block — one indented row per failed MCP
+    # server with the raw connection error so the user sees the
+    # 401 / DNS / EOF without running ``/mcp diagnose``.
+    if mcp_status:
+        failed_servers = [s for s in mcp_status if s.get("state") == "failed"]
+        if failed_servers:
+            console.print()
+            for srv in failed_servers:
+                name = str(srv.get("name", "?"))
+                err = str(srv.get("error", "")).strip()
+                console.print(
+                    f"  [{ERROR_COLOR}]✗ MCP {markup_escape(name)} "
+                    f"failed[/] [dim]— /mcp diagnose for details[/]",
+                )
+                if err:
+                    # Cap at one line to keep the banner compact;
+                    # full text is in the slash command.
+                    first_line = err.splitlines()[0] if "\n" in err else err
+                    if len(first_line) > 100:
+                        first_line = first_line[:97] + "..."
+                    console.print(
+                        f"    [dim]{markup_escape(first_line)}[/]",
+                    )
 
     # Show health warnings for degraded/unavailable optional dependencies
     if health_checks:

@@ -137,3 +137,5 @@ CLAUDE.md
 README.playwright.md
 SETUP.md
 docker-compose.yml
+build/
+obscura_agent.egg-info/

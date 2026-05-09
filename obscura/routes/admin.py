@@ -14,7 +14,7 @@ from obscura.auth.rbac import require_any_role, require_role
 from obscura.deps import audit_logs, get_runtime
 
 from obscura.auth.models import AuthenticatedUser
-from obscura.memory import MemoryStore
+from obscura.memory import create_memory_store
 from obscura.routes.agents import get_agent_templates
 from obscura.routes.webhooks import get_webhooks_store
 from obscura.routes.workflows import (
@@ -147,7 +147,7 @@ async def metrics_get(
         by_status[status] = by_status.get(status, 0) + 1
         by_model[model] = by_model.get(model, 0) + 1
 
-    store = MemoryStore.for_user(user)
+    store = create_memory_store(user)
     memory_stats = store.get_stats()
 
     return JSONResponse(

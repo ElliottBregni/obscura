@@ -30,12 +30,15 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import time as _time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -45,10 +48,10 @@ import yaml
 
 from obscura.arbiter.store import ArbiterStore
 from obscura.auth.cli_user import current_cli_user
-from obscura.core.kairos.goal_store import GoalStore
+from obscura.core.kairos.goal_store import create_goal_store
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.task_queue import TaskQueue
-from obscura.kairos.goals import GoalBoard
+from obscura.kairos.goals import GoalBoard, is_valid_status_transition
 from obscura.profile.builder import ProfileBuilder
 from obscura.profile.store import ProfileStore
 from obscura.vector_memory.vector_memory import VectorMemoryStore
@@ -66,6 +69,40 @@ def _empty_file_meta_list() -> list["FileMeta"]:
 
 def _empty_any_dict() -> dict[str, Any]:
     return {}
+
+
+def _run_async[T](coro: Awaitable[T]) -> T:
+    """Run *coro* to completion from synchronous code.
+
+    The export pipeline is sync (``_export_all`` calls each step
+    synchronously) but is itself dispatched from
+    ``VaultSync.sync()`` which is async — so an event loop is already
+    running on this thread. ``asyncio.run`` raises ``RuntimeError`` in
+    that case and the un-awaited coroutine leaks (visible as the
+    ``coroutine 'list_sessions' was never awaited`` warning).
+
+    Detect a running loop and, when present, drive *coro* on a worker
+    thread's own loop. Without a running loop, fall back to
+    ``asyncio.run`` (the simple path that tests / CLI scripts hit).
+    """
+    in_loop = True
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop on this thread — the simple path. Logged at
+        # debug because ``RuntimeError`` from ``get_running_loop`` is a
+        # signal, not a failure; we explicitly distinguish the two
+        # paths and want the choice to show up in deep logs.
+        logger.debug(
+            "_run_async: no running loop, using asyncio.run",
+            exc_info=True,
+        )
+        in_loop = False
+    if not in_loop:
+        return asyncio.run(cast("Any", coro))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, cast("Any", coro))
+        return cast("T", future.result())
 
 
 def _retry(
@@ -112,7 +149,16 @@ _ZONE_DIRS = (
     "shared/decisions",
     "shared/context",
     "shared/runbooks",
+    "shared/sessions",
 )
+
+
+# Caps for the session-log export. Tunable per-deployment without a
+# code change because the sync runs unattended and a runaway session
+# table shouldn't blow up the vault.
+_SESSION_PAGE_CAP = 50  # per-session pages kept on disk
+_DIGEST_RECENT_SESSIONS = 20  # rows shown in the digest body
+_DIGEST_LOG_TAIL = 500  # deep-log lines scanned for the digest stats
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +231,10 @@ class VaultSync:
         self.dry_run = bool(dry_run)
         self._prev_hashes: dict[str, str] = {}
         self._hash_file = self.vault_dir / ".sync_state.json"
+        # (goal_id, requested_status) pairs we've already info-logged about
+        # being illegal transitions. Without this, every sync tick re-logs
+        # the same WARNING as the in-memory FSM rejects the bad request.
+        self._logged_invalid_transitions: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------------
     # Bootstrap
@@ -386,12 +436,31 @@ class VaultSync:
             if conflicting is not None:
                 self._archive_conflict(conflicting)
 
-            # User file wins — overwrite in-memory version unconditionally.
+            # User file wins for content — but the lifecycle FSM still
+            # governs the status field. If the user's file requests an
+            # illegal transition (e.g. completed → in_progress because
+            # the markdown is older than the in-memory completion), we
+            # skip the status update rather than firing the GoalBoard
+            # validator's WARNING on every sync tick.
             fields: dict[str, Any] = {}
             if meta.frontmatter.get("priority"):
                 fields["priority"] = meta.frontmatter["priority"]
-            if meta.frontmatter.get("status"):
-                fields["status"] = meta.frontmatter["status"]
+            requested_status = meta.frontmatter.get("status")
+            if requested_status:
+                if is_valid_status_transition(existing.status, str(requested_status)):
+                    fields["status"] = requested_status
+                else:
+                    pair = (goal_id, str(requested_status))
+                    if pair not in self._logged_invalid_transitions:
+                        logger.info(
+                            "[vault] Skipping illegal status transition for goal %s: "
+                            "file requests %r but in-memory status is %r. "
+                            "Update the markdown frontmatter to clear this notice.",
+                            goal_id,
+                            requested_status,
+                            existing.status,
+                        )
+                        self._logged_invalid_transitions.add(pair)
             if meta.frontmatter.get("acceptance_criteria"):
                 fields["acceptance_criteria"] = meta.frontmatter["acceptance_criteria"]
             if meta.body:
@@ -462,7 +531,12 @@ class VaultSync:
             )
 
     def _ingest_task(self, meta: FileMeta) -> None:
-        """Create a task from a user-zone markdown file."""
+        """Create a task from a user-zone markdown file.
+
+        Vault sync runs on every tick over the same files, so the enqueue
+        is keyed on the source path (the natural fingerprint here). Two
+        ticks → one open task, not two duplicates.
+        """
         q = TaskQueue()
         subject = str(
             meta.frontmatter.get("title", meta.path.stem.replace("-", " ").title())
@@ -470,12 +544,16 @@ class VaultSync:
         priority_map = {"critical": 0, "high": 25, "medium": 50, "low": 75}
         priority = priority_map.get(str(meta.frontmatter.get("priority", "medium")), 50)
         goal_id = str(meta.frontmatter.get("goal_id", ""))
+        # Each markdown file maps to exactly one open task — key on
+        # absolute path (resilient to title edits between ticks).
+        dedupe_key = f"vault-task|{meta.path.resolve()}"
 
         q.enqueue(
             subject,
             description=meta.body,
             priority=priority,
             goal_id=goal_id,
+            dedupe_key=dedupe_key,
         )
         logger.debug("Vault ingest: created task '%s' from %s", subject, meta.path.name)
 
@@ -520,17 +598,68 @@ class VaultSync:
             logger.debug("Vector ingest failed", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Page rendering — single source of truth for vault frontmatter
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _render_page(
+        *,
+        page_type: str,
+        page_id: str,
+        body: str,
+        created_at: str = "",
+        updated_at: str = "",
+        generated_at: str = "",
+        extra_fields: dict[str, Any] | None = None,
+    ) -> str:
+        """Render a vault page with consistent frontmatter.
+
+        Two timestamp conventions:
+          - Entity pages (a goal, a task, a profile)  → ``created_at``
+            and ``updated_at``. ``generated_at`` is omitted.
+          - Snapshot pages (queue depth, latest verdicts) → ``generated_at``
+            only. ``created_at`` / ``updated_at`` are omitted.
+
+        Frontmatter ordering is fixed so consecutive sync ticks produce
+        byte-identical output when nothing changed (no spurious diffs).
+
+        ``extra_fields`` keys are appended after the canonical block in
+        their dict order. Values must be YAML-serializable.
+        """
+        ordered: dict[str, Any] = {"id": page_id, "type": page_type}
+        if generated_at:
+            ordered["generated_at"] = generated_at
+        if created_at:
+            ordered["created_at"] = created_at
+        if updated_at:
+            ordered["updated_at"] = updated_at
+        if extra_fields:
+            for key, val in extra_fields.items():
+                if key in ordered:
+                    continue
+                ordered[key] = val
+        fm = yaml.dump(ordered, default_flow_style=False, sort_keys=False)
+        body_text = body.rstrip()
+        return f"---\n{fm}---\n\n{body_text}\n" if body_text else f"---\n{fm}---\n"
+
+    # ------------------------------------------------------------------
     # Export (Obscura stores → agent zone)
     # ------------------------------------------------------------------
 
     def _export_all(self) -> int:
-        """Export Obscura state to the agent/ zone. Returns file count."""
+        """Export Obscura state to the agent/ + shared/ zones.
+
+        Returns total file count written. Each step is wrapped in
+        :func:`_retry` so a single transient I/O failure (e.g. fsync on
+        a busy disk) doesn't kill the whole export cycle.
+        """
         count = 0
         for fn, label in (
             (self._export_goals, "export_goals"),
             (self._export_queue_snapshot, "export_queue_snapshot"),
             (self._export_arbiter_verdicts, "export_arbiter_verdicts"),
             (self._export_profile_summary, "export_profile_summary"),
+            (self.export_session_logs, "export_session_logs"),
         ):
             try:
                 count += _retry(fn, label=label)
@@ -542,14 +671,16 @@ class VaultSync:
         """Export active goals to vault/agent/goals/.
 
         Reads from GoalStore (SQLite kairos.db) as the canonical source.
-        Falls back to GoalBoard (markdown files) for goals not yet in SQLite.
+        Falls back to GoalBoard (markdown files) for goals not yet in
+        SQLite. Each page goes through :meth:`_render_page` so the
+        frontmatter shape is uniform regardless of source.
+
+        Stale files (goals that no longer exist) are removed AFTER we've
+        written the live set, so other vault pages with backlinks to a
+        goal page won't observe a deletion mid-sync.
         """
         goals_dir = self.vault_dir / "agent" / "goals"
         goals_dir.mkdir(parents=True, exist_ok=True)
-
-        # Clean stale exports.
-        for old in goals_dir.glob("*.md"):
-            old.unlink()
 
         count = 0
         exported_ids: set[str] = set()
@@ -560,7 +691,7 @@ class VaultSync:
 
             db_path = resolve_obscura_home() / "kairos.db"
             if db_path.exists():
-                store = GoalStore(str(db_path))
+                store = create_goal_store(db_path)
                 try:
                     goals = store.list_goals()
                 finally:
@@ -580,17 +711,32 @@ class VaultSync:
                         if hasattr(goal.created_at, "isoformat")
                         else str(goal.created_at)
                     )
-                    data = {
-                        "id": goal.goal_id,
+                    # KAIROS Goals don't carry a separate updated_at —
+                    # the closest semantic timestamp is the most recent
+                    # state-change marker, which for an active goal is
+                    # started_at (work began) when set.
+                    updated_iso = ""
+                    started_at = getattr(goal, "started_at", None)
+                    if started_at is not None:
+                        updated_iso = (
+                            started_at.isoformat()
+                            if hasattr(started_at, "isoformat")
+                            else str(started_at)
+                        )
+                    extra: dict[str, Any] = {
                         "title": goal.title,
                         "status": status_val,
-                        "created_at": created_iso,
                         "success_criteria": list(goal.success_criteria),
                         "tags": list(goal.tags),
                     }
-                    fm = yaml.dump(data, default_flow_style=False, sort_keys=False)
-                    body = goal.description or ""
-                    content = f"---\n{fm}---\n\n{body}\n"
+                    content = self._render_page(
+                        page_type="goal",
+                        page_id=goal.goal_id,
+                        body=goal.description or "",
+                        created_at=created_iso,
+                        updated_at=updated_iso,
+                        extra_fields=extra,
+                    )
                     (goals_dir / f"{goal.goal_id}.md").write_text(
                         content, encoding="utf-8"
                     )
@@ -602,7 +748,6 @@ class VaultSync:
             )
 
         # --- Fallback / supplement: GoalBoard (markdown files) ---
-        # Export any goal whose ID isn't already covered by GoalStore above.
         try:
             board = GoalBoard()
             for goal in board.load_all():
@@ -610,28 +755,58 @@ class VaultSync:
                     continue
                 if goal.status in ("completed", "abandoned"):
                     continue
-                data = {
-                    "id": goal.id,
+                # Render linked tasks as a body section if any exist —
+                # currently no per-task page, so we list IDs as plain
+                # bullets. When per-task vault pages land, swap the
+                # bullet body for [[../tasks/<task_id>]] backlinks.
+                body_parts: list[str] = []
+                if goal.body:
+                    body_parts.append(goal.body)
+                if goal.tasks:
+                    body_parts.append("## Linked tasks")
+                    body_parts.extend(f"- {tid}" for tid in goal.tasks)
+                body = "\n\n".join(body_parts)
+
+                extra = {
                     "title": goal.title,
                     "status": goal.status,
                     "priority": goal.priority,
                     "progress": goal.progress,
-                    "created_at": goal.created,
-                    "updated_at": goal.updated,
                     "acceptance_criteria": list(goal.acceptance_criteria),
                     "tasks": list(goal.tasks),
                 }
-                fm = yaml.dump(data, default_flow_style=False, sort_keys=False)
-                content = f"---\n{fm}---\n\n{goal.body or ''}\n"
+                content = self._render_page(
+                    page_type="goal",
+                    page_id=goal.id,
+                    body=body,
+                    created_at=goal.created,
+                    updated_at=goal.updated,
+                    extra_fields=extra,
+                )
                 (goals_dir / f"{goal.id}.md").write_text(content, encoding="utf-8")
+                exported_ids.add(goal.id)
                 count += 1
         except Exception:
             logger.debug("GoalBoard export failed", exc_info=True)
 
+        # Sweep stale exports — files for goal IDs we did NOT just write.
+        # Done after writes so backlinks to live goals stay valid all the
+        # way through the export cycle.
+        for old in goals_dir.glob("*.md"):
+            if old.stem not in exported_ids:
+                with contextlib.suppress(OSError):
+                    old.unlink()
+
         return count
 
     def _export_queue_snapshot(self) -> int:
-        """Export pending tasks to vault/agent/tasks/queue-snapshot.md."""
+        """Export pending tasks to vault/agent/tasks/queue-snapshot.md.
+
+        The snapshot lists priority-bucket counts AND, when there are
+        few enough pending tasks, the top items linked back to their
+        goal page (``[[../goals/<goal_id>]]``). This gives the user a
+        navigable entry point from the snapshot to the goal context.
+        """
         try:
             q = TaskQueue()
             snapshot_path = self.vault_dir / "agent" / "tasks" / "queue-snapshot.md"
@@ -639,20 +814,16 @@ class VaultSync:
 
             depth = q.queue_depth()
             total = sum(depth.values())
+            now_iso = datetime.now(UTC).isoformat()
 
-            lines = [
-                "---",
-                "type: queue_snapshot",
-                f"generated: {datetime.now(UTC).isoformat()}",
-                f"total_pending: {total}",
-                "---",
-                "",
+            body_lines: list[str] = [
                 "# Task Queue Snapshot",
                 "",
                 f"**{total} pending tasks** across {len(depth)} priority levels.",
                 "",
+                "## By priority",
+                "",
             ]
-
             for prio_str, cnt in sorted(depth.items(), key=lambda x: int(x[0])):
                 prio_label = {
                     "0": "critical",
@@ -661,9 +832,33 @@ class VaultSync:
                     "75": "low",
                     "100": "lowest",
                 }.get(prio_str, f"p{prio_str}")
-                lines.append(f"- **{prio_label}**: {cnt} task(s)")
+                body_lines.append(f"- **{prio_label}**: {cnt} task(s)")
 
-            content = "\n".join(lines) + "\n"
+            # Top pending tasks with goal-page backlinks. Cap so the
+            # snapshot stays readable even when the queue is very deep.
+            top_tasks = self._top_pending_tasks(q, limit=20)
+            if top_tasks:
+                body_lines.extend(["", "## Top pending", ""])
+                for task in top_tasks:
+                    subject = str(task.get("subject", "")).strip() or task.get(
+                        "task_id", "?"
+                    )
+                    goal_id = str(task.get("goal_id", "")).strip()
+                    backlink = f" → [[../goals/{goal_id}]]" if goal_id else ""
+                    body_lines.append(
+                        f"- `{task.get('task_id', '?')}` {subject}{backlink}"
+                    )
+
+            content = self._render_page(
+                page_type="queue_snapshot",
+                page_id="queue-snapshot",
+                body="\n".join(body_lines),
+                generated_at=now_iso,
+                extra_fields={
+                    "total_pending": total,
+                    "priority_buckets": {k: v for k, v in depth.items()},
+                },
+            )
         except Exception:
             logger.debug("Queue snapshot export failed", exc_info=True)
             return 0
@@ -671,6 +866,36 @@ class VaultSync:
         # Write outside the data-fetch try/except so transient I/O errors can be retried.
         snapshot_path.write_text(content, encoding="utf-8")
         return 1
+
+    @staticmethod
+    def _top_pending_tasks(_q: TaskQueue, *, limit: int = 20) -> list[dict[str, Any]]:
+        """Return up to *limit* highest-priority pending tasks.
+
+        Reads directly through the queue's internal connection helper
+        (the *_q* arg is held for API symmetry with future TaskQueue
+        refactors that expose a public "list pending" method) — for now,
+        TaskQueue's public surface only offers next_ready (which claims),
+        so we open a read-only connection. The select is bounded by
+        *limit* so deep queues stay readable in the snapshot.
+        """
+        try:
+            from obscura.core import task_queue as _tq
+            from obscura.core.enums.lifecycle import TaskQueueStatus
+
+            conn = _tq._open()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            try:
+                rows = conn.execute(
+                    "SELECT task_id, subject, goal_id, priority "
+                    "FROM tasks WHERE status = ? "
+                    "ORDER BY priority ASC, created_at ASC LIMIT ?",
+                    (TaskQueueStatus.PENDING.value, limit),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("top_pending_tasks read failed", exc_info=True)
+            return []
 
     def _export_arbiter_verdicts(self) -> int:
         """Export recent Arbiter verdicts to vault/agent/arbiter/."""
@@ -702,12 +927,8 @@ class VaultSync:
             else:
                 trend_label = "insufficient data"
 
-            lines = [
-                "---",
-                "type: arbiter_verdicts",
-                f"generated: {datetime.now(UTC).isoformat()}",
-                "---",
-                "",
+            now_iso = datetime.now(UTC).isoformat()
+            body_lines = [
                 "# Recent Arbiter Verdicts",
                 "",
                 f"**{stats.get('total', 0)} total** evaluations "
@@ -715,12 +936,14 @@ class VaultSync:
                 f"Score trend (last 5 vs prev 5): **{trend_label}**"
                 f" — last5={avg_last5:.3f}, prev5={avg_prev5:.3f}",
                 "",
+                "## By verdict",
+                "",
             ]
 
             by_verdict = stats.get("by_verdict", {})
             for v, cnt in sorted(by_verdict.items()):
-                lines.append(f"- **{v}**: {cnt}")
-            lines.append("")
+                body_lines.append(f"- **{v}**: {cnt}")
+            body_lines.extend(["", "## Recent", ""])
 
             for row in recent[:10]:
                 verdict = row.get("verdict", "?")
@@ -729,13 +952,23 @@ class VaultSync:
                 session = row.get("session_id", "")
                 score = row.get("composite", 0)
                 feedback = (row.get("feedback") or "")[:80]
-                session_suffix = f" session={session}" if session else ""
-                lines.append(
+                session_suffix = f" session=`{session}`" if session else ""
+                body_lines.append(
                     f"- [{verdict}] {kind} `{target}`{session_suffix}"
                     f" (score={score:.2f}) {feedback}"
                 )
 
-            content = "\n".join(lines) + "\n"
+            content = self._render_page(
+                page_type="arbiter_verdicts",
+                page_id="latest-verdicts",
+                body="\n".join(body_lines),
+                generated_at=now_iso,
+                extra_fields={
+                    "total_evaluations": stats.get("total", 0),
+                    "avg_composite_score": stats.get("avg_composite_score", 0),
+                    "trend": trend_label,
+                },
+            )
         except Exception:
             logger.debug("Arbiter verdict export failed", exc_info=True)
             return 0
@@ -756,9 +989,11 @@ class VaultSync:
 
             out = self.vault_dir / "agent" / "profile-summary.md"
             out.parent.mkdir(parents=True, exist_ok=True)
-            content = (
-                f"---\ntype: profile_summary\n"
-                f"generated: {datetime.now(UTC).isoformat()}\n---\n\n{summary}\n"
+            content = self._render_page(
+                page_type="profile_summary",
+                page_id="profile-summary",
+                body=summary,
+                generated_at=datetime.now(UTC).isoformat(),
             )
         except Exception:
             logger.debug("Profile summary export failed", exc_info=True)
@@ -767,6 +1002,366 @@ class VaultSync:
         # Write outside the data-fetch try/except so transient I/O errors can be retried.
         out.write_text(content, encoding="utf-8")
         return 1
+
+    # ------------------------------------------------------------------
+    # Session log export — per-session pages + rolling digest
+    # ------------------------------------------------------------------
+
+    def export_session_logs(self) -> int:
+        """Public entry point: dump session logs to vault/shared/sessions/.
+
+        Writes up to ``_SESSION_PAGE_CAP`` per-session pages PLUS one
+        rolling ``recent-activity.md`` digest. Both run on every sync
+        tick and on-demand via the ``/vault dump-sessions`` slash
+        command.
+
+        Returns the total number of files written (per-session + digest).
+        """
+        return self._export_session_pages() + self._export_session_digest()
+
+    def _export_session_pages(self) -> int:
+        """Write one markdown page per session into vault/shared/sessions/.
+
+        Source: event store's :meth:`list_sessions` (most recently
+        updated first). Per-session pages contain frontmatter with
+        backend / model / project / status / message_count / metadata
+        scalars, plus a body that summarizes turn count, tools used
+        (from event store events), and a backlink to the linked goal
+        page when the session metadata records a goal_id.
+
+        Stale per-session pages (sessions evicted from the cap window
+        or removed from the store) are swept AFTER writes so backlinks
+        from the digest stay valid mid-export.
+        """
+        sessions_dir = self.vault_dir / "shared" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from obscura.core.db_factory import DatabaseFactory
+
+            store = DatabaseFactory.create_event_store()
+        except Exception:
+            logger.debug("Session-log export: event store unavailable", exc_info=True)
+            return 0
+
+        try:
+            sessions = _run_async(store.list_sessions())
+        except Exception:
+            logger.debug("Session-log export: list_sessions failed", exc_info=True)
+            return 0
+        finally:
+            with contextlib.suppress(Exception):
+                store.close()
+
+        # Most recent first; cap so the directory stays bounded.
+        try:
+            sessions.sort(
+                key=lambda s: (
+                    getattr(s, "updated_at", None)
+                    or getattr(s, "created_at", None)
+                    or datetime.min.replace(tzinfo=UTC)
+                ),
+                reverse=True,
+            )
+        except Exception:
+            logger.debug(
+                "Session-log export: sort failed; using natural order", exc_info=True
+            )
+        live_ids: set[str] = set()
+        count = 0
+        for sess in sessions[:_SESSION_PAGE_CAP]:
+            try:
+                page = self._render_session_page(sess)
+                if page is None:
+                    continue
+                page_id, content = page
+                (sessions_dir / f"{page_id}.md").write_text(content, encoding="utf-8")
+                live_ids.add(page_id)
+                count += 1
+            except Exception:
+                logger.debug(
+                    "Session-log export: render failed for session %s",
+                    getattr(sess, "id", "?"),
+                    exc_info=True,
+                )
+
+        # Sweep stale per-session pages — anything not in live_ids and not
+        # the digest itself.
+        for old in sessions_dir.glob("*.md"):
+            if old.stem in live_ids or old.name == "recent-activity.md":
+                continue
+            with contextlib.suppress(OSError):
+                old.unlink()
+
+        return count
+
+    def _render_session_page(self, sess: Any) -> tuple[str, str] | None:
+        """Render a single session into (page_id, file_content)."""
+        sid = getattr(sess, "id", "") or ""
+        if not sid:
+            return None
+
+        # Pull events to summarize tools used + turn count. Best-effort —
+        # if the per-session query fails we still emit the metadata page.
+        tool_counts: dict[str, int] = {}
+        turn_count = 0
+        try:
+            from obscura.core.db_factory import DatabaseFactory
+            from obscura.core.enums.agent import AgentEventKind
+
+            store = DatabaseFactory.create_event_store()
+            try:
+                events = _run_async(store.get_events(sid))
+            finally:
+                with contextlib.suppress(Exception):
+                    store.close()
+            for ev in events:
+                if ev.kind == AgentEventKind.TURN_COMPLETE:
+                    turn_count += 1
+                elif ev.kind == AgentEventKind.TOOL_CALL:
+                    name = str(ev.payload.get("tool_name", "")).strip() or "?"
+                    tool_counts[name] = tool_counts.get(name, 0) + 1
+        except Exception:
+            logger.debug(
+                "Session-log export: event scan failed for %s", sid, exc_info=True
+            )
+
+        metadata = dict(getattr(sess, "metadata", {}) or {})
+        goal_id = str(metadata.get("goal_id", "")).strip()
+        status = getattr(sess, "status", None)
+        status_val = getattr(status, "value", None) or str(status or "")
+        created = getattr(sess, "created_at", None)
+        updated = getattr(sess, "updated_at", None)
+        created_iso = (
+            created.isoformat()
+            if created is not None and hasattr(created, "isoformat")
+            else ""
+        )
+        updated_iso = (
+            updated.isoformat()
+            if updated is not None and hasattr(updated, "isoformat")
+            else ""
+        )
+
+        body_lines: list[str] = []
+        title = (
+            (getattr(sess, "summary", "") or "").strip()
+            or getattr(sess, "active_agent", "")
+            or sid
+        )
+        body_lines.append(f"# Session `{sid}`")
+        body_lines.append("")
+        body_lines.append(title if title != sid else "_(no summary recorded)_")
+        body_lines.append("")
+        body_lines.append("## Stats")
+        body_lines.append("")
+        body_lines.append(f"- turns: **{turn_count}**")
+        body_lines.append(f"- tool calls: **{sum(tool_counts.values())}**")
+        body_lines.append(f"- messages: **{getattr(sess, 'message_count', 0) or 0}**")
+        if tool_counts:
+            body_lines.append("")
+            body_lines.append("## Tools used")
+            body_lines.append("")
+            for name, cnt in sorted(
+                tool_counts.items(), key=lambda kv: (-kv[1], kv[0])
+            ):
+                body_lines.append(f"- `{name}` — {cnt}")
+        if goal_id:
+            body_lines.append("")
+            body_lines.append("## Goal")
+            body_lines.append("")
+            body_lines.append(f"- [[../../agent/goals/{goal_id}]]")
+
+        # Frontmatter — strip metadata to scalar/list values so YAML
+        # dump stays readable. Drop nested dicts (they bloat the page).
+        flat_meta: dict[str, Any] = {}
+        for k, v in metadata.items():
+            if isinstance(v, (str, int, float, bool)):
+                flat_meta[k] = v
+            elif isinstance(v, list):
+                flat_meta[k] = v[:20]  # cap deep lists like 'turns'
+
+        extra: dict[str, Any] = {
+            "agent": getattr(sess, "active_agent", ""),
+            "backend": getattr(sess, "backend", ""),
+            "model": getattr(sess, "model", ""),
+            "project": getattr(sess, "project", ""),
+            "status": status_val,
+            "message_count": getattr(sess, "message_count", 0) or 0,
+            "turn_count": turn_count,
+            "tool_call_count": sum(tool_counts.values()),
+        }
+        if goal_id:
+            extra["goal_id"] = goal_id
+        if flat_meta:
+            extra["metadata"] = flat_meta
+
+        content = self._render_page(
+            page_type="session",
+            page_id=sid,
+            body="\n".join(body_lines),
+            created_at=created_iso,
+            updated_at=updated_iso,
+            extra_fields=extra,
+        )
+        return sid, content
+
+    def _export_session_digest(self) -> int:
+        """Write a single rolling activity digest at recent-activity.md.
+
+        Combines two sources:
+
+          * Event store — most recent N sessions, with backlinks to
+            their per-session pages. This gives the human reader an
+            entry point into the per-session detail.
+          * Deep log JSONL — tail-scan to count tool_call / api_request
+            / error entries and surface their totals. This gives the
+            "what's been happening lately" view that the per-session
+            list can't (it's bounded by session boundaries).
+        """
+        digest_path = self.vault_dir / "shared" / "sessions" / "recent-activity.md"
+        digest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from obscura.core.db_factory import DatabaseFactory
+
+            store = DatabaseFactory.create_event_store()
+            try:
+                sessions = _run_async(store.list_sessions())
+            finally:
+                with contextlib.suppress(Exception):
+                    store.close()
+        except Exception:
+            logger.debug("Session digest: event store unavailable", exc_info=True)
+            sessions = []
+
+        try:
+            sessions.sort(
+                key=lambda s: (
+                    getattr(s, "updated_at", None)
+                    or getattr(s, "created_at", None)
+                    or datetime.min.replace(tzinfo=UTC)
+                ),
+                reverse=True,
+            )
+        except Exception:
+            logger.debug("Session digest: sort failed", exc_info=True)
+
+        log_stats = self._scan_deep_log_tail(_DIGEST_LOG_TAIL)
+
+        body_lines: list[str] = ["# Recent activity", ""]
+        body_lines.append(
+            f"Window: last {_DIGEST_RECENT_SESSIONS} sessions, last "
+            f"{_DIGEST_LOG_TAIL} deep-log entries.",
+        )
+        body_lines.append("")
+        body_lines.append("## Deep-log totals")
+        body_lines.append("")
+        if log_stats["scanned"] == 0:
+            body_lines.append("_no deep-log entries available_")
+        else:
+            body_lines.append(f"- entries scanned: **{log_stats['scanned']}**")
+            body_lines.append(f"- tool calls: **{log_stats['tool_calls']}**")
+            body_lines.append(f"- API requests: **{log_stats['api_requests']}**")
+            body_lines.append(f"- errors: **{log_stats['errors']}**")
+            top_tools = sorted(
+                log_stats["by_tool"].items(),
+                key=lambda kv: (-kv[1], kv[0]),
+            )[:10]
+            if top_tools:
+                body_lines.append("")
+                body_lines.append("**Top tools:**")
+                body_lines.extend(f"- `{name}` — {cnt}" for name, cnt in top_tools)
+
+        body_lines.append("")
+        body_lines.append("## Recent sessions")
+        body_lines.append("")
+        if not sessions:
+            body_lines.append("_no sessions recorded_")
+        else:
+            for sess in sessions[:_DIGEST_RECENT_SESSIONS]:
+                sid = getattr(sess, "id", "")
+                if not sid:
+                    continue
+                title = (
+                    (getattr(sess, "summary", "") or "").strip()
+                    or getattr(sess, "active_agent", "")
+                    or "(unnamed)"
+                )
+                status = getattr(sess, "status", None)
+                status_val = getattr(status, "value", None) or str(status or "")
+                body_lines.append(f"- [[{sid}]] · {status_val} · {title[:80]}")
+
+        content = self._render_page(
+            page_type="session_digest",
+            page_id="recent-activity",
+            body="\n".join(body_lines),
+            generated_at=datetime.now(UTC).isoformat(),
+            extra_fields={
+                "window_sessions": _DIGEST_RECENT_SESSIONS,
+                "window_log_entries": _DIGEST_LOG_TAIL,
+                "session_total": len(sessions),
+                "log_scanned": log_stats["scanned"],
+                "log_tool_calls": log_stats["tool_calls"],
+                "log_api_requests": log_stats["api_requests"],
+                "log_errors": log_stats["errors"],
+            },
+        )
+        digest_path.write_text(content, encoding="utf-8")
+        return 1
+
+    @staticmethod
+    def _scan_deep_log_tail(limit: int) -> dict[str, Any]:
+        """Tail-scan the JSONL deep log for aggregate stats.
+
+        Returns a dict with totals and a per-tool breakdown. Returns
+        zeros (and ``scanned=0``) when the log is missing or unreadable
+        — never raises.
+        """
+        result: dict[str, Any] = {
+            "scanned": 0,
+            "tool_calls": 0,
+            "api_requests": 0,
+            "errors": 0,
+            "by_tool": {},
+        }
+        log_path = Path.home() / ".obscura" / "logs" / "deep.jsonl"
+        if not log_path.is_file():
+            return result
+        try:
+            # Read full file then keep the last `limit` lines. Deep log
+            # is rotated at 10MB per file so this is bounded.
+            lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            logger.debug("deep-log tail read failed", exc_info=True)
+            return result
+        tail = lines[-limit:] if len(lines) > limit else lines
+        by_tool: dict[str, int] = {}
+        for raw in tail:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                entry: Any = json.loads(raw)
+            except Exception:
+                logger.debug("deep-log entry parse failed", exc_info=True)
+                continue
+            if not isinstance(entry, dict):
+                continue
+            entry_dict = cast(dict[str, Any], entry)
+            result["scanned"] = cast(int, result["scanned"]) + 1
+            kind = str(entry_dict.get("type", ""))
+            data: dict[str, Any] = entry_dict.get("data") or {}
+            if kind == "tool_call":
+                result["tool_calls"] = cast(int, result["tool_calls"]) + 1
+                tool_name = str(data.get("tool", "") or "?")
+                by_tool[tool_name] = by_tool.get(tool_name, 0) + 1
+            elif kind == "api_request":
+                result["api_requests"] = cast(int, result["api_requests"]) + 1
+            elif kind == "error":
+                result["errors"] = cast(int, result["errors"]) + 1
+        result["by_tool"] = by_tool
+        return result
 
     # ------------------------------------------------------------------
     # Notifications (called by tools on mutations)

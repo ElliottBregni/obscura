@@ -13,6 +13,11 @@ proper queue behaviour:
   times before being marked ``failed`` permanently.
 - **Scheduled tasks** — ``run_after`` keeps a task invisible until a future
   unix timestamp.
+- **Idempotent enqueue** — pass ``dedupe_key="..."`` (or use
+  :meth:`TaskQueue.derive_dedupe_key`) to make ``enqueue()`` return the
+  existing open task's id if one already exists, instead of inserting a
+  duplicate. Producers that re-run on a tick (vault sync, goal
+  decomposition) should always pass a key.
 
 Schema additions (applied via ``_ensure_schema()``)::
 
@@ -68,9 +73,18 @@ def _open() -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    # WAL mode for concurrent readers + writer.
-    conn.execute("PRAGMA journal_mode=WAL")
+    # busy_timeout MUST be set before any pragma that takes an exclusive
+    # lock (e.g. journal_mode=WAL), otherwise concurrent opens during
+    # contention raise "database is locked" instead of waiting.
     conn.execute("PRAGMA busy_timeout=5000")
+    # journal_mode=WAL is effectively one-shot per database file; once any
+    # connection sets it, the file is WAL forever. Treat the switch as
+    # idempotent best-effort so concurrent first-opens don't fail when one
+    # opener is mid-switch and others race in.
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        logger.debug("suppressed exception in _open WAL pragma", exc_info=True)
     _ensure_schema(conn)
     return conn
 
@@ -106,11 +120,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     _add_col(conn, "error", "TEXT DEFAULT ''")
     _add_col(conn, "output", "TEXT DEFAULT ''")
     _add_col(conn, "project_root", "TEXT DEFAULT ''")
+    _add_col(conn, "dedupe_key", "TEXT NOT NULL DEFAULT ''")
 
     # Index to make next_ready() fast.
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_tasks_queue
         ON tasks (status, priority, run_after, claimed_by)
+    """)
+    # Partial unique index: at most one open task per dedupe_key.
+    # Empty keys are excluded (the empty string is the opt-out signal).
+    # Active states are pending + in_progress; terminal-state tasks
+    # (completed/failed/deleted) do not block re-enqueue with the same key.
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dedupe_open
+        ON tasks(dedupe_key)
+        WHERE dedupe_key != ''
+          AND status IN ('pending', 'in_progress')
     """)
     conn.commit()
 
@@ -162,16 +187,74 @@ class TaskQueue:
         max_retries: int = 3,
         metadata: dict[str, Any] | None = None,
         project_root: str = "",
+        dedupe_key: str = "",
     ) -> str:
         """Create a new task in the queue and return its task_id.
 
         *priority* follows the same convention as the goal board:
         0 = critical, 25 = high, 50 = medium (default), 75 = low, 100 = lowest.
+
+        When ``dedupe_key`` is non-empty and an active (pending or in_progress)
+        task with the same key already exists, this method returns that task's
+        existing id instead of inserting a duplicate. Use
+        :meth:`derive_dedupe_key` to build a stable key from
+        ``(project_root, goal_id, subject)``.
         """
-        task_id = uuid.uuid4().hex[:12]
         now = time.time()
         conn = _open()
         try:
+            # Idempotent path: serialize check-then-insert under BEGIN
+            # IMMEDIATE so concurrent producers can't both pass the
+            # existence check and then both insert.
+            if dedupe_key:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    row = conn.execute(
+                        "SELECT task_id FROM tasks WHERE dedupe_key = ? "
+                        "AND status IN (?, ?) LIMIT 1",
+                        (
+                            dedupe_key,
+                            TaskQueueStatus.PENDING.value,
+                            TaskQueueStatus.IN_PROGRESS.value,
+                        ),
+                    ).fetchone()
+                    if row is not None:
+                        conn.commit()
+                        return str(row["task_id"])
+                    task_id = uuid.uuid4().hex[:12]
+                    conn.execute(
+                        """INSERT INTO tasks
+                           (task_id, subject, description, status,
+                            priority, goal_id, blocked_by, run_after,
+                            max_retries, retry_count, metadata,
+                            project_root, dedupe_key,
+                            created_at, updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)""",
+                        (
+                            task_id,
+                            subject,
+                            description,
+                            TaskQueueStatus.PENDING.value,
+                            priority,
+                            goal_id,
+                            json.dumps(blocked_by or []),
+                            run_after,
+                            max_retries,
+                            json.dumps(metadata or {}),
+                            project_root,
+                            dedupe_key,
+                            now,
+                            now,
+                        ),
+                    )
+                    conn.commit()
+                    return task_id
+                except Exception:
+                    conn.rollback()
+                    raise
+
+            # Non-idempotent path: standard insert with no key.
+            task_id = uuid.uuid4().hex[:12]
             conn.execute(
                 """INSERT INTO tasks
                    (task_id, subject, description, status,
@@ -197,9 +280,26 @@ class TaskQueue:
                 ),
             )
             conn.commit()
+            return task_id
         finally:
             conn.close()
-        return task_id
+
+    @staticmethod
+    def derive_dedupe_key(
+        project_root: str,
+        goal_id: str,
+        subject: str,
+    ) -> str:
+        """Build a stable dedupe key from a producer's natural fingerprint.
+
+        Whitespace is collapsed and the subject is case-folded so that
+        ``"Fix login bug"`` and ``" Fix  Login Bug "`` collapse to the
+        same task. Empty inputs are tolerated; producers that genuinely
+        have no fingerprint (rare) should pass ``dedupe_key=""``
+        directly to opt out.
+        """
+        normalized_subject = " ".join(subject.split()).casefold()
+        return f"{project_root}|{goal_id}|{normalized_subject}"
 
     # ------------------------------------------------------------------
     # Dequeue
@@ -236,7 +336,9 @@ class TaskQueue:
                 stale_threshold,
             ]
             if project_root is not None:
-                where += "\n                     AND project_root = ?"
+                where += (
+                    "\n                     AND (project_root = ? OR project_root = '')"
+                )
                 params.append(project_root)
             where += "\n                   ORDER BY priority ASC, created_at ASC"
             where += "\n                   LIMIT 50"

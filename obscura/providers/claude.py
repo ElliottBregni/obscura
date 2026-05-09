@@ -7,11 +7,16 @@ unified interface. Claude's async-iterator model maps naturally to our
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.agent_loop_factory import make_agent_loop
 from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
+from obscura.core.stream_guards import (
+    bind_stream_log,
+    check_stream_guards,
+)
 from obscura.core.tool_bridge import call_tool_handler
 from obscura.core.sessions import SessionStore
 from obscura.core.stream import ClaudeIteratorAdapter
@@ -105,6 +110,18 @@ class ClaudeBackend(BackendToolHostMixin):
         # Tool routing
         self._tool_router: Any | None = None
 
+        # TUI plan-approval callback — when set, intercepts Claude Code's
+        # built-in ExitPlanMode tool via can_use_tool and routes through
+        # the TUI PlanApprovalOverlay instead of the CLI's own (invisible)
+        # approval dialog.
+        self._plan_approval_callback: Any = None
+
+        # TUI permission-mode callback — called by the can_use_tool closure
+        # when EnterPlanMode / ExitPlanMode fire so the TUI HUD stays in sync.
+        # Note: only updates the display (HUDState.permission_mode); the SDK
+        # session owns the live runtime mode and doesn't need to be notified.
+        self._permission_mode_callback: Any = None
+
         # Session tracking
         self._session_store = SessionStore()
 
@@ -119,6 +136,34 @@ class ClaudeBackend(BackendToolHostMixin):
     def set_tool_router(self, router: Any) -> None:
         """Attach a :class:`ToolRouter` for per-turn tool selection."""
         self._tool_router = router
+
+    def set_plan_approval_callback(self, cb: Any) -> None:
+        """Register an async callable for plan-mode approval.
+
+        When set, Claude Code's built-in ``ExitPlanMode`` tool is
+        intercepted via the SDK's ``can_use_tool`` hook and the callback
+        is awaited to obtain an approval decision, rather than delegating
+        to the CLI's own (pipe-invisible) approval dialog.
+
+        The callable signature must match
+        ``async (plan_summary: str) -> bool``.
+        """
+        self._plan_approval_callback = cb
+
+    def set_permission_mode_callback(self, cb: Any) -> None:
+        """Register a callable to sync the TUI HUD when permission mode changes.
+
+        Called by the TUI after start() so the can_use_tool closure can
+        update ``HUDState.permission_mode`` when Claude Code's built-in
+        ``EnterPlanMode`` / ``ExitPlanMode`` tools fire through the SDK
+        bridge.
+
+        Signature: ``(mode: str) -> None | Awaitable[None]``
+
+        Note: this only updates the display layer. The SDK session owns
+        the live runtime permission mode and does not need to be notified.
+        """
+        self._permission_mode_callback = cb
 
     # -- Testing/observability accessors ------------------------------------
 
@@ -215,7 +260,7 @@ class ClaudeBackend(BackendToolHostMixin):
         def _pre_tool_hook(
             tool_name: str = "",
             tool_input: dict[str, Any] | None = None,
-            **kw: Any,
+            **_kw: Any,  # noqa: ARG002
         ) -> dict[str, Any] | None:
             if not confirm_fn(tool_name, tool_input or {}):
                 return {"denied": True, "reason": "Tool call denied by user."}
@@ -346,19 +391,20 @@ class ClaudeBackend(BackendToolHostMixin):
         with tracer.start_as_current_span("claude.send") as span:
             _set_span_attr(span, "backend", "claude")
 
-            # Drain any pending response before querying
-            async for _ in self._client.receive_response():
-                pass
+            with bind_stream_log():
+                # Drain any pending response before querying
+                async for _ in self._client.receive_response():
+                    pass
 
-            # Use query for a fresh exchange
-            await self._query(prompt, kwargs)
-            messages: list[Any] = []
-            async for msg in self._client.receive_response():
-                messages.append(msg)
-                if isinstance(msg, ResultMessage):
-                    self._last_session_id = msg.session_id
+                # Use query for a fresh exchange
+                await self._query(prompt, kwargs)
+                messages: list[Any] = []
+                async for msg in self._client.receive_response():
+                    messages.append(msg)
+                    if isinstance(msg, ResultMessage):
+                        self._last_session_id = msg.session_id
 
-            return self._to_message(messages)
+                return self._to_message(messages)
 
     async def stream(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         """Send a prompt and yield streaming chunks."""
@@ -367,16 +413,17 @@ class ClaudeBackend(BackendToolHostMixin):
         span = tracer.start_span("claude.stream")
         _set_span_attr(span, "backend", "claude")
         try:
-            await self._query(prompt, kwargs)
-            source = self._client.receive_response()
-            adapter = ClaudeIteratorAdapter(source)
+            with bind_stream_log():
+                await self._query(prompt, kwargs)
+                source = self._client.receive_response()
+                adapter = ClaudeIteratorAdapter(source)
 
-            async for chunk in adapter:
-                # Track session ID from done events
-                if chunk.kind == ChunkKind.DONE and chunk.raw is not None:
-                    if hasattr(chunk.raw, "session_id"):
-                        self._last_session_id = chunk.raw.session_id
-                yield chunk
+                async for chunk in adapter:
+                    # Track session ID from done events
+                    if chunk.kind == ChunkKind.DONE and chunk.raw is not None:
+                        if hasattr(chunk.raw, "session_id"):
+                            self._last_session_id = chunk.raw.session_id
+                    yield chunk
         finally:
             span.end()
 
@@ -717,6 +764,42 @@ class ClaudeBackend(BackendToolHostMixin):
                 )
                 filtered = result.tools
 
+            # Phase-3 opt-in SDK tier filter (OBSCURA_PHASE3_SDK_TIER=1).
+            # Off by default: the Claude Agent SDK commits the tool list
+            # at session creation, so filtered-out tools are uncallable
+            # until session recreate. Same caveat as Copilot.
+            #
+            # Set ``OBSCURA_PHASE3_EXTRA_CORE`` to keep specific tools
+            # callable even with phase-3 on (comma-separated names or
+            # fnmatch globs).
+            from obscura.core.tool_tiering import (
+                effective_core_names,
+                is_phase3_active,
+            )
+
+            if is_phase3_active():
+                from obscura.core.tool_observability import (
+                    TurnToolStats,
+                    emit_turn_tool_stats,
+                )
+
+                all_names = [t.name for t in filtered]
+                core_set = effective_core_names(all_names)
+                pre_phase3 = list(filtered)
+                filtered = [t for t in filtered if t.name in core_set]
+                kept_names = {t.name for t in filtered}
+                dropped = tuple(t.name for t in pre_phase3 if t.name not in kept_names)
+                emit_turn_tool_stats(
+                    TurnToolStats(
+                        backend="claude",
+                        registry_total=len(pre_phase3),
+                        core_count=len(filtered),
+                        discovered_count=0,
+                        sent_count=len(filtered),
+                        dropped=dropped,
+                    ),
+                )
+
             if not self._tool_policy.allow_native or len(filtered) < len(self._tools):
                 # When native tools are blocked (default) OR the filter reduced
                 # the set, set an explicit allowlist so the LLM can only call
@@ -727,6 +810,75 @@ class ClaudeBackend(BackendToolHostMixin):
         # Extended thinking (set at session level, not per-query)
         if self._max_thinking_tokens and self._max_thinking_tokens > 0:
             opts["max_thinking_tokens"] = self._max_thinking_tokens
+
+        # Plan-approval bridge: intercept Claude Code's built-in ExitPlanMode
+        # via can_use_tool so the TUI PlanApprovalOverlay handles it instead
+        # of the CLI's own dialog (which renders to a pipe and is invisible).
+        #
+        # IMPORTANT: _build_options() is called in start() before the TUI
+        # wires _plan_approval_callback via set_plan_approval_callback().
+        # The closure captures `self` (late-binding) so it reads the
+        # callback at invocation time, not at options-build time.  When no
+        # callback is registered the hook is a transparent pass-through.
+        _self = self
+
+        async def _can_use_tool(
+            tool_name: str,
+            tool_input: dict[str, Any],
+            _ctx: Any,  # noqa: ARG001
+        ) -> Any:
+            from claude_agent_sdk.types import (
+                PermissionResultAllow,
+                PermissionResultDeny,
+            )
+
+            async def _notify_mode(mode: str) -> None:
+                _mcb = _self._permission_mode_callback
+                if _mcb is not None:
+                    try:
+                        r = _mcb(mode)
+                        if asyncio.iscoroutine(r) or asyncio.isfuture(r):
+                            await r
+                    except Exception:
+                        logger.debug(
+                            "can_use_tool: permission_mode_callback raised",
+                            exc_info=True,
+                        )
+
+            if tool_name == "EnterPlanMode":
+                # No user approval needed — just sync the TUI display.
+                await _notify_mode("plan")
+                return PermissionResultAllow()
+
+            if tool_name == "ExitPlanMode":
+                _cb = _self._plan_approval_callback
+                if _cb is None:
+                    # Fallback: REPL path sets Session.plan_approval_callback
+                    # but doesn't call set_plan_approval_callback on the backend.
+                    from obscura.tools.system._session import Session as _Session
+
+                    _cb = _Session.plan_approval_callback
+                if _cb is not None:
+                    summary: str = tool_input.get("plan_summary", "") or ""
+                    try:
+                        approved = _cb(summary)
+                        if asyncio.iscoroutine(approved) or asyncio.isfuture(approved):
+                            approved = await approved
+                    except Exception:
+                        logger.debug(
+                            "can_use_tool: plan_approval_callback raised",
+                            exc_info=True,
+                        )
+                        approved = False
+                    if approved:
+                        await _notify_mode("default")
+                        return PermissionResultAllow()
+                    return PermissionResultDeny(
+                        message="Plan not approved by user.", interrupt=False
+                    )
+            return PermissionResultAllow()
+
+        opts["can_use_tool"] = _can_use_tool
 
         opts.update(overrides)
         return ClaudeAgentOptions(**opts)
@@ -780,6 +932,16 @@ class ClaudeBackend(BackendToolHostMixin):
                 arguments: dict[str, Any] | None = None, **kwargs: Any
             ) -> dict[str, Any]:
                 merged = {**(arguments or {}), **kwargs}
+                refusal = check_stream_guards(bound_spec.name, merged)
+                if refusal is not None:
+                    import json as _json
+
+                    return {
+                        "content": [
+                            {"type": "text", "text": _json.dumps(refusal)},
+                        ],
+                        "isError": True,
+                    }
                 result = await call_tool_handler(bound_spec, merged)
                 # claude_agent_sdk expects {"content": [{"type": "text", ...}]}.
                 # Returning a bare string makes the SDK do `"content" in result`

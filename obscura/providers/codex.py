@@ -29,6 +29,7 @@ from obscura.core.types import (
     StreamChunk,
     StreamMetadata,
 )
+from obscura.core.stream_guards import bind_stream_log
 from obscura.integrations.mcp.discovery import register_external_mcp_tools
 from obscura.plugins.capabilities import build_capability_map_section
 from obscura.providers._tool_host import BackendToolHostMixin
@@ -373,7 +374,8 @@ class CodexBackend(BackendToolHostMixin):
 
         thread = await self._resolve_thread()
         run_kwargs = self._build_run_kwargs()
-        result = await self._maybe_await(thread.run(prompt, **run_kwargs))
+        with bind_stream_log():
+            result = await self._maybe_await(thread.run(prompt, **run_kwargs))
 
         text = getattr(result, "final_response", None) or ""
         items = list(getattr(result, "items", None) or [])
@@ -416,56 +418,62 @@ class CodexBackend(BackendToolHostMixin):
         thread = await self._resolve_thread()
         run_kwargs = self._build_run_kwargs()
         wire_input = self._wrap_text_input(prompt)
-        turn_handle = await self._maybe_await(thread.turn(wire_input, **run_kwargs))
 
-        yield StreamChunk(kind=ChunkKind.MESSAGE_START)
+        # Bind per-task log so MCP-routed tool calls (which is how Codex
+        # invokes obscura tools) hit the dedup/budget guard at
+        # ObscuraMCPServer.handle_tools_call.
+        with bind_stream_log():
+            turn_handle = await self._maybe_await(thread.turn(wire_input, **run_kwargs))
 
-        usage_data: dict[str, int] | None = None
-        finish_reason = "stop"
+            yield StreamChunk(kind=ChunkKind.MESSAGE_START)
 
-        try:
-            event_stream = turn_handle.stream()
-            async for event in event_stream:
-                method = getattr(event, "method", "") or ""
-                payload = getattr(event, "payload", None)
+            usage_data: dict[str, int] | None = None
+            finish_reason = "stop"
 
-                if method == "thread/started":
-                    tid = getattr(payload, "thread_id", "") or ""
-                    if self._active_session and tid:
-                        self._thread_id_by_session[self._active_session] = tid
+            try:
+                event_stream = turn_handle.stream()
+                async for event in event_stream:
+                    method = getattr(event, "method", "") or ""
+                    payload = getattr(event, "payload", None)
 
-                for chunk in self._map_notification_to_chunks(method, payload):
-                    yield chunk
+                    if method == "thread/started":
+                        tid = getattr(payload, "thread_id", "") or ""
+                        if self._active_session and tid:
+                            self._thread_id_by_session[self._active_session] = tid
 
-                if method == "thread/tokenUsage/updated":
-                    tu = getattr(payload, "token_usage", None)
-                    total = getattr(tu, "total", None)
-                    if total is not None:
-                        usage_data = {
-                            "input_tokens": getattr(total, "input_tokens", 0) or 0,
-                            "output_tokens": getattr(total, "output_tokens", 0) or 0,
-                            "cached_input_tokens": getattr(
-                                total,
-                                "cached_input_tokens",
-                                0,
-                            )
-                            or 0,
-                        }
+                    for chunk in self._map_notification_to_chunks(method, payload):
+                        yield chunk
 
-                if method == "turn/completed":
-                    turn = getattr(payload, "turn", None)
-                    status = getattr(turn, "status", None)
-                    status_val = getattr(status, "value", status) if status else ""
-                    if status_val == "failed":
+                    if method == "thread/tokenUsage/updated":
+                        tu = getattr(payload, "token_usage", None)
+                        total = getattr(tu, "total", None)
+                        if total is not None:
+                            usage_data = {
+                                "input_tokens": getattr(total, "input_tokens", 0) or 0,
+                                "output_tokens": getattr(total, "output_tokens", 0)
+                                or 0,
+                                "cached_input_tokens": getattr(
+                                    total,
+                                    "cached_input_tokens",
+                                    0,
+                                )
+                                or 0,
+                            }
+
+                    if method == "turn/completed":
+                        turn = getattr(payload, "turn", None)
+                        status = getattr(turn, "status", None)
+                        status_val = getattr(status, "value", status) if status else ""
+                        if status_val == "failed":
+                            finish_reason = "error"
+
+                    if method == "error":
                         finish_reason = "error"
 
-                if method == "error":
-                    finish_reason = "error"
-
-        except Exception as exc:
-            logger.debug("suppressed exception in stream", exc_info=True)
-            yield StreamChunk(kind=ChunkKind.ERROR, text=str(exc))
-            finish_reason = "error"
+            except Exception as exc:
+                logger.debug("suppressed exception in stream", exc_info=True)
+                yield StreamChunk(kind=ChunkKind.ERROR, text=str(exc))
+                finish_reason = "error"
 
         await self._run_hooks(HookContext(hook=HookPoint.STOP))
 
@@ -613,13 +621,17 @@ class CodexBackend(BackendToolHostMixin):
         )
 
         if thread_id:
-            resume = getattr(client, "resume_thread", None)
+            resume = getattr(client, "thread_resume", None) or getattr(
+                client, "resume_thread", None
+            )
             if resume is not None:
                 return await self._maybe_await(resume(thread_id, **start_kwargs))
 
-        start = getattr(client, "start_thread", None)
+        start = getattr(client, "thread_start", None) or getattr(
+            client, "start_thread", None
+        )
         if start is None:
-            msg = "Codex SDK client has no start_thread method"
+            msg = "Codex SDK client has no thread_start/start_thread method"
             raise RuntimeError(msg)
         thread = await self._maybe_await(start(**start_kwargs))
         tid = getattr(thread, "id", "") or ""
@@ -628,7 +640,7 @@ class CodexBackend(BackendToolHostMixin):
         return thread
 
     def _build_thread_start_kwargs(self) -> dict[str, Any]:
-        """Assemble kwargs for ``Codex.start_thread``."""
+        """Assemble kwargs for ``Codex.thread_start``/``start_thread``."""
         kwargs: dict[str, Any] = {}
         if self._model:
             kwargs["model"] = self._model

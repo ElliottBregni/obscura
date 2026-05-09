@@ -26,7 +26,7 @@ from obscura.core.kairos.types import (
 
 if TYPE_CHECKING:
     from obscura.core.agent_loop_v2 import AgentLoopV2
-    from obscura.core.kairos.goal_store import GoalStore
+    from obscura.core.kairos.goal_store import GoalStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class TaskRunner:
     def __init__(
         self,
         agent_loop: AgentLoopV2,
-        store: GoalStore,
+        store: GoalStoreProtocol,
         config: KairosConfig,
     ) -> None:
         self._loop = agent_loop

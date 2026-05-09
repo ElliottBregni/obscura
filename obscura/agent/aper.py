@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, override
 from obscura.agent.agent import BaseAgent
 
 if TYPE_CHECKING:
-    from obscura.core.client import ObscuraClient
+    # Accepts ObscuraClient OR AgentSession — duck-typed
+    from typing import Any as ObscuraClient  # noqa: F401
+
     from obscura.core.types import AgentContext
 
 

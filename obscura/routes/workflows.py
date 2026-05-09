@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from obscura.auth.rbac import AGENT_READ_ROLES, AGENT_WRITE_ROLES, require_any_role
 from obscura.deps import audit, get_runtime
-from obscura.memory import MemoryStore
+from obscura.memory import create_memory_store
 from obscura.routes.agents import agent_templates
 
 from obscura.auth.models import AuthenticatedUser
@@ -367,7 +367,7 @@ async def workflow_run(
         await agent.stop()
 
     if store_result:
-        store = MemoryStore.for_user(user)
+        store = create_memory_store(user)
         store.set(
             memory_key,
             {

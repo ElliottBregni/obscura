@@ -20,7 +20,6 @@ from obscura.agent.daemon_agent import DaemonAgent, IMessageTrigger, ScheduleTri
 from obscura.agent.interaction import AttentionPriority, InteractionBus
 from obscura.agent.supervisor import SupervisorConfig
 from obscura.cli.render import console as _console
-from obscura.core.client import ObscuraClient
 
 _log = logging.getLogger("obscura.cli")
 
@@ -85,13 +84,22 @@ async def start_imessage_daemon(
 
         _logging.getLogger("obscura.agent.daemon_agent").setLevel(_logging.WARNING)
 
-        # Create a SEPARATE client for the daemon so it does not contend
-        # with the REPL client for backend access.
-        daemon_client = ObscuraClient(
-            agent_def.model,
-            system_prompt=agent_def.system_prompt,
+        # Create a SEPARATE session for the daemon so it does not contend
+        # with the REPL session for backend access. Migrated from direct
+        # ObscuraClient construction to composition.build_core_session;
+        # session.run_loop_to_completion / .send / .reset_session quack
+        # the same way DaemonAgent expects.
+        from obscura.composition.core import build_core_session
+        from obscura.composition.session import SessionConfig
+
+        daemon_client = await build_core_session(
+            SessionConfig(
+                backend=agent_def.model,
+                system_prompt=agent_def.system_prompt,
+                inject_claude_context=False,
+            ),
+            surface="a2a",
         )
-        await daemon_client.__aenter__()
 
         # Load persisted schedules from ~/.obscura/schedules.json
         try:

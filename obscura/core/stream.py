@@ -22,6 +22,76 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+
+def _extract_sdk_tool_result(data: Any) -> tuple[str, bool, bool]:
+    """Pull a tool-execution result out of an SDK completion event.
+
+    Returns ``(text, has_result, success)``.
+
+    Copilot SDK 0.3 puts ``result`` (a ``{"content": str, ...}`` dict) and
+    ``success: bool`` on ``data``. Older builds may use ``output`` or carry
+    raw text. ``has_result=False`` means the caller should not synthesise a
+    TOOL_RESULT chunk.
+    """
+    if data is None:
+        return "", False, True
+
+    def _get(name: str) -> Any:
+        val = getattr(data, name, None)
+        if val is None and isinstance(data, dict):
+            val = cast(dict[str, Any], data).get(name)
+        return val
+
+    success = _get("success")
+    if success is None:
+        success = True
+    raw_result = _get("result")
+    if raw_result is None:
+        raw_result = _get("output")
+    if raw_result is None:
+        return "", False, bool(success)
+
+    text: str | None = None
+    if isinstance(raw_result, str):
+        text = raw_result
+    elif isinstance(raw_result, dict):
+        result_dict = cast(dict[str, Any], raw_result)
+        candidate = result_dict.get("content")
+        if not isinstance(candidate, str):
+            candidate = result_dict.get("detailedContent")
+        if isinstance(candidate, str):
+            text = candidate
+        else:
+            try:
+                text = json.dumps(result_dict)
+            except (TypeError, ValueError):
+                logger.debug(
+                    "_extract_sdk_tool_result: json.dumps(result dict) failed",
+                    exc_info=True,
+                )
+                text = str(result_dict)
+    else:
+        # Pydantic-style model (Copilot SDK ``ToolExecutionCompleteResult``):
+        # check for ``content`` / ``detailedContent`` attributes before
+        # falling back to a JSON dump (which would emit a useless ``repr``).
+        candidate = getattr(raw_result, "content", None)
+        if not isinstance(candidate, str):
+            candidate = getattr(raw_result, "detailedContent", None)
+        if isinstance(candidate, str):
+            text = candidate
+        else:
+            try:
+                text = json.dumps(raw_result, default=str)
+            except (TypeError, ValueError):
+                logger.debug(
+                    "_extract_sdk_tool_result: json.dumps(model) failed",
+                    exc_info=True,
+                )
+                text = str(cast(object, raw_result))
+
+    return text or "", True, bool(success)
+
+
 # ---------------------------------------------------------------------------
 # Copilot: Event → AsyncIterator bridge
 # ---------------------------------------------------------------------------
@@ -49,6 +119,14 @@ class EventToIteratorBridge:
         # used to backfill an end-event tool_name when the SDK omits it.
         self._active_tool_id: str = ""
         self._active_tool_name: str = ""
+        # Cumulative text we've already emitted for this turn. Used to
+        # detect providers that misuse delta events to send cumulative
+        # content (Copilot's `assistant.message_delta` has been observed
+        # to do this on certain message shapes). When the next "delta"
+        # is a prefix-extension of what we've sent, we slice off the
+        # duplicate and emit only the new tail.
+        self._emitted_text: str = ""
+        self._emitted_thinking: str = ""
 
     # -- Push methods (called from Copilot event handlers) ------------------
 
@@ -57,27 +135,55 @@ class EventToIteratorBridge:
         self._queue.put_nowait(chunk)
 
     def on_text_delta(self, event: Any) -> None:
-        """Map Copilot ``assistant.message_delta`` event."""
-        delta = ""
+        """Map Copilot ``assistant.message_delta`` event.
+
+        A delta event MUST carry incremental new chars, not cumulative
+        content. We accept (in priority order) ``delta_content`` →
+        ``delta`` → bare-string events. The legacy ``content`` field
+        was a cumulative-snapshot fallback that double-printed assistant
+        text whenever Copilot's SDK shipped a delta event without a
+        proper ``delta_content`` field; we now log and drop those.
+
+        As defense in depth, _normalize_delta detects when the
+        incoming delta is a prefix-extension of what we've already
+        emitted (i.e. a provider misusing delta semantics to send
+        cumulative content) and trims it down to just the new tail.
+        """
+        raw_delta = ""
         if (
             hasattr(event, "data")
             and hasattr(event.data, "delta_content")
             and event.data.delta_content
         ):
-            delta = event.data.delta_content
-        elif (
-            hasattr(event, "data")
-            and hasattr(event.data, "content")
-            and event.data.content
-        ):
-            delta = event.data.content
+            raw_delta = event.data.delta_content
         elif (
             hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta
         ):
-            delta = event.data.delta
+            raw_delta = event.data.delta
         elif isinstance(event, str):
-            delta = event
+            raw_delta = event
+        else:
+            # Some Copilot SDK builds emit assistant.message_delta with
+            # only `content` (cumulative) and no `delta_content`. Don't
+            # silently treat that as an incremental delta — it's the bug
+            # that caused the duplicate-render symptom. Log loudly so
+            # we can spot any new provider regression.
+            if (
+                hasattr(event, "data")
+                and hasattr(event.data, "content")
+                and event.data.content
+            ):
+                logger.warning(
+                    "assistant.message_delta missing delta_content; "
+                    "ignoring cumulative `content` field to avoid "
+                    "double-print (data=%r)",
+                    type(event.data).__name__,
+                )
+            return
+
+        delta = self._normalize_delta(raw_delta, kind="text")
         if delta:
+            self._emitted_text += delta
             self.push(
                 StreamChunk(
                     kind=ChunkKind.TEXT_DELTA,
@@ -87,35 +193,66 @@ class EventToIteratorBridge:
                 ),
             )
 
+    def _normalize_delta(self, raw_delta: str, *, kind: str) -> str:
+        """Strip the prefix-overlap when a provider sends cumulative content.
+
+        If ``raw_delta`` starts with everything we've already emitted in
+        this turn, the provider sent the full message-so-far instead of
+        just the new chars. Slice the overlap and return only the tail.
+        Logs a warning the first time it triggers per turn so the
+        regression is visible.
+        """
+        if not raw_delta:
+            return ""
+        emitted = self._emitted_text if kind == "text" else self._emitted_thinking
+        if emitted and raw_delta.startswith(emitted):
+            tail = raw_delta[len(emitted) :]
+            logger.warning(
+                "%s delta arrived as cumulative snapshot (len=%d, "
+                "overlap=%d, tail=%d); emitting tail only",
+                kind,
+                len(raw_delta),
+                len(emitted),
+                len(tail),
+            )
+            return tail
+        return raw_delta
+
     def on_thinking_delta(self, event: Any) -> None:
         """Map Copilot ``assistant.reasoning_delta`` event."""
-        delta = ""
+        raw_delta = ""
         if (
             hasattr(event, "data")
             and hasattr(event.data, "delta_content")
             and event.data.delta_content
         ):
-            delta = event.data.delta_content
+            raw_delta = event.data.delta_content
         elif (
             hasattr(event, "data")
             and hasattr(event.data, "reasoning_text")
             and event.data.reasoning_text
         ):
-            delta = event.data.reasoning_text
+            # reasoning_text is the cumulative-snapshot variant; let
+            # _normalize_delta strip the overlap when used as a fallback.
+            raw_delta = event.data.reasoning_text
         elif (
             hasattr(event, "data") and hasattr(event.data, "delta") and event.data.delta
         ):
-            delta = event.data.delta
+            raw_delta = event.data.delta
         elif isinstance(event, str):
-            delta = event
-        self.push(
-            StreamChunk(
-                kind=ChunkKind.THINKING_DELTA,
-                text=delta,
-                raw=event,
-                native_event=event,
-            ),
-        )
+            raw_delta = event
+
+        delta = self._normalize_delta(raw_delta, kind="thinking")
+        if delta:
+            self._emitted_thinking += delta
+            self.push(
+                StreamChunk(
+                    kind=ChunkKind.THINKING_DELTA,
+                    text=delta,
+                    raw=event,
+                    native_event=event,
+                ),
+            )
 
     def on_tool_start(self, event: Any) -> None:
         """Map tool execution start."""
@@ -123,25 +260,50 @@ class EventToIteratorBridge:
         tool_id = ""
         data: Any = getattr(event, "data", None)
         if data is not None:
-            name = getattr(data, "tool_name", "") or getattr(data, "name", "") or ""
+            # Copilot SDK 0.3 events carry camelCase fields (toolName,
+            # toolCallId); older builds and other SDKs use snake_case.
+            name = (
+                getattr(data, "tool_name", "")
+                or getattr(data, "toolName", "")
+                or getattr(data, "name", "")
+                or ""
+            )
             # Copilot may surface the call id under a few different names;
             # try each in turn. Falls back to empty (agent_loop_v2 will
             # treat the call as un-cached, which is correct for siblings
             # that have no SDK identity).
             tool_id = (
                 getattr(data, "tool_call_id", "")
+                or getattr(data, "toolCallId", "")
                 or getattr(data, "tool_use_id", "")
+                or getattr(data, "toolUseId", "")
                 or getattr(data, "call_id", "")
+                or getattr(data, "callId", "")
                 or getattr(data, "id", "")
                 or ""
             )
-            if not tool_id and isinstance(data, dict):
+            if isinstance(data, dict):
                 data_dict = cast(dict[str, Any], data)
-                for key in ("tool_call_id", "tool_use_id", "call_id", "id"):
-                    val = data_dict.get(key)
-                    if val:
-                        tool_id = str(val)
-                        break
+                if not name:
+                    for key in ("tool_name", "toolName", "name"):
+                        val = data_dict.get(key)
+                        if val:
+                            name = str(val)
+                            break
+                if not tool_id:
+                    for key in (
+                        "tool_call_id",
+                        "toolCallId",
+                        "tool_use_id",
+                        "toolUseId",
+                        "call_id",
+                        "callId",
+                        "id",
+                    ):
+                        val = data_dict.get(key)
+                        if val:
+                            tool_id = str(val)
+                            break
         # Cache the active id/name so DELTA chunks emitted below and any
         # following on_tool_end can attribute back to the same call even
         # if Copilot only emits the id on the start event.
@@ -161,7 +323,13 @@ class EventToIteratorBridge:
         # various attributes; try common locations.
         if data is not None:
             tool_input: Any = None
-            for attr in ("tool_input", "input", "arguments", "parameters"):
+            for attr in (
+                "tool_input",
+                "toolInput",
+                "input",
+                "arguments",
+                "parameters",
+            ):
                 val = getattr(cast(Any, data), attr, None)
                 if val is not None:
                     tool_input = val
@@ -169,7 +337,13 @@ class EventToIteratorBridge:
             # Also check dict-style access
             if tool_input is None and isinstance(data, dict):
                 data_dict = cast(dict[str, Any], data)
-                for key in ("tool_input", "input", "arguments", "parameters"):
+                for key in (
+                    "tool_input",
+                    "toolInput",
+                    "input",
+                    "arguments",
+                    "parameters",
+                ):
                     if key in data_dict:
                         tool_input = data_dict[key]
                         break
@@ -201,30 +375,48 @@ class EventToIteratorBridge:
         """Map tool execution end."""
         name = ""
         tool_id = ""
-        if (
-            hasattr(event, "data")
-            and hasattr(event.data, "tool_name")
-            and event.data.tool_name
-        ):
-            name = event.data.tool_name
-        elif hasattr(event, "data") and hasattr(event.data, "name") and event.data.name:
-            name = event.data.name
         data = getattr(event, "data", None)
         if data is not None:
+            # Copilot SDK 0.3 emits camelCase (toolName, toolCallId);
+            # earlier builds and other SDKs use snake_case.
+            name = (
+                getattr(data, "tool_name", "")
+                or getattr(data, "toolName", "")
+                or getattr(data, "name", "")
+                or ""
+            )
             tool_id = (
                 getattr(data, "tool_call_id", "")
+                or getattr(data, "toolCallId", "")
                 or getattr(data, "tool_use_id", "")
+                or getattr(data, "toolUseId", "")
                 or getattr(data, "call_id", "")
+                or getattr(data, "callId", "")
                 or getattr(data, "id", "")
                 or ""
             )
-            if not tool_id and isinstance(data, dict):
+            if isinstance(data, dict):
                 data_dict = cast(dict[str, Any], data)
-                for key in ("tool_call_id", "tool_use_id", "call_id", "id"):
-                    val = data_dict.get(key)
-                    if val:
-                        tool_id = str(val)
-                        break
+                if not name:
+                    for key in ("tool_name", "toolName", "name"):
+                        val = data_dict.get(key)
+                        if val:
+                            name = str(val)
+                            break
+                if not tool_id:
+                    for key in (
+                        "tool_call_id",
+                        "toolCallId",
+                        "tool_use_id",
+                        "toolUseId",
+                        "call_id",
+                        "callId",
+                        "id",
+                    ):
+                        val = data_dict.get(key)
+                        if val:
+                            tool_id = str(val)
+                            break
         # Backfill from the active call when the END event omits id/name —
         # copilot tool events are emitted in start/end pairs, so the most
         # recent active call is the right attribution.
@@ -244,6 +436,28 @@ class EventToIteratorBridge:
                 native_event=event,
             ),
         )
+        # When the backend SDK runs the tool itself (Copilot, Claude),
+        # the completion event carries the result. Emit a TOOL_RESULT
+        # chunk so agent_loop_v2 can short-circuit its own dispatch
+        # rather than re-running the tool against the local Python
+        # handler (which has caused signature mismatches and double
+        # execution). The chunk's raw event preserves ``success`` so
+        # the loop can tag the result as error or ok.
+        result_text, has_result, _success = _extract_sdk_tool_result(data)
+        if has_result:
+            # ``success`` is read off the raw event in agent_loop_v2's
+            # TOOL_RESULT handler — that keeps the wire shape (camelCase
+            # ``success``) as the only source of truth for is_error tagging.
+            self.push(
+                StreamChunk(
+                    kind=ChunkKind.TOOL_RESULT,
+                    tool_name=name,
+                    tool_use_id=tool_id,
+                    text=result_text,
+                    raw=event,
+                    native_event=event,
+                ),
+            )
 
     def finish(
         self,
@@ -261,6 +475,10 @@ class EventToIteratorBridge:
             ),
         )
         self._queue.put_nowait(None)
+        # Reset cumulative-detection state for the next stream lifecycle —
+        # bridges are sometimes reused across turns by the same backend.
+        self._emitted_text = ""
+        self._emitted_thinking = ""
 
     def error(
         self,

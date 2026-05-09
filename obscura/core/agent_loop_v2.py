@@ -1,68 +1,30 @@
-"""obscura.core.agent_loop_v2 — DAG-native agent loop (clean rewrite).
+"""obscura.core.agent_loop_v2 — DAG-native agent loop.
 
-This is the successor to :class:`obscura.core.agent_loop.AgentLoop` (v1).
-v1 is ~10K lines and grew organically: a streaming tool executor, predictive
-cache, capability gates, retries, hooks, arbiter integration, and the
-core turn loop are all interleaved. v2 separates the core loop from the
-optional behaviors and uses :mod:`obscura.core.dag` natively for tool
-execution.
+The agent loop owns:
 
-Architectural diff from v1
-==========================
+1. Streaming from a :class:`BackendProtocol`, one turn at a time.
+2. Collecting ``tool_use`` blocks during the stream into
+   :class:`ToolCallInfo` objects.
+3. Firing text-delta observers (the predictive-cache observer is the
+   canonical user).
+4. After each assistant turn ends, building a :class:`TurnDAG` from the
+   collected calls (with no edges by default — matches today's batch
+   behavior).
+5. Running the DAG through :class:`Scheduler`, sequential or parallel
+   depending on whether any node has declared ``depends_on``.
+6. Binding a :class:`ToolContext` per turn so tools see host_callbacks,
+   history, session_id, and registry.
+7. Composing any caller-supplied dispatch middleware around the per-node
+   executor (``capability_gate``, ``tool_confirmation``,
+   ``predictive_cache_middleware``, etc.).
+8. Yielding :class:`AgentEvent` instances throughout (TEXT_DELTA,
+   TOOL_CALL, TOOL_RESULT, AGENT_DONE).
+9. Repeating until the model emits no tool calls or ``max_turns`` is
+   exceeded.
 
-+--------------------------+----------------------------------+---------------------------------+
-| Concern                  | v1                               | v2                              |
-+==========================+==================================+=================================+
-| Tool dispatch            | StreamingToolExecutor            | dag.Scheduler                   |
-| Intra-turn parallelism   | side_effects=="none" only        | DAG edges + concurrency caps    |
-| Retries / backoff        | inline in run()                  | RetryingBackend wrapper         |
-| Predictive cache         | inline in run()                  | predictive_cache_middleware     |
-| Capability gates         | inline _execute_single_tool      | capability_gate middleware      |
-| Arbiter (turn-level)     | inline                           | arbiter_post_turn hook          |
-| Tool confirmation        | inline + on_confirm callback     | tool_confirmation middleware    |
-| Tool allow/deny          | inline                           | tool_allowlist / tool_denylist  |
-| Hooks (pre/post tool)    | inline HookRegistry calls        | hook_middleware                 |
-| Compaction               | inline                           | compact_pre_turn hook           |
-| Event store              | inline                           | event_store_post_turn hook      |
-| host_callbacks           | ToolContext fields               | ToolContext fields (parity)     |
-| compiled_agent           | inline                           | factory translation             |
-| seen_calls dedup         | StreamingToolExecutor.seen_calls | _seen_calls dict (load-bearing) |
-| Cancellation             | abort_event + task.cancel        | scheduler.cancel_event          |
-+--------------------------+----------------------------------+---------------------------------+
-
-What v2 owns
-------------
-
-A focused, ~600-line implementation that:
-
-1. Streams from a :class:`BackendProtocol`, one turn at a time.
-2. Collects ``tool_use`` blocks during the stream into ``ToolCallInfo`` objects.
-3. Fires text-delta observers (predictive cache observer is the canonical user).
-4. After the assistant turn ends, builds a :class:`TurnDAG` from the collected
-   calls (with no edges by default — matches today's batch behavior).
-5. Runs the DAG through :class:`Scheduler`, sequential or parallel depending
-   on whether any node has declared ``depends_on``.
-6. Binds a :class:`ToolContext` per turn so tools see host_callbacks /
-   history / session_id / registry just like v1.
-7. Composes any user-supplied dispatch_middleware around the per-node
-   executor (capability_gate, tool_confirmation, predictive_cache_middleware,
-   etc.).
-8. Yields :class:`AgentEvent` instances throughout (TEXT_DELTA, TOOL_CALL,
-   TOOL_RESULT, AGENT_DONE) — same shape as v1 so callers don't need
-   to change.
-9. Repeats until the model emits no tool calls or ``max_turns`` is exceeded.
-
-Migration
----------
-
-**v2 is the default loop**. Existing call sites should migrate to
-:func:`obscura.core.agent_loop_factory.make_agent_loop`, which translates
-v1-shape kwargs to v2 middleware/hooks automatically. Set
-``OBSCURA_AGENT_LOOP=v1`` to revert to the legacy loop while debugging.
-
-v1 (:class:`obscura.core.agent_loop.AgentLoop`) is preserved as a fallback
-and deletion target. The deprecation pass and final removal happen once
-eval data confirms parity across all real-world workloads.
+Most call sites should construct via
+:func:`obscura.core.agent_loop_factory.make_agent_loop`, which assembles
+the standard middleware + hook stack from a flat kwarg surface.
 """
 
 from __future__ import annotations
@@ -74,7 +36,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.dag import (
     DAGNode,
@@ -361,8 +323,78 @@ class AgentLoopV2:
             Message(role=Role.USER, content=[ContentBlock(kind="text", text=prompt)])
         )
 
-        async for event in self._run_inner(messages, session_id, backend_kwargs):
-            yield event
+        # Bind two per-task ContextVars for the duration of this run:
+        # 1. Stream guards (dedup/budget) — same primitive every backend uses
+        # 2. Discovery set — backends that filter the per-turn tool list
+        #    by tier consult this set so deferred tools surfaced via
+        #    ``tool_search`` become visible in subsequent turns.
+        from obscura.core.stream_guards import bind_stream_log
+        from obscura.core.tool_tiering import bind_discovered_tools
+
+        with bind_stream_log(), bind_discovered_tools():
+            # Run preflight to ground environment / URL questions BEFORE
+            # the model is invoked. Preflight prepends a synthetic system
+            # message with tool results so the model has real data in
+            # context and won't fabricate from priors.
+            await self._apply_preflight(prompt, messages)
+
+            async for event in self._run_inner(messages, session_id, backend_kwargs):
+                yield event
+
+    async def _apply_preflight(
+        self,
+        prompt: str,
+        messages: list[Message],
+    ) -> None:
+        """Run preflight rules; mutate ``messages`` to prepend grounded data.
+
+        Best-effort. Any failure is logged and ignored — preflight must
+        not block the user's actual request.
+        """
+        from obscura.core.prompt_preflight import run_preflight
+
+        async def _invoke(name: str, tool_input: dict[str, object]) -> str:
+            spec = self._registry.get(name)
+            if spec is None:
+                msg = f"preflight: tool {name!r} not registered"
+                raise RuntimeError(msg)
+            handler = spec.handler
+            result = handler(**tool_input)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return (
+                result if isinstance(result, str) else json.dumps(result, default=str)
+            )
+
+        try:
+            results = await run_preflight(prompt, invoke_tool=_invoke)
+        except Exception:
+            logger.debug("preflight: top-level failure swallowed", exc_info=True)
+            return
+
+        if not results:
+            return
+
+        # Build a single grounding system note. Inserted before the user
+        # message so the model reads context first, prompt second.
+        sections: list[str] = ["[Preflight grounding — auto-fetched before this turn]"]
+        for match, output in results:
+            sections.append(
+                f"\n• {match.reason}\n  Result: {output[:2000]}",
+            )
+        sections.append(
+            "\nUse this data for your answer. Do not pre-fabricate based on priors.",
+        )
+        note = Message(
+            role=Role.SYSTEM,
+            content=[ContentBlock(kind="text", text="".join(sections))],
+        )
+
+        # Insert just before the trailing user message we appended above.
+        if messages and messages[-1].role == Role.USER:
+            messages.insert(len(messages) - 1, note)
+        else:
+            messages.append(note)
 
     # -- Internal --------------------------------------------------------------
 
@@ -435,6 +467,15 @@ class AgentLoopV2:
                 str, list[str]
             ] = {}  # tool_use_id -> JSON delta chunks
             partial_names: dict[str, str] = {}
+            # SDK-pre-resolved tool results: backends whose SDK runs the tool
+            # internally (Copilot, Claude with the agent SDK) emit
+            # ChunkKind.TOOL_RESULT after TOOL_USE_END carrying the SDK's
+            # result. We populate this map and use it to short-circuit the
+            # local Python dispatcher (see ``_seen_calls`` priming below)
+            # — re-running the tool would double-execute and frequently
+            # fails on signature drift between the SDK spec and the
+            # registered Python handler.
+            sdk_resolved: dict[str, tuple[str, bool]] = {}
 
             # Extract the latest user-message text as the positional ``prompt``
             # arg for backends whose ``stream()`` signature is
@@ -554,6 +595,25 @@ class AgentLoopV2:
                             input=parsed_input,
                         )
                     )
+                elif kind == ChunkKind.TOOL_RESULT:
+                    # Backend SDK already executed the tool — capture its
+                    # result so the local dispatcher returns it from the
+                    # _seen_calls cache instead of re-running the tool.
+                    # See ``sdk_resolved`` declaration above.
+                    tu_id = chunk.tool_use_id
+                    if not tu_id and len(partial_names) == 1:
+                        tu_id = next(iter(partial_names))
+                    if tu_id:
+                        raw = getattr(chunk, "raw", None)
+                        success = True
+                        if raw is not None:
+                            data = getattr(raw, "data", None) or raw
+                            success_val = getattr(data, "success", None)
+                            if success_val is None and isinstance(data, dict):
+                                success_val = cast(dict[str, Any], data).get("success")
+                            if success_val is not None:
+                                success = bool(success_val)
+                        sdk_resolved[tu_id] = (chunk.text or "", success)
                 elif kind == ChunkKind.TASK_STARTED:
                     yield AgentEvent(
                         kind=AgentEventKind.TASK_STARTED,
@@ -621,6 +681,28 @@ class AgentLoopV2:
                     text=full_text,
                 )
                 return
+
+            # Pre-populate ``_seen_calls`` with results the backend SDK
+            # already produced. The dispatcher's cache check
+            # (``if tu_id and tu_id in self._seen_calls``) then returns
+            # the SDK's result text directly — no Python handler invoked.
+            # Required for Copilot/Claude where the SDK runs the tool
+            # internally before our chunks even arrive.
+            for tu_id, (result_text, success) in sdk_resolved.items():
+                if tu_id in self._seen_calls:
+                    continue
+                self._seen_calls[tu_id] = _ToolEnvelopeV2(
+                    tool_use_id=tu_id,
+                    content=[
+                        ContentBlock(
+                            kind="text",
+                            text=result_text,
+                            is_error=not success,
+                        )
+                    ],
+                    is_error=not success,
+                    is_cancelled=False,
+                )
 
             # Build the merged turn DAG. parallel_plan calls expand into
             # their declared sub-DAG; non-plan calls become no-edge sibling
@@ -756,6 +838,28 @@ class AgentLoopV2:
                         text="stopped by post_turn hook",
                     )
                     return
+
+            # Backend SDK ran the tool loop itself (Copilot, Claude with
+            # the agent SDK). The chunk stream we just consumed already
+            # contained the post-tool model continuation, so we have all
+            # the assistant text the user is going to see. Iterating
+            # ``backend.stream`` again would just replay a fresh SDK
+            # conversation with the tool result re-injected — wasteful
+            # and visible to the user as duplicate "Done — ..." text.
+            #
+            # Detect this by: every tool call we observed was already
+            # resolved by the SDK (its result arrived as a TOOL_RESULT
+            # chunk). When that holds, the SDK is the source of truth;
+            # exit cleanly.
+            if tool_calls and all(
+                tc.tool_use_id and tc.tool_use_id in sdk_resolved for tc in tool_calls
+            ):
+                yield AgentEvent(
+                    kind=AgentEventKind.AGENT_DONE,
+                    turn=turn,
+                    text=full_text,
+                )
+                return
 
         # max_turns exceeded.
         yield AgentEvent(
@@ -1044,6 +1148,22 @@ class AgentLoopV2:
                         text=f"tool not found: {node.tool_name}",
                     ),
                 ],
+                is_error=True,
+            )
+
+        # Per-task dedup/budget guard — same primitive used by Copilot,
+        # Claude, Codex (via MCP server), so behavior is uniform across
+        # backends regardless of who drives the loop.
+        from obscura.core.stream_guards import (
+            check_stream_guards,
+            refusal_text,
+        )
+
+        refusal = check_stream_guards(node.tool_name, dict(node.tool_input))
+        if refusal is not None:
+            return _ToolEnvelopeV2(
+                tool_use_id=node.tool_use_id,
+                content=[ContentBlock(kind="text", text=refusal_text(refusal))],
                 is_error=True,
             )
 
