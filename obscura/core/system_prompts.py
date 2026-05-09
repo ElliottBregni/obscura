@@ -56,11 +56,42 @@ def load_custom_system_prompt(path: Path | str) -> str:
     return path_obj.read_text(encoding="utf-8")
 
 
+def _is_browser_running() -> bool:
+    """Return True if at least one obscura browser host is currently active."""
+    try:
+        from obscura.integrations.browser.active_hosts import list_hosts
+
+        return bool(list_hosts())
+    except Exception:
+        logger.debug("suppressed exception in _is_browser_running", exc_info=True)
+        return False
+
+
+# The browser tools section is the last ~13 lines of default_agent.txt.
+# We keep a reference marker so we can extract it when needed.
+_BROWSER_SECTION_MARKER = "## Browser Tools"
+
+
+def _split_browser_section(prompt: str) -> tuple[str, str]:
+    """Split a prompt into (main_body, browser_section).
+
+    If the browser marker is not found, returns (prompt, "").
+    """
+    idx = prompt.find(_BROWSER_SECTION_MARKER)
+    if idx == -1:
+        return prompt, ""
+    # Keep the separator (a blank line or ---) that precedes the section.
+    body = prompt[:idx].rstrip()
+    browser = prompt[idx:]
+    return body, browser
+
+
 def compose_system_prompt(
     *,
     base: str = "",
     include_default: bool = True,
     custom_sections: list[str] | None = None,
+    include_browser_tools: bool | None = None,
 ) -> str:
     """Compose a system prompt from multiple sources.
 
@@ -68,6 +99,10 @@ def compose_system_prompt(
         base: Base system prompt (user-provided)
         include_default: Whether to include default Obscura prompt
         custom_sections: Additional sections to append
+        include_browser_tools: Whether to include the browser tools section from the
+            default prompt. When None (default) the value is auto-detected by
+            checking whether a browser host socket is currently active. Pass
+            True/False to override the auto-detection.
 
     Returns:
         Composed system prompt
@@ -76,7 +111,14 @@ def compose_system_prompt(
     parts: list[str] = []
 
     if include_default:
-        parts.append(get_default_system_prompt())
+        default_prompt = get_default_system_prompt()
+        # Determine whether to include browser section.
+        if include_browser_tools is None:
+            include_browser_tools = _is_browser_running()
+        if not include_browser_tools:
+            # Strip the browser tools section to save ~30 tokens.
+            default_prompt, _ = _split_browser_section(default_prompt)
+        parts.append(default_prompt)
 
     if base:
         parts.append(base)
