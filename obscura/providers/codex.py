@@ -560,13 +560,25 @@ class CodexBackend(BackendToolHostMixin):
         return ", ".join(parts)
 
     def _build_tool_listing(self) -> str:
-        """Build a human-readable tool listing for the system prompt."""
+        """Build a human-readable tool listing for the system prompt.
+
+        Core tools (those in CORE_TOOL_NAMES or passing is_core()) appear with
+        full descriptions. Non-core and shadow tools are deferred — they get a
+        single compact line directing the model to use ``tool_search`` first.
+        """
+        from obscura.core.tool_tiering import deferred_listing, split_by_tier
+
+        # Shadow specs (MCP shadows) are never listed in the prompt — they are
+        # discoverable via tool_search but bloat the system prompt otherwise.
+        visible_tools = [s for s in self._tools if not getattr(s, "is_shadow", False)]
+        core_tools, deferred_tools = split_by_tier(visible_tools)
+
         lines = ["## Available Tools", ""]
         lines.append(
             "You have the following tools. Use these EXACT names when calling tools:",
         )
         lines.append("")
-        for spec in self._tools:
+        for spec in core_tools:
             desc = (spec.description or "").split("\n")[0][:120]
             cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
             lines.append(
@@ -577,12 +589,19 @@ class CodexBackend(BackendToolHostMixin):
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
-            cap_section = build_capability_map_section(self._tools)
+            cap_section = build_capability_map_section(core_tools)
             if cap_section:
                 lines.append("")
                 lines.append(cap_section)
         except Exception:
             logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
+
+        if deferred_tools:
+            deferred_section = deferred_listing(deferred_tools)
+            if deferred_section:
+                lines.append("")
+                lines.append(deferred_section)
+
         return "\n".join(lines)
 
     def _build_system_prompt(self) -> str:
