@@ -40,6 +40,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
+from obscura.cli._text_utils import sanitize_text as _sanitize_text
 from obscura.cli.render import (
     ACCENT,
     CODE_THEME,
@@ -48,7 +49,6 @@ from obscura.cli.render import (
     TOOL_COLOR,
     WARN_COLOR,
     _detect_language,  # pyright: ignore[reportPrivateUsage]
-    _sanitize_text,  # pyright: ignore[reportPrivateUsage]
     console,
 )
 
@@ -412,7 +412,7 @@ async def _run_action_bar(
     return result or default_cancel
 
 
-async def _run_text_input(placeholder: str = "") -> str:
+async def _run_text_input(_placeholder: str = "") -> str:
     """Single-line text input for free-form responses."""
     session: PromptSession[str] = PromptSession()
     try:

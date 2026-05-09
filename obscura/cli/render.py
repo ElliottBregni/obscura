@@ -34,6 +34,7 @@ from obscura.cli.renderer.modern.theme import (
     TOOL_HEX,
     WARN_HEX,
 )
+from obscura.cli._text_utils import sanitize_text as _sanitize_text
 from obscura.cli.tool_summaries import summarize_tool_call
 from obscura.cli.ui_primitives import random_thinking_message
 from obscura.core.enums.agent import AgentEventKind
@@ -68,28 +69,6 @@ ERROR_COLOR = ERROR_HEX
 OK_COLOR = OK_HEX
 WARN_COLOR = WARN_HEX
 CODE_THEME = "monokai"
-
-
-def _sanitize_text(s: str) -> str:
-    """Remove ANSI/escape sequences and control characters from text."""
-    if not s:
-        return ""
-    try:
-        # CSI sequences: ESC [ ... final-byte
-        cleaned = re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", s)
-        # OSC sequences: ESC ] ... (ST or BEL)
-        cleaned = re.sub(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)", "", cleaned)
-        # DCS / PM / APC / SOS sequences
-        cleaned = re.sub(r"\x1B[PX^_][^\x1B]*(?:\x1B\\|$)", "", cleaned)
-        # Lone ESC + one char
-        cleaned = re.sub(r"\x1B[@-Z\\-_]", "", cleaned)
-        # Bare ESC
-        cleaned = re.sub(r"\x1B", "", cleaned)
-        # C0 controls (keep TAB \x09, LF \x0A, CR \x0D)
-        return re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", "", cleaned)
-    except Exception:
-        logger.debug("suppressed exception in _sanitize_text", exc_info=True)
-        return s
 
 
 def _detect_language(text: str) -> str | None:

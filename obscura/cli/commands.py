@@ -6296,11 +6296,10 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
         print_info("No tool usage recorded yet.")
         return None
     # Show a summary of all tool calls from the session.
-    if hasattr(collapser, "_group") or True:
-        tracker = get_cost_tracker()
-        print_info(
-            tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.",
-        )
+    tracker = get_cost_tracker()
+    print_info(
+        tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.",
+    )
     return None
 
 

@@ -197,6 +197,11 @@ class TUIRenderer:
         self._all_text: list[str] = []
         self._thinking_blocks: list[str] = []
         self._in_thinking: bool = False
+        # Live transcript entry for the current thinking block. Created on
+        # the first THINKING_DELTA and updated in place each subsequent delta
+        # so thinking streams into the transcript as it arrives rather than
+        # appearing all at once when the block ends.
+        self._thinking_entry: TranscriptEntry | None = None
 
         # Reveal-aware flush queue — same shape as the bordered REPL.
         # Events whose handler commits ``_text_buf`` to the transcript
@@ -466,6 +471,7 @@ class TUIRenderer:
             # Begin a fresh turn — clamp leftover state. ``finish`` already
             # ran on the previous turn, but a defensive reset costs nothing.
             self._in_thinking = False
+            self._thinking_entry = None
             self._state.live.kind = LiveRegionKind.THINKING
             self._state.live.label = "thinking"
             self._state.live.preview = ""
@@ -479,7 +485,26 @@ class TUIRenderer:
             if not self._in_thinking:
                 self._flush_text()
                 self._in_thinking = True
+                # Create a live transcript entry immediately so thinking
+                # streams delta-by-delta into the transcript rather than
+                # appearing all at once when the block ends.
+                entry = TranscriptEntry(
+                    kind=TranscriptKind.THINKING,
+                    runs=[StyledRun(text="", style=_STYLE_THINKING)],
+                )
+                self._thinking_entry = entry
+                self._state.append_transcript(entry)
             self._thinking_buf.append(event.text)
+            # Update the live entry's runs in place — TranscriptEntry is
+            # not frozen so this is safe; StyledRun is frozen so we replace
+            # the list rather than mutating a run.
+            if self._thinking_entry is not None:
+                self._thinking_entry.runs = [
+                    StyledRun(
+                        text="".join(self._thinking_buf),
+                        style=_STYLE_THINKING,
+                    )
+                ]
             self._update_live_thinking()
             return
 
@@ -592,21 +617,27 @@ class TUIRenderer:
         self._state.append_transcript(entry)
 
     def _flush_thinking(self) -> None:
-        """Flush ``_thinking_buf`` as a single THINKING transcript entry."""
+        """Finalise the live THINKING transcript entry and reset thinking state.
+
+        The transcript entry was created on the first THINKING_DELTA and
+        updated in place on each subsequent delta, so there is nothing left
+        to append here. We just record the completed block in
+        ``_thinking_blocks`` for context-window compaction and clear all
+        accumulators.
+        """
         if not self._thinking_buf:
             self._in_thinking = False
+            self._thinking_entry = None
             return
         text = "".join(self._thinking_buf)
         self._thinking_buf.clear()
         self._in_thinking = False
+        self._thinking_entry = None
         if not text.strip():
             return
         self._thinking_blocks.append(text)
-        entry = TranscriptEntry(
-            kind=TranscriptKind.THINKING,
-            runs=[StyledRun(text=text, style=_STYLE_THINKING)],
-        )
-        self._state.append_transcript(entry)
+        # Entry already committed live to the transcript during streaming —
+        # do not append a second copy.
 
     # ------------------------------------------------------------------
     # Tool / error emission
@@ -718,7 +749,9 @@ class TUIRenderer:
             live.started_at_monotonic = time.monotonic()
             live.reveal_pos = 0
         if live.kind != LiveRegionKind.THINKING:
-            live.reveal_pos = 0
+            # Clamp: never let reveal_pos jump backwards on a kind
+            # transition (e.g. STREAMING → THINKING mid-turn).
+            live.reveal_pos = max(live.reveal_pos, 0)
         live.kind = LiveRegionKind.THINKING
         live.label = "thinking"
         live.full_text = "".join(self._thinking_buf)
@@ -735,7 +768,9 @@ class TUIRenderer:
             live.started_at_monotonic = time.monotonic()
             live.reveal_pos = 0
         if live.kind != LiveRegionKind.STREAMING:
-            live.reveal_pos = 0
+            # Clamp: never let reveal_pos jump backwards on a kind
+            # transition (e.g. THINKING → STREAMING mid-turn).
+            live.reveal_pos = max(live.reveal_pos, 0)
         live.kind = LiveRegionKind.STREAMING
         live.label = "streaming"
         live.full_text = "".join(self._text_buf)
