@@ -862,14 +862,14 @@ class ObscuraTUIApp:
         # transcript formatter instead of stdout.
         original_file = rich_console.file
         try:
-            rich_console.file = captured  # type: ignore[assignment]
+            rich_console.file = captured
             result = await handle_command(line, ctx)
         except Exception as exc:
             logger.exception("tui: slash command raised")
             self._push_error(f"slash command error: {exc}")
             return
         finally:
-            rich_console.file = original_file  # type: ignore[assignment]
+            rich_console.file = original_file
 
         captured_text = captured.getvalue()
         if captured_text:

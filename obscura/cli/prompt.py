@@ -62,7 +62,7 @@ from obscura.cli.promptkit.style import (
 # Legacy re-exports that historically lived in this module — the renderer
 # owns the canonical implementation; keep them importable from here for
 # call sites that haven't migrated.
-from obscura.cli.render import _sanitize_text  # pyright: ignore[reportPrivateUsage]
+from obscura.cli.render import _sanitize_text
 from obscura.cli.ui_primitives import random_thinking_message
 
 __all__ = [

@@ -825,7 +825,7 @@ class ClaudeBackend(BackendToolHostMixin):
         async def _can_use_tool(
             tool_name: str,
             tool_input: dict[str, Any],
-            _ctx: Any,  # noqa: ARG001  # pyright: ignore[reportUnusedParameter]
+            _ctx: Any,  # noqa: ARG001
         ) -> Any:
             from claude_agent_sdk.types import (
                 PermissionResultAllow,

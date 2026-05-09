@@ -15,7 +15,7 @@ say "no agents running". A snapshot test would have caught both.
 from __future__ import annotations
 
 import asyncio
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 from prompt_toolkit.application import Application
@@ -114,8 +114,8 @@ async def test_empty_input_is_exactly_one_row() -> None:
     """
     state = _make_state()
     rows = await _render(state)
-    # Find the row containing the prompt glyph "❯".
-    input_rows = [i for i, line in enumerate(rows) if line.startswith("❯")]
+    # Find the row containing the prompt glyph "❯".  # noqa: RUF003
+    input_rows = [i for i, line in enumerate(rows) if line.startswith("❯")]  # noqa: RUF001
     assert len(input_rows) == 1, (
         f"Expected exactly one input row, found {len(input_rows)}: {input_rows}"
     )
@@ -197,10 +197,8 @@ async def test_input_grows_when_buffer_has_newlines() -> None:
     """The dynamic height callable should let the input expand for
     multi-line drafts, capped at 6 rows."""
     state = _make_state()
-    layout = build_layout(state)
-    layout.input_buffer.text = "line one\nline two\nline three"
-    rows = await _render(state)
-    input_rows = [i for i, line in enumerate(rows) if line.startswith("❯")]
+    rows = await _render(state, input_text="line one\nline two\nline three")
+    input_rows = [i for i, line in enumerate(rows) if line.startswith("❯")]  # noqa: RUF001
     # The prompt glyph still appears on one row, but the *visible* span
     # of the input should now be 3 — meaning the toolbar moved 2 rows
     # further down.

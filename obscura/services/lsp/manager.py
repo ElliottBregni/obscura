@@ -49,6 +49,10 @@ class LSPClient:
         self._req_id += 1
         return self._req_id
 
+    @property
+    def is_alive(self) -> bool:
+        return self._process.returncode is None
+
     async def _write(self, msg: dict[str, Any]) -> None:
         body = json.dumps(msg).encode("utf-8")
         header = f"Content-Length: {len(body)}\r\n\r\n".encode()
@@ -63,7 +67,7 @@ class LSPClient:
         while True:
             try:
                 ch = await asyncio.wait_for(self._process.stdout.read(1), timeout=timeout)
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 logger.debug("suppressed exception in _read_one (header read)", exc_info=True)
                 return None
             if not ch:
@@ -81,14 +85,14 @@ class LSPClient:
                 chunk = await asyncio.wait_for(
                     self._process.stdout.read(length - len(body)), timeout=timeout
                 )
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 logger.debug("suppressed exception in _read_one (body read)", exc_info=True)
                 break
             if not chunk:
                 break
             body += chunk
         try:
-            return json.loads(body)  # type: ignore[return-value]
+            return json.loads(body)
         except json.JSONDecodeError:
             logger.debug("lsp: malformed JSON body: %r", body[:200])
             return None
@@ -235,7 +239,7 @@ class LSPServerManager:
         workspace_root = _find_workspace_root(file_path)
         existing = self._clients.get(workspace_root)
         if existing is not None:
-            if existing._process.returncode is None:
+            if existing.is_alive:
                 return existing
             del self._clients[workspace_root]
 

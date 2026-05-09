@@ -53,7 +53,7 @@ from obscura.cli.promptkit.status import (
 )
 from obscura.cli.promptkit.style import PROMPT_STYLE
 from obscura.cli.render import (
-    _sanitize_text,  # pyright: ignore[reportPrivateUsage]
+    _sanitize_text,
     get_model_space_delta,
 )
 from obscura.core.paths import resolve_obscura_home
