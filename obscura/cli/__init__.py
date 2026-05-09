@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Literal, cast
 
 import click
@@ -195,6 +196,13 @@ class _SubcommandAwareGroup(click.Group):
     default=True,
     help="Launch the agent fleet from agents.yaml (default: on).",
 )
+@click.option(
+    "--debug-tui",
+    "debug_tui",
+    is_flag=True,
+    default=False,
+    help="Start the TUI in debug display mode (raw payloads + traces).",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -212,6 +220,7 @@ def main(
     workspace_name: str | None = None,
     log_level: str = "WARNING",
     supervise: bool = True,
+    debug_tui: bool = False,
 ) -> None:
     """Obscura -- AI agent REPL."""
     # If a subcommand was invoked, let Click handle it
@@ -278,6 +287,13 @@ def main(
         except Exception:
             _log.debug("suppressed exception in main", exc_info=True)
 
+    # --debug-tui beats env, env beats default.
+    tui_mode = (
+        "debug"
+        if (debug_tui or os.environ.get("OBSCURA_TUI_DEBUG", "").strip().lower() == "1")
+        else "normal"
+    )
+
     try:
         asyncio.run(
             repl(
@@ -292,6 +308,7 @@ def main(
                 no_default_prompt,
                 supervise=supervise,
                 compiled_ws=compiled_ws,
+                tui_display_mode=tui_mode,
             ),
         )
     except KeyboardInterrupt:

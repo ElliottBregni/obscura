@@ -109,6 +109,7 @@ async def repl(
     *,
     supervise: bool = True,
     compiled_ws: Any | None = None,
+    tui_display_mode: str = "normal",
 ) -> None:
     """Core async loop -- runs the interactive REPL or single-shot."""
     # Event store — backend chosen via OBSCURA_DB_TYPE.
@@ -252,6 +253,7 @@ async def repl(
             vector_store=_session.vector_store,
             context_router=_session.context_router,
             turn_classifier=_session.turn_classifier,
+            tui_display_mode=tui_display_mode,
         )
 
         # --- Single-shot mode ---

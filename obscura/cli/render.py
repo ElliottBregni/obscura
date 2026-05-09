@@ -280,6 +280,15 @@ def set_active_renderer(r: Any) -> None:
     _active_renderer = r
 
 
+def get_active_renderer() -> Any:
+    """Return the currently active renderer instance, or None.
+
+    Used by slash commands that mutate live renderer state (e.g.
+    ``/tui debug`` switching display mode mid-turn).
+    """
+    return _active_renderer
+
+
 def get_active_text() -> str:
     try:
         if _active_renderer is None:

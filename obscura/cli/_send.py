@@ -84,7 +84,10 @@ async def send_message(
             )
         return inline_agent_response
 
-    renderer = create_renderer(streaming_status=streaming_status)
+    renderer = create_renderer(
+        streaming_status=streaming_status,
+        display_mode=getattr(ctx, "tui_display_mode", "normal") or "normal",
+    )
     # Feed session context into the modern renderer's status bar
     _set_session_context = getattr(renderer, "set_session_context", None)
     if callable(_set_session_context):
