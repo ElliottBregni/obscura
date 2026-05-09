@@ -38,8 +38,15 @@ _tokenizer_ready = False
 CONTEXT_WINDOW_HARD_MIN_TOKENS = 16_000  # Block if available tokens < this
 CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000  # Warn if available tokens < this
 
-# Snip compact: truncate individual tool outputs above this token count
-SNIP_TOOL_OUTPUT_THRESHOLD = 10_000  # tokens
+# Snip compact: truncate individual tool outputs above this token count.
+# Lowered from 10_000 to 3_000 to keep tool results from consuming the
+# context window. Override via OBSCURA_SNIP_THRESHOLD env var or by
+# passing threshold_tokens explicitly to snip_tool_outputs().
+import os as _os
+SNIP_TOOL_OUTPUT_THRESHOLD: int = int(
+    _os.environ.get("OBSCURA_SNIP_THRESHOLD", "3000")
+)
+del _os
 
 # Model context windows
 MODEL_CONTEXT_WINDOWS: dict[str, int] = {
