@@ -245,6 +245,7 @@ async def _probe_one_server(
             description=(tool.description or "").strip(),
             parameters=dict(tool.inputSchema or {"type": "object", "properties": {}}),
             handler=_shadow_handler_factory(qualified),
+            is_shadow=True,
         )
         specs.append(spec)
     logger.info("MCP discovery: %s contributed %d tools", name, len(specs))
