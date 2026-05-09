@@ -1773,7 +1773,7 @@ wheels = [
 
 [[package]]
 name = "obscura-agent"
-version = "0.5.3"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "claude-agent-sdk" },
