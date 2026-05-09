@@ -118,3 +118,194 @@ def test_renderer_error_mid_stream_flushes_pending_text_and_thinking() -> None:
     ]
     err = state.transcript[-1]
     assert "stream blew up" in "".join(r.text for r in err.runs)
+
+
+# ── Tool call summary uses the shared summarizer ─────────────────────────
+
+
+def test_tool_call_uses_shared_summarize_tool_call() -> None:
+    """Should produce the same friendly summary the bordered REPL uses."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            tool_name="read_text_file",
+            tool_input={"path": "/tmp/foo.py"},
+            tool_use_id="tu_x",
+        ),
+    )
+    assert state.transcript, "expected a TOOL_USE entry"
+    entry = state.transcript[-1]
+    assert entry.kind == TranscriptKind.TOOL_USE
+    body = "".join(r.text for r in entry.runs)
+    # ``read_text_file {"path": "/tmp/foo.py"}`` → ``Reading foo.py``.
+    assert "Reading foo.py" in body, f"summary missing from runs: {body!r}"
+    assert "read_text_file" in body
+
+
+def test_tool_call_for_shell_includes_dollar_tag() -> None:
+    """Shell-classified tools get a ``$`` tag prefix mirroring modern."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            tool_name="run_command",
+            tool_input={"command": "ls -la"},
+            tool_use_id="tu_y",
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert body.lstrip().startswith("$ ") or "$ " in body
+    assert "ls -la" in body
+
+
+def test_tool_call_for_mcp_includes_mcp_tag() -> None:
+    """MCP shadow names get a ``MCP`` tag and ``server.tool`` summary."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            tool_name="mcp__github__list_repos",
+            tool_input={"org": "anthropic"},
+            tool_use_id="tu_z",
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert "MCP " in body, f"missing MCP tag: {body!r}"
+    assert "github.list_repos" in body, f"missing server.tool summary: {body!r}"
+
+
+def test_tool_call_live_preview_is_capped() -> None:
+    """A long input should never become a > 50-char ``state.live.preview``."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    long_input = "x" * 500
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_CALL,
+            tool_name="run_command",
+            tool_input={"command": long_input},
+            tool_use_id="tu_l",
+        ),
+    )
+    assert len(state.live.preview) <= 50
+
+
+# ── Tool result formatting ───────────────────────────────────────────────
+
+
+def test_tool_result_json_dict_extracts_stdout() -> None:
+    """``{"ok": true, "stdout": "hello\\n"}`` should render as ``hello``."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="run_command",
+            tool_use_id="tu_1",
+            tool_result='{"ok": true, "stdout": "hello\\n", "stderr": "", "exit_code": 0}',
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    # Body should surface the readable stdout, not the JSON envelope.
+    assert "hello" in body
+    assert "{\"ok\":" not in body
+    # Success glyph leads the body.
+    assert body.lstrip().startswith("✓")
+
+
+def test_tool_result_json_failure_marks_error() -> None:
+    """A non-zero ``exit_code`` flips the entry to error severity."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="run_command",
+            tool_use_id="tu_2",
+            tool_result='{"ok": false, "stdout": "", "stderr": "command not found", "exit_code": 127}',
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert "command not found" in body
+    assert body.lstrip().startswith("✗")
+
+
+def test_tool_result_multiline_splits_into_indented_lines() -> None:
+    """Multi-line plain text result should split with continuation indent."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    raw = "line one\nline two\nline three"
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="read_text_file",
+            tool_use_id="tu_3",
+            tool_result=raw,
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert "line one" in body
+    assert "line two" in body
+    assert "line three" in body
+    # Continuation rows are indented under the glyph.
+    assert "\n    line two" in body
+
+
+def test_tool_result_strips_ansi_escapes() -> None:
+    """Shell tool results with colour codes should not leak escapes."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    raw_with_ansi = "\x1b[31mred error\x1b[0m"
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="run_command",
+            tool_use_id="tu_4",
+            tool_result=raw_with_ansi,
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert "\x1b[" not in body
+    assert "red error" in body
+
+
+def test_tool_result_long_output_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Very tall results should be capped with a ``… (N more lines)`` hint."""
+    monkeypatch.setenv("OBSCURA_TOOL_OUTPUT_MAX_LINES", "5")
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    raw = "\n".join(f"line {i}" for i in range(50))
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="read_text_file",
+            tool_use_id="tu_5",
+            tool_result=raw,
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    # Cap means we keep only 5 of the 50 lines.
+    assert "line 0" in body
+    assert "line 4" in body
+    assert "line 49" not in body
+    assert "more lines" in body
+
+
+def test_tool_result_empty_renders_placeholder() -> None:
+    """Empty / whitespace-only results should show ``(empty result)``."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="read_text_file",
+            tool_use_id="tu_6",
+            tool_result="   \n   ",
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert "(empty result)" in body

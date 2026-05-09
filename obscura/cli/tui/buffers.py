@@ -67,8 +67,14 @@ __all__ = [
 # 5000, but the layout window only needs the recent tail.
 _TRANSCRIPT_RENDER_CAP = 1000
 
-# Maximum chars from the live region preview before we ellipsize.
-_LIVE_PREVIEW_MAX = 80
+# Maximum chars from the live region preview before we ellipsize. The
+# live region renders on a single row pinned by ``Dimension.exact(1)``
+# in :mod:`obscura.cli.tui.layout`; combined with ``wrap_lines=False``
+# on the live-region window this is now defence-in-depth (the window
+# would clip horizontally anyway), but a tighter cap keeps the spinner
+# legible on narrow terminals where the truncation point would otherwise
+# fall mid-word.
+_LIVE_PREVIEW_MAX = 60
 
 # Spinner frames. We pick the frame from ``state.live.spinner_idx`` so
 # the live region animates without re-rendering anything else.

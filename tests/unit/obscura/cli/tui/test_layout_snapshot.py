@@ -251,6 +251,38 @@ async def test_live_region_appears_above_input() -> None:
     )
 
 
+async def test_long_live_region_label_does_not_push_toolbar_off_screen() -> None:
+    """A live region with a long label + preview must clip horizontally,
+    not wrap into a second row that hides the toolbar / footer.
+
+    Reproduces the user-reported "toolbar gets hidden once chat
+    expands" bug: the live region used to ``wrap_lines=True`` on a
+    ``Dimension.exact(1)`` window. When the rendered content didn't
+    fit on a single row, prompt-toolkit grew the rendered height and
+    pushed the toolbar/footer off-screen on narrow terminals.
+    """
+    from obscura.cli.tui.state import LiveRegionKind
+
+    state = _make_state()
+    state.live.kind = LiveRegionKind.TOOL_RUNNING
+    state.live.label = "running run_command"
+    # Far longer than the terminal width — used to wrap and steal a row.
+    state.live.preview = "x" * 500
+    rows = await _render(state, w=80, h=15)
+
+    # All four bottom rows of the layout must still be present.
+    assert "quit" in rows[-3] and "palette" in rows[-3], (
+        f"Toolbar pushed off-screen by long live-region preview; "
+        f"rows[-3]={rows[-3]!r}"
+    )
+    assert "─" in rows[-2], (
+        f"Footer separator missing; rows[-2]={rows[-2]!r}"
+    )
+    assert rows[-1].startswith("session "), (
+        f"Footer header missing; rows[-1]={rows[-1]!r}"
+    )
+
+
 async def test_long_transcript_does_not_overflow_fixed_widgets() -> None:
     """Chat output must never push the input, toolbar, or footer off-screen.
 

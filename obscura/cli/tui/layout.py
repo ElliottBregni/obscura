@@ -119,12 +119,19 @@ def _make_text_window(
     height: Dimension | int | None = None,
     style: str = "",
     always_hide_cursor: bool = True,
+    wrap_lines: bool = True,
 ) -> Window:
     """Build a :class:`Window` whose content is recomputed every frame.
 
     ``get_text`` is wrapped in a :class:`FormattedTextControl` so
     prompt-toolkit re-invokes it on each redraw; this is what lets
     :class:`TUIState` mutations show up live.
+
+    ``wrap_lines`` defaults to ``True`` for the transcript, but
+    single-row widgets (toolbar, footer, live region, separator) pass
+    ``wrap_lines=False`` so a line that overflows the terminal width
+    gets clipped horizontally rather than wrapping into a second row
+    that would push fixed-height neighbours off-screen.
     """
     control = FormattedTextControl(
         text=get_text,
@@ -136,7 +143,7 @@ def _make_text_window(
         height=height,
         style=style,
         always_hide_cursor=always_hide_cursor,
-        wrap_lines=True,
+        wrap_lines=wrap_lines,
     )
 
 
@@ -194,10 +201,14 @@ def build_layout(
     """
 
     # ---- Header (top, 1 row) + thin rule ---------------------------------
+    # ``wrap_lines=False`` so a long session title or model name gets
+    # clipped horizontally instead of wrapping into a second row that
+    # would push the transcript off-screen.
     header_window = _make_text_window(
         lambda: header_text(state),
         height=Dimension.exact(1),
         style="class:tui.header",
+        wrap_lines=False,
     )
     # Single-row separator under the header so the transcript doesn't
     # butt directly into the session/model line. ``Window(char=...)``
@@ -295,10 +306,15 @@ def build_layout(
     )
 
     # ---- Live region (1 row, conditional) --------------------------------
+    # ``wrap_lines=False`` is critical: the live region label shows the
+    # tool name + truncated preview + elapsed timer on one row. Without
+    # this guard, a long preview would wrap onto a second row and the
+    # toolbar / footer would be pushed off-screen.
     live_region_window = _make_text_window(
         lambda: live_region_text(state),
         height=Dimension.exact(1),
         style="class:tui.live",
+        wrap_lines=False,
     )
     live_region_container = ConditionalContainer(
         content=live_region_window,
@@ -376,10 +392,13 @@ def build_layout(
     input_area.window.height = _input_height
 
     # ---- Toolbar (1 row, exact) ------------------------------------------
+    # ``wrap_lines=False`` so a wide toolbar (lots of hotkeys + agent
+    # counter) gets clipped instead of wrapping and hiding the footer.
     toolbar_window = _make_text_window(
         lambda: toolbar_text(state),
         height=Dimension.exact(1),
         style="class:tui.toolbar",
+        wrap_lines=False,
     )
 
     # ---- Banner / notification windows kept for return value -------------
