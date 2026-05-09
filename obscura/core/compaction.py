@@ -668,9 +668,9 @@ async def extract_memories(
     try:
         result_text = ""
         if hasattr(backend, "complete"):
-            result_text = str(await backend.complete(prompt, max_tokens=1024)).strip()
+            result_text = str(await backend.complete(prompt, max_tokens=512)).strip()
         elif hasattr(backend, "generate"):
-            result_text = str(await backend.generate(prompt, max_tokens=1024)).strip()
+            result_text = str(await backend.generate(prompt, max_tokens=512)).strip()
         elif hasattr(backend, "chat"):
             result = await backend.chat([{"role": "user", "content": prompt}])
             if isinstance(result, dict):
@@ -709,12 +709,13 @@ def should_auto_compact(
     messages: list[Any],
     model_id: str,
     system_prompt: str = "",
-    threshold: float = 0.80,
+    threshold: float = 0.70,
 ) -> bool:
     """Check if auto-compaction should trigger.
 
-    Returns True if token usage exceeds *threshold* (default 80%) of the
-    context window.
+    Returns True if token usage exceeds *threshold* (default 70%, lowered from
+    80%) of the context window. The lower threshold gives the compaction
+    pipeline more headroom before the window fills.
     """
     if not messages:
         return False
