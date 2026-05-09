@@ -1,30 +1,38 @@
 """obscura.cli.tui.layout — full-screen :mod:`prompt_toolkit` layout.
 
-Opencode-style three-row shell: status header, scrolling transcript,
-input + hint footer. Banner and notifications appear as conditional
-floats (top-anchored) so they never push the input around. Modal
-overlays attach as centered :class:`Float`s on the
-:class:`FloatContainer` root.
+Opencode-style shell with the status header pinned to the BOTTOM as a
+footer. The live region (agent "thinking" / spinner) sits directly
+above the input area so the user always sees activity in their
+peripheral vision while typing — never below the prompt where it gets
+hidden by the toolbar. Banner and notifications attach as conditional
+:class:`Float`s anchored to the top of the screen so they stack above
+the transcript without pushing the input around. Modal overlays are
+centered :class:`Float`s on the :class:`FloatContainer` root.
 
-Top-to-bottom shape (ALL widgets pinned by exact :class:`Dimension` so
-no row gets unintended weight)::
+Top-to-bottom shape (ALL fixed widgets pinned by exact
+:class:`Dimension` so the transcript can't overflow into them)::
 
     ┌─────────────────────────────────────────────┐
-    │ header_window (1 row, exact)                │
-    ├─────────────────────────────────────────────┤
     │ transcript_window (weight=1, scrolls)       │
     │                                             │
     ├─────────────────────────────────────────────┤
-    │ live_region_window (cond, 1 row when active)│
+    │ live_region_window (cond, 1 row when active)│  ← thinking
     ├─────────────────────────────────────────────┤
     │ input_area (1..6 rows, multiline)           │
     ├─────────────────────────────────────────────┤
-    │ toolbar_window (1 row, exact)               │
+    │ toolbar_window (1 row, exact)               │  ← hotkeys
+    ├─────────────────────────────────────────────┤
+    │ header_separator (1 row, "─")               │
+    ├─────────────────────────────────────────────┤
+    │ header_window (1 row, exact)                │  ← footer
     └─────────────────────────────────────────────┘
 
-Banner / notification stacks float on top of the body via
-:class:`Float`s configured with ``top``/``right`` anchors so they don't
-displace the input.
+The transcript uses ``Dimension(weight=1, min=1)``; everything else is
+fixed-height, so chat output cannot push the input, toolbar, or footer
+off-screen no matter how long the conversation gets. Banner /
+notification stacks float on top of the body via :class:`Float`s
+configured with ``top``/``right`` anchors so they don't displace any
+fixed widget.
 """
 
 from __future__ import annotations
@@ -390,29 +398,41 @@ def build_layout(
     )
 
     # ---- Compose ---------------------------------------------------------
-    # The live region (tool spinner / streaming label) sits BELOW the input
-    # so "running shell_exec..." appears under the prompt the user is
-    # interacting with rather than above it. Toolbar stays at the very
-    # bottom.
+    # Layout order (top → bottom):
+    #
+    #   * transcript_row — chat output, weight=1 with min=1, scrolls. The
+    #     ``weight=1`` means it absorbs any spare rows, so it cannot push
+    #     fixed-height widgets off-screen.
+    #   * live_region_container — agent "thinking" spinner / streaming
+    #     activity label. Conditional, 1 row when active. Sits ABOVE the
+    #     input so the user sees activity in their peripheral vision
+    #     while composing the next message.
+    #   * input_area — 1..6 rows, the prompt the user types into.
+    #   * toolbar_window — hotkey hints, 1 row.
+    #   * header_separator_window — thin rule above the footer.
+    #   * header_window — session/model/status, 1 row. Pinned at the
+    #     very bottom of the screen as a footer.
     body = HSplit(
         [
-            header_window,
-            header_separator_window,
             transcript_row,
-            input_area,
             live_region_container,
+            input_area,
             toolbar_window,
+            header_separator_window,
+            header_window,
         ],
     )
 
     # Banner and notification stacks as conditional floats — top-anchored
-    # so they appear above the transcript without pushing the input.
+    # so they appear above the transcript without pushing fixed widgets.
+    # ``top=0`` is fine now that the header lives at the bottom; nothing
+    # owns row 0 by default, so floats can fully claim it.
     banner_float = Float(
         content=ConditionalContainer(
             content=banner_window,
             filter=Condition(lambda: state.banner is not None),
         ),
-        top=1,
+        top=0,
         left=0,
         right=0,
     )
@@ -421,7 +441,7 @@ def build_layout(
             content=notification_window,
             filter=Condition(lambda: bool(state.notifications)),
         ),
-        top=2,
+        top=1,
         right=2,
         width=48,
     )
