@@ -163,9 +163,7 @@ async def test_header_has_separator_below_it() -> None:
     state = _make_state()
     rows = await _render(state)
     # Header is row 0; row 1 should be the separator (a tiled "─").
-    assert rows[0].startswith("session "), (
-        f"Row 0 should be header, was: {rows[0]!r}"
-    )
+    assert rows[0].startswith("session "), f"Row 0 should be header, was: {rows[0]!r}"
     assert "─" in rows[1] and rows[1].count("─") >= 50, (
         f"Row 1 should be a tiled rule separator, was: {rows[1]!r}"
     )
@@ -202,9 +200,7 @@ async def test_input_grows_when_buffer_has_newlines() -> None:
     # The prompt glyph still appears on one row, but the *visible* span
     # of the input should now be 3 — meaning the toolbar moved 2 rows
     # further down.
-    toolbar_idx = next(
-        i for i, r in enumerate(rows) if "quit" in r and "palette" in r
-    )
+    toolbar_idx = next(i for i, r in enumerate(rows) if "quit" in r and "palette" in r)
     input_idx = input_rows[0]
     assert toolbar_idx - input_idx >= 3, (
         f"3-line buffer should produce >= 3 rows of input space; "

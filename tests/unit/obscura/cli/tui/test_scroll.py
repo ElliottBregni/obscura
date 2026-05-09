@@ -85,17 +85,13 @@ def _build_scroll_kb(state: TUIState) -> KeyBindings:
         state.transcript_scroll_offset += page
 
     def _down_page(event: KeyPressEvent) -> None:
-        state.transcript_scroll_offset = max(
-            0, state.transcript_scroll_offset - page
-        )
+        state.transcript_scroll_offset = max(0, state.transcript_scroll_offset - page)
 
     def _up_line(event: KeyPressEvent) -> None:
         state.transcript_scroll_offset += line
 
     def _down_line(event: KeyPressEvent) -> None:
-        state.transcript_scroll_offset = max(
-            0, state.transcript_scroll_offset - line
-        )
+        state.transcript_scroll_offset = max(0, state.transcript_scroll_offset - line)
 
     def _to_tail(event: KeyPressEvent) -> None:
         state.transcript_scroll_offset = 0

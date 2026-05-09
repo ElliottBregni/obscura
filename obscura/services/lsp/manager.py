@@ -27,7 +27,14 @@ def _find_workspace_root(file_path: str) -> str:
     Markers: pyproject.toml, setup.py, setup.cfg, Cargo.toml, package.json, .git.
     Falls back to the file's parent directory if none is found.
     """
-    markers = {"pyproject.toml", "setup.py", "setup.cfg", "Cargo.toml", "package.json", ".git"}
+    markers = {
+        "pyproject.toml",
+        "setup.py",
+        "setup.cfg",
+        "Cargo.toml",
+        "package.json",
+        ".git",
+    }
     p = Path(file_path).resolve().parent
     for parent in [p, *p.parents]:
         if any((parent / m).exists() for m in markers):
@@ -38,7 +45,9 @@ def _find_workspace_root(file_path: str) -> str:
 class LSPClient:
     """Async JSON-RPC client talking to a language server over stdio."""
 
-    def __init__(self, process: asyncio.subprocess.Process, workspace_root: str) -> None:
+    def __init__(
+        self, process: asyncio.subprocess.Process, workspace_root: str
+    ) -> None:
         self._process = process
         self._workspace_root = workspace_root
         self._req_id = 0
@@ -66,9 +75,13 @@ class LSPClient:
         header = b""
         while True:
             try:
-                ch = await asyncio.wait_for(self._process.stdout.read(1), timeout=timeout)
+                ch = await asyncio.wait_for(
+                    self._process.stdout.read(1), timeout=timeout
+                )
             except TimeoutError:
-                logger.debug("suppressed exception in _read_one (header read)", exc_info=True)
+                logger.debug(
+                    "suppressed exception in _read_one (header read)", exc_info=True
+                )
                 return None
             if not ch:
                 return None
@@ -86,7 +99,9 @@ class LSPClient:
                     self._process.stdout.read(length - len(body)), timeout=timeout
                 )
             except TimeoutError:
-                logger.debug("suppressed exception in _read_one (body read)", exc_info=True)
+                logger.debug(
+                    "suppressed exception in _read_one (body read)", exc_info=True
+                )
                 break
             if not chunk:
                 break
@@ -100,7 +115,9 @@ class LSPClient:
     async def _request(self, method: str, params: Any, timeout: float = 15.0) -> Any:
         """Send a JSON-RPC request and wait for its response."""
         req_id = self._next_id()
-        await self._write({"jsonrpc": "2.0", "id": req_id, "method": method, "params": params})
+        await self._write(
+            {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
+        )
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
@@ -158,13 +175,27 @@ class LSPClient:
             return
         ext = Path(file_path).suffix.lower()
         lang_id = {
-            ".py": "python", ".ts": "typescript", ".tsx": "typescriptreact",
-            ".js": "javascript", ".jsx": "javascriptreact",
-            ".go": "go", ".rs": "rust", ".c": "c", ".cpp": "cpp", ".java": "java",
+            ".py": "python",
+            ".ts": "typescript",
+            ".tsx": "typescriptreact",
+            ".js": "javascript",
+            ".jsx": "javascriptreact",
+            ".go": "go",
+            ".rs": "rust",
+            ".c": "c",
+            ".cpp": "cpp",
+            ".java": "java",
         }.get(ext, "plaintext")
         await self._notify(
             "textDocument/didOpen",
-            {"textDocument": {"uri": uri, "languageId": lang_id, "version": 1, "text": text}},
+            {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": lang_id,
+                    "version": 1,
+                    "text": text,
+                }
+            },
         )
         self._opened_uris.add(uri)
 
@@ -178,7 +209,10 @@ class LSPClient:
         await self._open_file(file_path)
         return await self._request(
             "textDocument/definition",
-            {"textDocument": {"uri": f"file://{Path(file_path).resolve()}"}, "position": self._lsp_pos(line, character)},
+            {
+                "textDocument": {"uri": f"file://{Path(file_path).resolve()}"},
+                "position": self._lsp_pos(line, character),
+            },
         )
 
     async def find_references(self, file_path: str, line: int, character: int) -> Any:
@@ -198,7 +232,10 @@ class LSPClient:
         await self._open_file(file_path)
         return await self._request(
             "textDocument/hover",
-            {"textDocument": {"uri": f"file://{Path(file_path).resolve()}"}, "position": self._lsp_pos(line, character)},
+            {
+                "textDocument": {"uri": f"file://{Path(file_path).resolve()}"},
+                "position": self._lsp_pos(line, character),
+            },
         )
 
     async def document_symbols(self, file_path: str) -> Any:
@@ -215,13 +252,17 @@ class LSPClient:
             await self._request("shutdown", None, timeout=5.0)
             await self._notify("exit", None)
         except Exception:
-            logger.debug("suppressed exception in shutdown (graceful stop)", exc_info=True)
+            logger.debug(
+                "suppressed exception in shutdown (graceful stop)", exc_info=True
+            )
         try:
             if self._process.returncode is None:
                 self._process.terminate()
                 await asyncio.wait_for(self._process.wait(), timeout=3.0)
         except Exception:
-            logger.debug("suppressed exception in shutdown (process terminate)", exc_info=True)
+            logger.debug(
+                "suppressed exception in shutdown (process terminate)", exc_info=True
+            )
 
 
 class LSPServerManager:
@@ -250,7 +291,8 @@ class LSPServerManager:
 
         try:
             process = await asyncio.create_subprocess_exec(
-                server_cmd, "--stdio",
+                server_cmd,
+                "--stdio",
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -262,5 +304,7 @@ class LSPServerManager:
 
         client = LSPClient(process, workspace_root)
         self._clients[workspace_root] = client
-        logger.debug("lsp: started %s for %s (pid=%s)", server_cmd, workspace_root, process.pid)
+        logger.debug(
+            "lsp: started %s for %s (pid=%s)", server_cmd, workspace_root, process.pid
+        )
         return client

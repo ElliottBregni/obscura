@@ -139,7 +139,9 @@ def _render_markdown_lines(text: str, width: int) -> list[str]:
         # prepend the hook indent.
         return [line.rstrip() for line in rendered.split("\n")]
     except Exception:
-        logger.debug("markdown render failed; falling back to plain wrap", exc_info=True)
+        logger.debug(
+            "markdown render failed; falling back to plain wrap", exc_info=True
+        )
         return _wrap(text, width)
 
 
@@ -681,9 +683,7 @@ class ModernRenderer:
             w = self._width
             # Indent response under the ⎿ hook (like Claude Code)
             hook_prefix = _styled(f"  {_HOOK}  ", STYLE_DIM)
-            content_lines = _render_markdown_lines(
-                _sanitize(full_text), max(1, w - 5)
-            )
+            content_lines = _render_markdown_lines(_sanitize(full_text), max(1, w - 5))
             lines: list[str] = []
             for i, cl in enumerate(content_lines):
                 if i == 0:

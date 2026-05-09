@@ -201,9 +201,7 @@ def create_prompt_session(
     def _toolbar() -> HTML:
         if _static_hud_html is not None:
             return HTML(_static_hud_html)
-        if _prompt_status is not None or (
-            _status is not None and _status.active
-        ):
+        if _prompt_status is not None or (_status is not None and _status.active):
             return HTML(_build_toolbar_html(_prompt_status, _status))
         return HTML(_fallback_text)
 
