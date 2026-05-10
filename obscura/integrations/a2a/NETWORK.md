@@ -12,7 +12,7 @@
 | Streaming | ✅ Implemented | `stream_send()` SSE |
 | Multi-turn | ✅ Implemented | `OpenClawContext` |
 | Auto-init | ✅ Implemented | `ask_openclaw` tool registered on provider startup |
-| Auth inbound | ⚠️ Partial | Obscura A2A server bearer token not yet set — OpenClaw→Obscura calls are unauthenticated |
+| Auth inbound | ✅ Full | Bearer token enforced on :18790 (`~/.obscura/network-gateway.token`); webhook callbacks verified with HMAC-SHA256 |
 
 ---
 
@@ -46,26 +46,27 @@ asyncio.run(main())
 ## Current topology
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                  Local machine                         │
-│                                                        │
-│  ┌─────────────────────┐    REST/SSE/JSON-RPC          │
-│  │  Obscura A2A Server │◄────────────────────────────  │
-│  │  port 8080          │  (inbound A2A from any peer)  │
-│  │                     │                               │
-│  │  /.well-known/      │                               │
-│  │    agent.json       │                               │
-│  └────────┬────────────┘                               │
-│           │  OpenClawBridge                            │
-│           │  POST /v1/chat/completions                 │
-│           ▼                                            │
-│  ┌─────────────────────┐                               │
-│  │  OpenClaw Gateway   │                               │
-│  │  port 18789         │                               │
-│  │  (WS + HTTP)        │                               │
-│  │  model: openclaw/main                               │
-│  └─────────────────────┘                               │
-└────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                        Local machine                           │
+│                                                                │
+│  ┌──────────────────────────┐    A2A REST/SSE/JSON-RPC         │
+│  │  Obscura Network Gateway │◄───────────────────────────────  │
+│  │  port 18790 (0.0.0.0)   │  Auth: Bearer token (inbound)   │
+│  │                          │  Webhook: HMAC-SHA256 signed     │
+│  │  /.well-known/agent.json │                                  │
+│  │  /a2a/rpc                │                                  │
+│  │  /webhook/a2a  ◄─────────┼── push notification callbacks   │
+│  └──────────┬───────────────┘                                  │
+│             │  OpenClawBridge                                  │
+│             │  POST /v1/chat/completions                       │
+│             ▼                                                  │
+│  ┌──────────────────────────┐                                  │
+│  │  OpenClaw Gateway        │                                  │
+│  │  port 18789 (loopback)   │                                  │
+│  │  (WS + HTTP)             │                                  │
+│  │  model: openclaw/main    │                                  │
+│  └──────────────────────────┘                                  │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 Both processes run on the same host.  The communication is loopback — no
@@ -86,17 +87,30 @@ Authorization: Bearer <openclaw_token>
 The token is set once in `OpenClawBridgeConfig.token` and injected as a
 default header on the underlying `httpx.AsyncClient`.
 
-### OpenClaw → Obscura (inbound, future)
+### OpenClaw → Obscura (inbound)
 
-When OpenClaw needs to call back into Obscura via A2A REST, it must send:
+All calls from OpenClaw to the Obscura network gateway (:18790) must carry:
 
 ```
-Authorization: Bearer <obscura_token>
+Authorization: Bearer <value from ~/.obscura/network-gateway.token>
 ```
 
-The Obscura A2A server validates this via `APIKeyAuthMiddleware` (configured
-through `ServerConfig.bearer_tokens`).  The `a2a-gateway.yaml` config stores
-the accepted token in `~/.obscura/a2a-gateway.token`.
+The token is configured in `~/.openclaw/openclaw.json` under `a2aPeers[].token`
+and `a2aPeers[].authToken`.  `GatewayBearerAuthMiddleware` validates it with a
+timing-safe comparison (`hmac.compare_digest`).
+
+### OpenClaw → Obscura webhook callbacks (HMAC)
+
+Push notification callbacks fired by Obscura back to itself at
+`POST http://localhost:18790/webhook/a2a` are HMAC-SHA256 signed:
+
+```
+X-Webhook-Signature: sha256=<hex-digest>
+```
+
+The shared secret is in `~/.obscura/network-gateway-webhook.secret`.  The
+gateway verifies the signature before processing the payload.  Requests with
+missing or invalid signatures are rejected with `401 {"error":"invalid_signature"}`.
 
 ---
 
@@ -127,19 +141,26 @@ Caller                  OpenClawBridge          OpenClaw Gateway
 4. The bridge wraps the reply in an `A2ATask` with state `completed` and one
    `Artifact` whose first part is the reply `TextPart`.
 
-### OpenClaw → Obscura (A2A REST, future)
+### OpenClaw → Obscura (A2A REST)
 
-OpenClaw does not currently speak A2A natively.  When support is added:
+OpenClaw sends A2A JSON-RPC calls to the Obscura network gateway on :18790.
+The `a2aPeers` entry in `~/.openclaw/openclaw.json` points to this endpoint
+and carries the bearer token automatically:
 
 ```
-OpenClaw              Obscura A2A Server (port 8080)
+OpenClaw              Obscura Network GW (port 18790)
   │                          │
   │  POST /a2a/rpc           │
+  │  Authorization: Bearer X │
   │  {"method":"message/send"│
   │  ,"params":{...}}        │
   │─────────────────────────►│
-  │                          │ task execution (agent loop)
+  │                          │ agent loop execution (Claude)
   │   {"result": Task}       │
+  │◄─────────────────────────│
+  │                          │
+  │  POST /webhook/a2a       │ ← push notification (HMAC signed)
+  │  X-Webhook-Signature:... │
   │◄─────────────────────────│
 ```
 
@@ -225,10 +246,11 @@ Token resolution is centralised in
 
 Set these in your shell or in `~/.obscura/.env` before starting Obscura:
 
-| Variable            | Used for                              |
-|---------------------|---------------------------------------|
-| `OPENCLAW_TOKEN`    | Bearer token sent to OpenClaw gateway |
-| `OBSCURA_A2A_TOKEN` | Bearer token accepted by Obscura A2A server (inbound) |
+| Variable                  | Used for                                             |
+|---------------------------|------------------------------------------------------|
+| `OPENCLAW_TOKEN`          | Bearer token sent to OpenClaw gateway (outbound)     |
+| `OBSCURA_NETWORK_TOKEN`   | Bearer token accepted by Obscura network gateway :18790 |
+| `OBSCURA_WEBHOOK_SECRET`  | HMAC-SHA256 key for push notification signing/verifying |
 
 A template is provided at `~/.obscura/.env.a2a.example`.
 
@@ -236,10 +258,11 @@ A template is provided at `~/.obscura/.env.a2a.example`.
 
 When the env vars are absent, the manager falls back to on-disk files:
 
-| Token               | File                                  |
-|---------------------|---------------------------------------|
-| `OPENCLAW_TOKEN`    | `~/.openclaw/openclaw.json` → `gateway.auth.token` |
-| `OBSCURA_A2A_TOKEN` | `~/.obscura/a2a-gateway.token`        |
+| Secret                    | File                                                 |
+|---------------------------|------------------------------------------------------|
+| `OPENCLAW_TOKEN`          | `~/.openclaw/openclaw.json` → `a2aPeers[].token`    |
+| `OBSCURA_NETWORK_TOKEN`   | `~/.obscura/network-gateway.token`                   |
+| `OBSCURA_WEBHOOK_SECRET`  | `~/.obscura/network-gateway-webhook.secret`          |
 
 ### Token rotation
 
@@ -258,8 +281,8 @@ print(f"New token: {new_token}")
 
 ## Ports reference
 
-| Service         | Port  | Protocol                   |
-|-----------------|-------|----------------------------|
-| Obscura A2A     | 8080  | HTTP (REST, SSE, JSON-RPC) |
-| OpenClaw gateway| 18789 | HTTP + WebSocket           |
-| Obscura A2A (gateway daemon) | 18791 | HTTP (see a2a-gateway.yaml) |
+| Service                  | Port  | Protocol                        |
+|--------------------------|-------|---------------------------------|
+| Obscura network gateway  | 18790 | HTTP (OpenAI-compat, A2A, WS)  |
+| OpenClaw gateway         | 18789 | HTTP + WebSocket                |
+| Obscura A2A SDK server   | 8080  | HTTP (REST, SSE, JSON-RPC) — legacy internal; primary is 18790 |

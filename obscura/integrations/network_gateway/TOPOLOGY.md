@@ -92,19 +92,25 @@ procedures.
 | Token / Secret               | Held by          | Used for                                               | Resolution order                                                                             |
 |------------------------------|------------------|--------------------------------------------------------|---------------------------------------------------------------------------------------------|
 | `4a30d783...eda8754a`        | Obscura          | Outbound calls from `OpenClawBridge` → OpenClaw :18789 | Hardcoded in `OpenClawBridgeConfig.token`; falls back to `OPENCLAW_TOKEN` env var           |
-| `~/.obscura/network-gateway.token` | Obscura    | Inbound auth on Obscura network gateway :18790         | `OBSCURA_NETWORK_TOKEN` env var → `~/.obscura/network-gateway.token` → empty (no auth)     |
-| `~/.obscura/a2a-gateway.token` | Obscura        | Inbound auth on Obscura A2A SDK server :8080           | `OBSCURA_A2A_TOKEN` env var → `~/.obscura/a2a-gateway.token`                               |
-| `~/.openclaw/openclaw.json` → `gateway.auth.token` | OpenClaw | OpenClaw→Obscura outbound calls :18790 | Read by OpenClaw at startup from its config file                                            |
-
-**OpenClaw→Obscura calls are currently unauthenticated** (see `NETWORK.md` status table). The Obscura network gateway token must be supplied in `~/.openclaw/openclaw.json` under `a2aPeers[].token` once auth enforcement is enabled.
+| `~/.obscura/network-gateway.token` | Obscura    | Inbound bearer auth on Obscura network gateway :18790  | `OBSCURA_NETWORK_TOKEN` env var → `~/.obscura/network-gateway.token` → empty (no auth)     |
+| `~/.obscura/network-gateway-webhook.secret` | Obscura | HMAC-SHA256 signing of push notification callbacks | `OBSCURA_WEBHOOK_SECRET` env var → `~/.obscura/network-gateway-webhook.secret`    |
+| `~/.openclaw/openclaw.json` → `a2aPeers[].token` | OpenClaw | OpenClaw→Obscura outbound calls :18790 | Read by OpenClaw at startup; set to match `~/.obscura/network-gateway.token`               |
 
 **Middleware stack on port 18790 (outermost → innermost):**
 
 ```
-SecurityHeaders → GatewayRateLimit (60 req/min/IP) → GatewayBearerAuth → CORS → routes
+SecurityHeaders
+  → RequestSizeLimit (1 MB max body; exempt: /health, /.well-known/, /peers/)
+  → GatewayRateLimit (60 req/min/IP; exempt: /health, /.well-known/, /peers/)
+  → GatewayBearerAuth (exempt: /health, /.well-known/, /peers/, /webhook/)
+  → CORS
+  → routes
 ```
 
-Exempt from auth and rate limiting: `/health`, `/.well-known/`.
+`/webhook/a2a` is exempt from **bearer auth** (uses HMAC-SHA256 instead) but is
+**subject to rate limiting and request size enforcement**.
+
+Exempt from all middleware: `/health`, `/.well-known/`, `/peers/`.
 
 ---
 
@@ -237,7 +243,40 @@ OpenClaw                        Obscura Network GW :18790
 **Available model strings:** `obscura/claude`, `obscura/copilot`, `obscura/codex`
 **Base URL for OpenClaw config:** `http://localhost:18790/v1`
 
-### 4.7 Remote access via Tailscale
+### 4.7 Push notification callback (Obscura → itself via webhook)
+
+After a blocking A2A task completes, Obscura fires a push notification to the
+URL supplied in `params.pushNotificationUrl`:
+
+```
+A2A caller (OpenClaw)         Obscura GW :18790        /webhook/a2a handler
+     │                              │                         │
+     │  POST /a2a/rpc               │                         │
+     │  {"method":"message/send",   │                         │
+     │   "params":{                 │                         │
+     │     "message":{...},         │                         │
+     │     "pushNotificationUrl":   │                         │
+     │       "http://localhost:18790│                         │
+     │        /webhook/a2a"}}       │                         │
+     │─────────────────────────────►│                         │
+     │                              │  agent loop (Claude)    │
+     │                              │  blocking execution     │
+     │  {"result": Task(completed)} │                         │
+     │◄─────────────────────────────│                         │
+     │                              │  POST /webhook/a2a      │
+     │                              │  X-Webhook-Signature:   │
+     │                              │    sha256=<hmac>        │
+     │                              │─────────────────────────►
+     │                              │                         │ verify HMAC
+     │                              │  {"ok":true,...}        │
+     │                              │◄─────────────────────────
+```
+
+The gateway verifies `X-Webhook-Signature` using the shared secret from
+`~/.obscura/network-gateway-webhook.secret`.  The A2A service signs callbacks
+with the same secret (`_fire_push_notification` in `a2a/service.py`).
+
+### 4.8 Remote access via Tailscale
 
 ```
 Remote client
@@ -250,6 +289,9 @@ elliotts-macbook-pro-1.tail91e620.ts.net → Obscura  :18790 (all routes)
 ```
 
 Tailscale `serve` is configured at gateway startup when `GatewayConfig.tailscale_enabled = True`. The `tailscale serve --bg https+insecure://localhost:18790` command creates the proxy mapping; `remove_tailscale_serve` tears it down on shutdown.
+
+**Note:** Tailscale access goes through `GatewayBearerAuthMiddleware` — remote
+callers must supply the same bearer token as local callers.
 
 ---
 
@@ -425,14 +467,51 @@ tailscale serve status
 # Should show: localhost:18790 → https://elliotts-macbook-pro-1.tail91e620.ts.net
 ```
 
-### 7.10 Agent monitor
+### 7.10 Webhook HMAC smoke test
 
 ```bash
-kill -0 47368 2>/dev/null && echo "monitor alive" || echo "monitor dead"
+SECRET=$(cat ~/.obscura/network-gateway-webhook.secret)
+PAYLOAD='{"type":"test","from":"smoke-test"}'
+SIG="sha256=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')"
+curl -s \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Signature: $SIG" \
+  -d "$PAYLOAD" \
+  http://localhost:18790/webhook/a2a
+# Expected: {"ok":true,...}
+# If 401: secret mismatch or gateway not reloaded after secret was created
+```
+
+### 7.11 Full A2A round-trip with push notification
+
+```bash
+TOKEN=$(cat ~/.obscura/network-gateway.token)
+curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0",
+    "method":"message/send",
+    "params":{
+      "message":{"role":"user","parts":[{"type":"text","text":"reply with: pong"}]},
+      "pushNotificationUrl":"http://localhost:18790/webhook/a2a"
+    },
+    "id":"smoke1"
+  }' \
+  http://localhost:18790/a2a/rpc
+# Expected: task completes synchronously; gateway log shows:
+#   POST /a2a/rpc 200
+#   POST /webhook/a2a 200
+```
+
+### 7.12 Agent monitor
+
+```bash
+# PID may differ — check the current lock files
 ls -la ~/.obscura/sessions/*.lock 2>/dev/null | head -5
 ```
 
-### 7.11 Circuit breaker state
+### 7.13 Circuit breaker state
 
 If `OpenClawBridge` returns `circuit_open` errors, the breaker tripped after repeated OpenClaw failures. Wait for the recovery timeout (default: see `ObscuraConfig.circuit_breaker_recovery`) or restart the Obscura process to reset.
 
