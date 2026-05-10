@@ -22,13 +22,20 @@ Concrete backend ``__init__`` looks like:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import logging
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.tools import ToolRegistry
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
+    from obscura.integrations.a2a.openclaw_bridge import OpenClawBridge
     from obscura.integrations.mcp.discovery import DiscoveryReport
+
+logger = logging.getLogger(__name__)
 
 
 class BackendToolHostMixin:
@@ -49,6 +56,7 @@ class BackendToolHostMixin:
     _tools: list[ToolSpec]
     _tool_registry: ToolRegistry
     last_mcp_discovery_report: DiscoveryReport | None
+    _openclaw_bridge: OpenClawBridge | None
 
     def _init_tool_host(self) -> None:
         """Initialize the empty tool list and registry. Idempotent."""
@@ -58,6 +66,8 @@ class BackendToolHostMixin:
             self._tool_registry = ToolRegistry()
         if not hasattr(self, "last_mcp_discovery_report"):
             self.last_mcp_discovery_report = None
+        if not hasattr(self, "_openclaw_bridge"):
+            self._openclaw_bridge = None
 
     def register_tool(self, spec: ToolSpec) -> None:
         """Register *spec* for use in sessions, skipping duplicates by name.
@@ -79,3 +89,97 @@ class BackendToolHostMixin:
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         """Immutable snapshot of registered specs in registration order."""
         return tuple(self._tools)
+
+    # -- OpenClaw bridge -----------------------------------------------------
+
+    def _read_openclaw_token(self) -> str | None:
+        """Return the OpenClaw gateway token, or ``None`` if not configured.
+
+        Resolution order:
+        1. ``OPENCLAW_TOKEN`` environment variable.
+        2. ``~/.openclaw/openclaw.json`` → ``gateway.auth.token``.
+        """
+        env_token = os.environ.get("OPENCLAW_TOKEN", "").strip()
+        if env_token:
+            return env_token
+
+        config_path = Path.home() / ".openclaw" / "openclaw.json"
+        if config_path.exists():
+            try:
+                raw_data: object = json.loads(config_path.read_text())
+                data: dict[str, Any] = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
+                raw_gateway = data.get("gateway")
+                gateway: dict[str, Any] = cast(dict[str, Any], raw_gateway) if isinstance(raw_gateway, dict) else {}
+                raw_auth = gateway.get("auth")
+                auth: dict[str, Any] = cast(dict[str, Any], raw_auth) if isinstance(raw_auth, dict) else {}
+                raw_token = auth.get("token")
+                token: str | None = raw_token if isinstance(raw_token, str) else None
+                if token:
+                    return token.strip() or None
+            except Exception:
+                logger.debug("Failed to parse %s", config_path, exc_info=True)
+
+        return None
+
+    async def _init_openclaw_bridge(self) -> None:
+        """Connect to the OpenClaw gateway and register the ``ask_openclaw`` tool.
+
+        Reads the token from ``OPENCLAW_TOKEN`` env var or
+        ``~/.openclaw/openclaw.json``.  Non-fatal — if no token is found or the
+        health check fails, the bridge is set to ``None`` and the tool is not
+        registered.
+        """
+        from obscura.core.types import ToolSpec
+        from obscura.integrations.a2a.openclaw_bridge import OpenClawBridge
+
+        token = self._read_openclaw_token()
+        if not token:
+            logger.debug("OPENCLAW_TOKEN not set and ~/.openclaw/openclaw.json not found — skipping OpenClaw bridge")
+            return
+
+        bridge = OpenClawBridge.from_config(
+            token=token,
+            gateway_url="http://localhost:18789",
+        )
+        await bridge.connect()
+        healthy = await bridge.health_check()
+        if healthy:
+            logger.debug("OpenClaw bridge connected and healthy")
+        else:
+            logger.debug("OpenClaw bridge connected but health check failed — gateway may be offline")
+
+        self._openclaw_bridge = bridge
+
+        # Register the ask_openclaw tool now that the bridge is available.
+        async def _ask_openclaw_handler(message: str = "") -> str:
+            if self._openclaw_bridge is None:
+                return json.dumps({"error": "openclaw_bridge_unavailable", "detail": "OpenClaw bridge is not connected"})
+            task = await self._openclaw_bridge.send(message)
+            from obscura.core.enums.protocol import A2ATaskState
+            from obscura.core.models.a2a import TextPart
+            if task.status.state == A2ATaskState.COMPLETED and task.artifacts:
+                parts = task.artifacts[0].parts
+                return "".join(p.text for p in parts if isinstance(p, TextPart))
+            # Failed task — return the status message text
+            msg = task.status.message
+            if msg and msg.parts:
+                from obscura.core.models.a2a import TextPart as _TP
+                return json.dumps({"error": "openclaw_failed", "detail": "".join(p.text for p in msg.parts if isinstance(p, _TP))})
+            return json.dumps({"error": "openclaw_failed", "detail": "Unknown error"})
+
+        spec = ToolSpec(
+            name="ask_openclaw",
+            description="Send a message to Molty (OpenClaw/Kimi K2.5 agent) and get a response",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "The message to send to Molty",
+                    }
+                },
+                "required": ["message"],
+            },
+            handler=_ask_openclaw_handler,
+        )
+        self.register_tool(spec)

@@ -153,6 +153,7 @@ class CodexBackend(BackendToolHostMixin):
 
     async def start(self) -> None:
         await register_external_mcp_tools(self, self._mcp_servers)
+        await self._init_openclaw_bridge()
 
         sdk_cls = self._import_sdk_class()
         self._sdk_client = await self._build_sdk_client(sdk_cls)
