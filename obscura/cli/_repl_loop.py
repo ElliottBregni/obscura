@@ -565,7 +565,37 @@ async def repl(
                                 )
                                 daemon_task = None
                     _refresh_prompt_status()
-                    user_input = await bordered_prompt(session, status=prompt_status)
+                    # --- Channel inject: race prompt vs incoming platform messages ---
+                    try:
+                        from obscura.integrations.messaging.channel_inject import (
+                            ChannelMessage as _ChannelMessage,
+                            get_channel_queue,
+                        )
+                        _ch_queue = get_channel_queue()
+                        _prompt_coro = bordered_prompt(session, status=prompt_status)
+                        _prompt_task: asyncio.Task[str] = asyncio.ensure_future(_prompt_coro)
+                        _channel_task: asyncio.Task[_ChannelMessage] = asyncio.ensure_future(_ch_queue.get())
+                        _done, _pending = await asyncio.wait(
+                            {_prompt_task, _channel_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        for _t in _pending:
+                            _t.cancel()
+                            with contextlib.suppress(asyncio.CancelledError, Exception):
+                                await _t
+                        if _channel_task in _done and not _channel_task.cancelled():
+                            _ch_msg: _ChannelMessage = _channel_task.result()
+                            _label = _ch_msg.display_name or _ch_msg.sender_id
+                            _plat = _ch_msg.platform.capitalize()
+                            user_input = f"[{_plat} from {_label}]: {_ch_msg.text}"
+                            ctx._pending_channel_reply = _ch_msg.reply_fn  # type: ignore[attr-defined]
+                        else:
+                            user_input = _prompt_task.result()
+                            ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                    except Exception:
+                        _log.debug("channel inject race failed, falling back to plain prompt", exc_info=True)
+                        user_input = await bordered_prompt(session, status=prompt_status)
+                        ctx._pending_channel_reply = None  # type: ignore[attr-defined]
                 except (EOFError, KeyboardInterrupt):
                     _log.debug("suppressed exception in repl", exc_info=True)
                     console.print()
@@ -984,7 +1014,13 @@ async def repl(
                 )
                 background_tasks.add(task)
 
-                def _on_done(t: asyncio.Task[str]) -> None:
+                # Capture the channel reply_fn at task-creation time so that
+                # concurrent loop iterations don't overwrite ctx._pending_channel_reply
+                # before _on_done fires.
+                _captured_reply_fn = getattr(ctx, "_pending_channel_reply", None)
+                ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+
+                def _on_done(t: asyncio.Task[str], _reply_fn: object = _captured_reply_fn) -> None:
                     background_tasks.discard(t)
                     ss.reset()
                     if t.cancelled():
@@ -998,6 +1034,22 @@ async def repl(
                         return
                     if exc is not None:
                         _log.error("chat turn failed", exc_info=exc)
+                        return
+                    # Send reply back to originating platform if this was an injected message
+                    if _reply_fn is not None:
+                        try:
+                            resp_text: str = t.result() or ""
+                            if resp_text:
+                                import asyncio as _asyncio
+                                import collections.abc as _abc
+                                if callable(_reply_fn) and isinstance(_reply_fn, _abc.Callable):
+                                    _asyncio.get_event_loop().create_task(
+                                        _reply_fn(resp_text)  # type: ignore[arg-type]
+                                    )
+                        except Exception:
+                            _log.debug(
+                                "channel inject: reply dispatch failed", exc_info=True
+                            )
 
                 task.add_done_callback(_on_done)
 

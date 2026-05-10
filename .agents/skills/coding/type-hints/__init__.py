@@ -1,0 +1,1 @@
+"""type-hints skill module."""

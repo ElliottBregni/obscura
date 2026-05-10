@@ -111,10 +111,12 @@ def get_adapter(
 
 
 def _parse_mode(value: str) -> str:
-    """Normalise a mode string to 'chat' or 'kairos'."""
+    """Normalise a mode string to 'chat', 'kairos', or 'channel_inject'."""
     v = value.strip().lower()
     if v in ("kairos", "k"):
         return "kairos"
+    if v in ("inject", "channel_inject"):
+        return "channel_inject"
     return "chat"
 
 
@@ -126,6 +128,7 @@ async def build_channel_router(
     backend_name: str | None = None,
     default_mode: str = "chat",
     platform_modes: dict[str, str] | None = None,
+    inject_platforms: list[str] | None = None,
 ) -> Any:
     """Build a fully-wired ChannelRouter from environment variables.
 
@@ -212,6 +215,12 @@ async def build_channel_router(
 
     def _apply_platform_mode(platform: str) -> None:
         """Resolve and apply the correct mode for a registered platform."""
+        # 0. inject_platforms kwarg takes highest priority
+        if inject_platforms and platform in inject_platforms:
+            channel_router.set_platform_mode(platform, ChannelMode.CHANNEL_INJECT)
+            logger.info("Platform %s → channel_inject mode (inject_platforms)", platform)
+            return
+
         # 1. Explicit kwarg dict
         if platform_modes and platform in platform_modes:
             mode_str = _parse_mode(platform_modes[platform])
@@ -220,6 +229,11 @@ async def build_channel_router(
             env_key = f"OBSCURA_{platform.upper()}_MODE"
             env_val = os.environ.get(env_key, "")
             mode_str = _parse_mode(env_val) if env_val else resolved_default
+
+        if mode_str == "channel_inject":
+            channel_router.set_platform_mode(platform, ChannelMode.CHANNEL_INJECT)
+            logger.info("Platform %s → channel_inject mode", platform)
+            return
 
         if mode_str == "kairos":
             kr = _get_kairos_runner()

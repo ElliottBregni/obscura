@@ -177,11 +177,17 @@ class ChannelRouter:
 
         When *mode* is ``KAIROS``, supply a *kairos_runner* instance.
         If none is provided the platform silently falls back to ``CHAT``.
+
+        When *mode* is ``CHANNEL_INJECT``, no runner is required — inbound
+        messages are pushed into the shared REPL inject queue instead.
         """
         key = platform.lower()
         if mode == ChannelMode.KAIROS and kairos_runner is not None:
             self._platform_modes[key] = ChannelMode.KAIROS
             self._platform_runners[key] = kairos_runner
+        elif mode == ChannelMode.CHANNEL_INJECT:
+            self._platform_modes[key] = ChannelMode.CHANNEL_INJECT
+            self._platform_runners.pop(key, None)
         else:
             if mode == ChannelMode.KAIROS:
                 logger.warning(
@@ -391,6 +397,47 @@ class ChannelRouter:
                     await adapter.send_typing(chat_id)  # type: ignore[attr-defined]
             except Exception:
                 logger.debug("suppressed exception in _handle", exc_info=True)
+
+        # Channel-inject mode: push to REPL queue instead of running autonomous agent
+        mode = self.get_platform_mode(platform)
+        if mode == ChannelMode.CHANNEL_INJECT:
+            from obscura.integrations.messaging.channel_inject import (
+                ChannelMessage,
+                push_channel_message,
+            )
+
+            _adapter = self._adapters.get(platform)
+
+            async def _reply(text: str) -> bool:
+                if _adapter is None:
+                    return False
+                try:
+                    return await _adapter.send(sender_id, text)
+                except Exception:
+                    logger.warning(
+                        "channel_inject: reply send failed for %s/%s",
+                        platform,
+                        sender_id,
+                    )
+                    return False
+
+            pushed = push_channel_message(
+                ChannelMessage(
+                    platform=platform,
+                    sender_id=sender_id,
+                    text=msg.text,
+                    reply_fn=_reply,
+                    display_name=msg.metadata.get("display_name", ""),
+                    account_id=msg.account_id,
+                )
+            )
+            if not pushed:
+                logger.warning(
+                    "channel_inject: queue full, dropping message from %s/%s",
+                    platform,
+                    sender_id,
+                )
+            return
 
         # Run agent — select per-platform runner (chat or kairos mode)
         runner = self._get_runner_for(platform)

@@ -1,0 +1,1 @@
+"""coverage-report skill module."""

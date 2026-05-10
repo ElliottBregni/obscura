@@ -1,0 +1,1 @@
+"""docs-search skill module."""

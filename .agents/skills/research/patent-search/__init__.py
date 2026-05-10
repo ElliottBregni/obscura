@@ -1,0 +1,1 @@
+"""patent-search skill module."""

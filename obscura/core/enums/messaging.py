@@ -15,10 +15,13 @@ class ChannelMode(StrEnum):
 
     ``CHAT`` — standard single-turn AgentLoop.
     ``KAIROS`` — long-horizon goal runtime.
+    ``CHANNEL_INJECT`` — inject into the active REPL session instead of running
+    an autonomous agent; Claude's reply is sent back to the originating platform.
     """
 
     CHAT = "chat"
     KAIROS = "kairos"
+    CHANNEL_INJECT = "channel_inject"
 
 
 class PushProvider(StrEnum):

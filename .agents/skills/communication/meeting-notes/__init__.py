@@ -1,0 +1,1 @@
+"""meeting-notes skill module."""

@@ -1,0 +1,1 @@
+"""fuzz-test skill module."""
