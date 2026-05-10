@@ -5,6 +5,7 @@ Provides backwards-compatible database initialization based on environment confi
 
 from __future__ import annotations
 
+import logging
 import os
 
 from obscura.core.event_store import EventStoreProtocol, SQLiteEventStore
@@ -13,6 +14,7 @@ from obscura.core.postgres_event_store import PostgreSQLEventStore
 
 # Public alias — callers should type against the Protocol, not the union.
 EventStore = EventStoreProtocol
+logger = logging.getLogger(__name__)
 
 
 class DatabaseFactory:
@@ -56,7 +58,9 @@ class DatabaseFactory:
     @staticmethod
     def _create_sqlite_store() -> SQLiteEventStore:
         """Create SQLite event store with default configuration."""
-        return SQLiteEventStore(db_path=resolve_obscura_home() / "events.db")
+        db_path = resolve_obscura_home() / "events.db"
+        logger.info("DatabaseFactory: sqlite event store path=%s", db_path)
+        return SQLiteEventStore(db_path=db_path)
 
     @staticmethod
     def _create_postgres_store() -> PostgreSQLEventStore:

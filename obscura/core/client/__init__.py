@@ -218,8 +218,10 @@ class ObscuraClient:
         #   config overrides) and suppress MCPBackend so we don't also
         #   connect obscura-side — that would double-bind the server
         #   without giving Codex anything useful.
-        codex_native_mcp = backend == Backend.CODEX
-        self._mcp_server_configs = [] if codex_native_mcp else (mcp_servers or [])
+        from obscura.core.backend_features import backend_routes_mcp_natively
+
+        native_mcp = backend_routes_mcp_natively(backend)
+        self._mcp_server_configs = [] if native_mcp else (mcp_servers or [])
         self._mcp_backend: Any = None  # MCPBackend, set in start()
 
         self._backend = self._create_backend(
@@ -227,7 +229,7 @@ class ObscuraClient:
             auth=resolved_auth,
             model=resolved_model,
             system_prompt=system_prompt,
-            mcp_servers=mcp_servers if codex_native_mcp else None,
+            mcp_servers=mcp_servers if native_mcp else None,
             permission_mode=permission_mode,
             cwd=cwd,
             streaming=streaming,

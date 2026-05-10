@@ -378,6 +378,7 @@ class ObscuraSession:
             context_router=self.context_router,
             turn_classifier=self.turn_classifier,
         )
+        await self._ensure_event_store_session(config)
 
         # Hydrate context from prior session when backend resume failed
         if resume_summary:
@@ -395,6 +396,36 @@ class ObscuraSession:
                 _log.debug("suppressed exception in create", exc_info=True)
 
         return self
+
+    async def _ensure_event_store_session(self, config: SessionConfig) -> None:
+        existing = await self._store.get_session(self._sid)
+        if existing is not None:
+            _log.info(
+                "event store session exists: sid=%s backend=%s status=%s",
+                self._sid,
+                existing.backend,
+                existing.status.value,
+            )
+            return
+        project = str(Path.cwd())
+        await self._store.create_session(
+            self._sid,
+            agent="repl",
+            backend=config.backend,
+            model=config.model or "",
+            source="live",
+            project=project,
+            metadata={
+                "surface": "repl",
+                "tools_enabled": config.tools_enabled,
+            },
+        )
+        _log.info(
+            "event store session created: sid=%s backend=%s project=%s",
+            self._sid,
+            config.backend,
+            project,
+        )
 
     # ── Public API ─────────────────────────────────────────────────────────
 

@@ -221,39 +221,10 @@ def build_layout(
     )
 
     # ---- Transcript (weight=1, auto-scroll) ------------------------------
-    # Anchor cursor at the LAST rendered line so prompt-toolkit's render
-    # loop never indexes past content. An out-of-range cursor y crashes
-    # with ``IndexError: list index out of range`` from
-    # ``fragment_lines[lineno]`` in controls.py.
-    def _last_line_index() -> int:
-        # FormattedText's element shape is OneStyleAndTextTuple — at
-        # runtime always a 2- or 3-tuple where index 1 is the text.
-        # Pyright's stubs widen it past simple unpacking, so iterate
-        # by index instead and let pyright stay happy.
-        nl = 0
-        for tup in transcript_text(state):
-            text = tup[1] if len(tup) > 1 else ""
-            # ``text`` is typed as ``str`` here but
-            # OneStyleAndTextTuple is a positional alias whose middle
-            # field can technically be a callable in some
-            # prompt-toolkit versions; the guard keeps us safe.
-            if isinstance(text, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-                nl += text.count("\n")
-        return max(0, nl)
-
-    # The cursor must move with the scroll offset, otherwise prompt_toolkit
-    # auto-scrolls the window to keep the cursor on screen and our manual
-    # offset gets reset every frame. Anchoring the cursor at
-    # (last_line - offset) tells prompt_toolkit "this is the visible line",
-    # so it scrolls there. ``always_hide_cursor`` keeps it invisible.
-    def _cursor_y() -> int:
-        return max(0, _last_line_index() - max(0, state.transcript_scroll_offset))
-
     transcript_control = FormattedTextControl(
         text=lambda: transcript_text(state),
         focusable=False,
         show_cursor=False,
-        get_cursor_position=lambda: Point(x=0, y=_cursor_y()),
     )
     transcript_window = Window(
         content=transcript_control,
@@ -265,6 +236,14 @@ def build_layout(
         ),
         allow_scroll_beyond_bottom=False,
         style="class:tui.transcript",
+    )
+    # Cursor must track visual rows (not logical \n-count) so prompt_toolkit's
+    # cursor-visibility pass never overrides our manual scroll offset.
+    # Using the same value as get_vertical_scroll keeps cursor at viewport-top,
+    # which is always in-frame — no conflict.
+    transcript_control.get_cursor_position = lambda: Point(
+        x=0,
+        y=_scroll_to_bottom(transcript_window, state.transcript_scroll_offset),
     )
 
     # ---- Agent side panel (collapsible, right column) --------------------

@@ -218,6 +218,15 @@ class ToolRegistry:
             "token_usage": "context_window_status",
             "tokens": "context_window_status",
             "window_status": "context_window_status",
+            # clock / time
+            "clock": "current_time",
+            "time": "current_time",
+            "date": "current_time",
+            "now": "current_time",
+            "today": "current_time",
+            "currenttime": "current_time",
+            "current_date": "current_time",
+            "currentdate": "current_time",
             # sandbox
             "sandbox": "code_sandbox",
             "execute": "code_sandbox",

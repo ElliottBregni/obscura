@@ -86,7 +86,8 @@ When storing or retrieving persistent data:
 When writing files (reports, exports, generated content):
 - Use absolute paths under ~/.obscura/output/ for generated files.
 - NEVER write to the current working directory unless the user explicitly asks.
-- Relative paths automatically resolve to ~/.obscura/output/, not cwd.
+- Relative paths resolve to the current working directory. Use absolute
+  ~/.obscura/output/ paths for generated artifacts that do not belong in cwd.
 
 ## Behavior
 

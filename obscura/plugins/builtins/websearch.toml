@@ -75,6 +75,8 @@ handler = "obscura.tools.providers.websearch:_handler_images"
 [tools.parameters]
 type = "object"
 
+[tools.parameters.properties]
+
 [[tools]]
 name = "websearch_summarize"
 description = "Summarize a URL"

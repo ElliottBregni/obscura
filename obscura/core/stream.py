@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.enums.agent import ChunkKind
@@ -17,6 +18,17 @@ from obscura.core.types import StreamChunk, StreamMetadata
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _trace_copilot_stream_enabled() -> bool:
+    raw = os.environ.get("OBSCURA_TRACE_COPILOT_STREAM", "").strip().lower()
+    return raw in {"1", "true", "yes", "on", "debug", "trace"}
+
+
+def _trace_copilot_stream(message: str, *args: Any) -> None:
+    if not _trace_copilot_stream_enabled():
+        return
+    logger.info("copilot-stream: " + message, *args)
 
 
 if TYPE_CHECKING:
@@ -182,6 +194,13 @@ class EventToIteratorBridge:
             return
 
         delta = self._normalize_delta(raw_delta, kind="text")
+        _trace_copilot_stream(
+            "text_delta raw_len=%d norm_len=%d raw=%r norm=%r",
+            len(raw_delta),
+            len(delta),
+            raw_delta[:200],
+            delta[:200],
+        )
         if delta:
             self._emitted_text += delta
             self.push(
@@ -194,18 +213,24 @@ class EventToIteratorBridge:
             )
 
     def _normalize_delta(self, raw_delta: str, *, kind: str) -> str:
-        """Strip the prefix-overlap when a provider sends cumulative content.
+        """Trim repeated content when a provider sends overlapping chunks.
 
-        If ``raw_delta`` starts with everything we've already emitted in
-        this turn, the provider sent the full message-so-far instead of
-        just the new chars. Slice the overlap and return only the tail.
-        Logs a warning the first time it triggers per turn so the
-        regression is visible.
+        Two malformed stream shapes are handled here:
+
+        1. Full cumulative snapshots:
+           emitted = ``"hello"``, raw = ``"hello world"``
+        2. Rolling overlap windows:
+           emitted = ``"obsc"``, raw = ``"scura"``
+
+        In both cases we emit only the unseen tail.
         """
         if not raw_delta:
             return ""
         emitted = self._emitted_text if kind == "text" else self._emitted_thinking
-        if emitted and raw_delta.startswith(emitted):
+        if not emitted:
+            return raw_delta
+
+        if raw_delta.startswith(emitted):
             tail = raw_delta[len(emitted) :]
             logger.warning(
                 "%s delta arrived as cumulative snapshot (len=%d, "
@@ -216,6 +241,24 @@ class EventToIteratorBridge:
                 len(tail),
             )
             return tail
+
+        # Some SDK builds appear to stream a rolling overlap window
+        # instead of a pure delta or full cumulative snapshot.
+        # Example: "ob" -> "obsc" -> "scura" -> "ura". Trim the
+        # longest suffix/prefix overlap so we only append the new tail.
+        max_overlap = min(len(emitted), len(raw_delta))
+        for overlap in range(max_overlap, 0, -1):
+            if emitted[-overlap:] == raw_delta[:overlap]:
+                tail = raw_delta[overlap:]
+                logger.warning(
+                    "%s delta arrived with rolling overlap (raw=%d, "
+                    "overlap=%d, tail=%d); emitting tail only",
+                    kind,
+                    len(raw_delta),
+                    overlap,
+                    len(tail),
+                )
+                return tail
         return raw_delta
 
     def on_thinking_delta(self, event: Any) -> None:
@@ -243,6 +286,13 @@ class EventToIteratorBridge:
             raw_delta = event
 
         delta = self._normalize_delta(raw_delta, kind="thinking")
+        _trace_copilot_stream(
+            "thinking_delta raw_len=%d norm_len=%d raw=%r norm=%r",
+            len(raw_delta),
+            len(delta),
+            raw_delta[:200],
+            delta[:200],
+        )
         if delta:
             self._emitted_thinking += delta
             self.push(

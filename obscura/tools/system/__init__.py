@@ -21,6 +21,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, ClassVar, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from obscura.core.paths import resolve_obscura_home
 from obscura.core.tool_context import current_tool_context
@@ -94,6 +95,80 @@ async def file_change(
             "recorded": True,
             "changes": changes or summary,
             "path": path,
+        },
+    )
+
+
+@tool(
+    "current_time",
+    (
+        "Read the current clock time. Use this for up-to-date dates, times, "
+        "deadlines, elapsed-time checks, or timezone conversions instead of "
+        "relying on static prompt context."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "timezone": {
+                "type": "string",
+                "description": (
+                    "Optional IANA timezone name, such as America/Detroit or UTC. "
+                    "Omit to use the host's local timezone."
+                ),
+            },
+        },
+    },
+    output_schema={
+        "x-output-levels": {
+            "minimal": ["ok", "local_iso", "utc_iso"],
+            "standard": [
+                "ok",
+                "timezone",
+                "local_iso",
+                "local_date",
+                "local_time",
+                "utc_iso",
+                "unix_seconds",
+            ],
+            "full": [
+                "ok",
+                "timezone",
+                "timezone_key",
+                "utc_offset",
+                "local_iso",
+                "local_date",
+                "local_time",
+                "utc_iso",
+                "unix_seconds",
+            ],
+        },
+        "x-default-level": "standard",
+    },
+)
+async def current_time(timezone: str = "") -> str:
+    utc_now = datetime.datetime.now(datetime.UTC)
+    timezone_key = timezone.strip()
+    if timezone_key:
+        try:
+            tzinfo = ZoneInfo(timezone_key)
+        except ZoneInfoNotFoundError:
+            return Policy.json_error("unknown_timezone", timezone=timezone_key)
+        local_now = utc_now.astimezone(tzinfo)
+    else:
+        local_now = utc_now.astimezone()
+        timezone_key = getattr(local_now.tzinfo, "key", "") or local_now.tzname() or ""
+
+    return json.dumps(
+        {
+            "ok": True,
+            "timezone": local_now.tzname(),
+            "timezone_key": timezone_key,
+            "utc_offset": local_now.strftime("%z"),
+            "local_iso": local_now.isoformat(),
+            "local_date": local_now.date().isoformat(),
+            "local_time": local_now.strftime("%H:%M:%S"),
+            "utc_iso": utc_now.isoformat(),
+            "unix_seconds": utc_now.timestamp(),
         },
     )
 
@@ -793,6 +868,8 @@ def _aggregate_tool_specs() -> list[ToolSpec]:
         cast("ToolSpec", cast("Any", task).spec),
         # Provider notifications
         cast("ToolSpec", cast("Any", file_change).spec),
+        # Clock
+        cast("ToolSpec", cast("Any", current_time).spec),
         # System discovery
         cast("ToolSpec", cast("Any", Shell.which_command).spec),
         # Filesystem — basic

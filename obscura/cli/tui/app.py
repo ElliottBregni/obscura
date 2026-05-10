@@ -44,7 +44,6 @@ from obscura.cli.render import console as rich_console
 from obscura.cli.render import set_active_renderer
 from obscura.cli.renderer.reveal import compute_reveal_burst
 from obscura.cli.tui.engine_adapter import TUIEngineHandle
-from obscura.cli.tui.formatter import format_slash_output
 from obscura.cli.tui.layout import build_layout
 from obscura.cli.tui.overlays import build_overlays
 from obscura.cli.tui.renderer import TUIRenderer
@@ -854,6 +853,8 @@ class ObscuraTUIApp:
 
     async def _dispatch_slash_command(self, line: str) -> None:
         """Run a ``/slash`` command, capturing Rich output for the transcript."""
+        self._renderer.push_slash_command(line)
+        self._invalidate()
         ctx = self._make_repl_context()
         captured = io.StringIO()
         # The Rich console used by every command writes through
@@ -873,8 +874,7 @@ class ObscuraTUIApp:
 
         captured_text = captured.getvalue()
         if captured_text:
-            entry = format_slash_output(captured_text)
-            self._state.append_transcript(entry)
+            self._renderer.push_slash_output(captured_text)
             self._invalidate()
 
         if result == "quit":

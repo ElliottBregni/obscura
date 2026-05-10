@@ -137,7 +137,7 @@ def _extract_overflow_path(text: str) -> str:
 # characters in the transcript window; strip them before display.
 _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)")
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0B-\x1F\x7F]+")
 
 
 def _sanitize(text: str) -> str:
@@ -308,10 +308,13 @@ def _format_tool_result_runs(
     if truncated:
         lines = lines[:cap]
 
-    runs: list[StyledRun] = [
-        StyledRun(text=f"{glyph} ", style=f"{glyph_style} bold"),
-        StyledRun(text=lines[0], style=body_style),
-    ]
+    tool_name = (event.tool_name or "tool").strip()
+    runs: list[StyledRun] = []
+    if tool_name:
+        runs.append(StyledRun(text=tool_name, style=f"{success_style} bold"))
+        runs.append(StyledRun(text="  ", style=""))
+    runs.append(StyledRun(text=f"{glyph} ", style=f"{glyph_style} bold"))
+    runs.append(StyledRun(text=lines[0], style=body_style))
     for ln in lines[1:]:
         runs.append(StyledRun(text="\n    "))
         runs.append(StyledRun(text=ln, style=body_style))
@@ -637,6 +640,18 @@ class TUIRenderer:
         entry = TranscriptEntry(
             kind=TranscriptKind.USER,
             runs=[StyledRun(text=text, style=_STYLE_USER)],
+        )
+        self._state.append_transcript(entry)
+        self._fire_invalidate()
+
+    def push_slash_command(self, text: str) -> None:
+        """Append a submitted slash command as a USER transcript entry."""
+        if not text:
+            return
+        entry = TranscriptEntry(
+            kind=TranscriptKind.USER,
+            runs=[StyledRun(text=text, style=f"{_STYLE_USER} italic")],
+            metadata={"raw_text": text, "is_slash_command": True},
         )
         self._state.append_transcript(entry)
         self._fire_invalidate()

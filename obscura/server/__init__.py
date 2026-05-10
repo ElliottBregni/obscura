@@ -16,6 +16,21 @@ import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+# Load .env files BEFORE any auth imports so that OBSCURA_API_KEYS and other
+# env vars are present when obscura.auth.rbac calls _load_api_keys() at
+# module-import time (rbac.py line: `_load_api_keys()` runs on import).
+# Priority: shell env > ~/.obscura/.env > project .obscura/.env > CWD .env
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    from pathlib import Path as _Path
+
+    _global_env = _Path.home() / ".obscura" / ".env"
+    if _global_env.is_file():
+        _load_dotenv(_global_env, override=False)
+    _load_dotenv(override=False)  # CWD .env (e.g. obscura-main/.env)
+except Exception:
+    pass  # dotenv is optional; fall back to shell env
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -200,9 +215,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     """Build and return the FastAPI application."""
-    from dotenv import load_dotenv
-
-    load_dotenv()
+    # Note: .env is loaded at module import time (top of file) so that
+    # obscura.auth.rbac._load_api_keys() sees OBSCURA_API_KEYS on first
+    # import. The extra load_dotenv() call here was removed to avoid a
+    # redundant load that arrived too late for the module-level key init.
 
     if config is None:
         config = ObscuraConfig.load()
