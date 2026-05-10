@@ -49,6 +49,12 @@ def _build_slack_adapter(*, contacts: list[str], account_id: str = "default") ->
     return SlackAdapter(contacts, account_id=account_id)
 
 
+def _build_discord_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.discord import DiscordAdapter
+
+    return DiscordAdapter(contacts, account_id=account_id)
+
+
 def _build_webhook_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
     from obscura.integrations.webhook import WebhookAdapter
 
@@ -72,6 +78,7 @@ _ADAPTER_BUILDERS: dict[str, AdapterBuilder] = {
     "whatsapp": _build_whatsapp_adapter,
     "signal": _build_signal_adapter,
     "slack": _build_slack_adapter,
+    "discord": _build_discord_adapter,
     "webhook": _build_webhook_adapter,
     "push": _build_push_adapter,
     "telegram": _build_telegram_adapter,
@@ -268,6 +275,23 @@ async def build_channel_router(
         except Exception:
             logger.warning(
                 "WhatsApp adapter failed to initialise; WhatsApp webhooks disabled",
+                exc_info=True,
+            )
+
+    # --- Discord ---
+    discord_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+    if discord_token:
+        try:
+            from obscura.integrations.discord.adapter import DiscordAdapter
+
+            dc_raw = os.environ.get("DISCORD_CHANNEL_IDS", "")
+            dc_contacts = [c.strip() for c in dc_raw.split(",") if c.strip()]
+            dc_adapter = DiscordAdapter(contacts=dc_contacts, bot_token=discord_token)
+            channel_router.register("discord", dc_adapter)
+            _apply_platform_mode("discord")
+        except Exception:
+            logger.warning(
+                "Discord adapter failed to initialise; Discord webhooks disabled",
                 exc_info=True,
             )
 
