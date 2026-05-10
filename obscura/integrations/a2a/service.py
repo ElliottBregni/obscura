@@ -166,7 +166,10 @@ class A2AService:
         if blocking:
             await self._run_agent_blocking(task)
             refreshed = await self._store.get_task(task.id)
-            return refreshed or task
+            final = refreshed or task
+            if push_notification_url:
+                await self._fire_push_notification(final, push_notification_url)
+            return final
 
         # Non-blocking: run in background, fire push notification when done
         if push_notification_url:
