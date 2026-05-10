@@ -87,7 +87,7 @@ class UndercoverMode:
 
         # Remove Co-Authored-By lines mentioning AI/Claude/Obscura.
         sanitized = re.sub(
-            r"\n\s*Co-Authored-By:.*(?:Claude|Obscura|AI|Agent|noreply@).*",
+            r"\n\s*Co-Authored-By:.*(?:Claude|Obscura|AI|Copilot|🤖|Agent|noreply@).*",
             "",
             message,
             flags=re.IGNORECASE,
