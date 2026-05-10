@@ -29,17 +29,20 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
+from collections.abc import AsyncGenerator
 
 import httpx
 
 from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.core.models.a2a import (
     A2AMessage,
+    A2AStatusUpdateEvent,
     A2ATask,
     A2ATaskStatus,
     Artifact,
@@ -437,6 +440,157 @@ class OpenClawBridge:
         )
 
     # ------------------------------------------------------------------
+    # Streaming
+    # ------------------------------------------------------------------
+
+    async def stream_send(
+        self,
+        text: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        task_id: str | None = None,
+        context_id: str | None = None,
+        system_prompt: str | None = None,
+    ) -> AsyncGenerator[A2AStatusUpdateEvent]:
+        """Send *text* to OpenClaw and yield :class:`~obscura.core.models.a2a.A2AStatusUpdateEvent` chunks.
+
+        The generator yields one event per SSE chunk while the model streams,
+        then a final event with ``final=True`` and ``state=completed`` when
+        the stream ends.  If OpenClaw does not support streaming (or any error
+        occurs), a single completed event is yielded as a graceful fallback.
+
+        Parameters
+        ----------
+        text:
+            User message to send.
+        history:
+            Prior conversation turns in OpenAI ``{"role", "content"}`` format.
+        task_id:
+            Explicit task ID.  A UUID-derived value is generated when omitted.
+        context_id:
+            Explicit context ID.  A UUID-derived value is generated when omitted.
+        system_prompt:
+            Optional system message prepended to the completions request.
+
+        Yields
+        ------
+        A2AStatusUpdateEvent
+            Intermediate events with ``state=working`` while streaming;
+            a final event with ``state=completed`` (``final=True``) at the end.
+
+        """
+        http = self._ensure_connected()
+        tid = task_id or self._make_task_id()
+        cid = context_id or self._make_context_id()
+
+        payload = self._build_completions_payload(
+            text,
+            system_prompt=system_prompt,
+            history=history,
+        )
+        payload["stream"] = True
+
+        accumulated: list[str] = []
+
+        def _working_event(chunk_text: str) -> A2AStatusUpdateEvent:
+            now = datetime.now(UTC)
+            chunk_msg = A2AMessage(
+                role=A2ARole.AGENT,
+                messageId=f"msg-{uuid.uuid4().hex[:8]}",
+                parts=[TextPart(text=chunk_text)],
+                taskId=tid,
+                contextId=cid,
+                timestamp=now,
+            )
+            return A2AStatusUpdateEvent(
+                taskId=tid,
+                contextId=cid,
+                status=A2ATaskStatus(
+                    state=A2ATaskState.WORKING,
+                    message=chunk_msg,
+                    timestamp=now,
+                ),
+                final=False,
+            )
+
+        def _completed_event(reply_text: str) -> A2AStatusUpdateEvent:
+            now = datetime.now(UTC)
+            reply_msg = A2AMessage(
+                role=A2ARole.AGENT,
+                messageId=f"msg-{uuid.uuid4().hex[:8]}",
+                parts=[TextPart(text=reply_text)],
+                taskId=tid,
+                contextId=cid,
+                timestamp=now,
+            )
+            return A2AStatusUpdateEvent(
+                taskId=tid,
+                contextId=cid,
+                status=A2ATaskStatus(
+                    state=A2ATaskState.COMPLETED,
+                    message=reply_msg,
+                    timestamp=now,
+                ),
+                final=True,
+            )
+
+        try:
+            async with http.stream("POST", "/v1/chat/completions", json=payload) as resp:
+                resp.raise_for_status()
+                async for raw_line in resp.aiter_lines():
+                    line = raw_line.strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:"):].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk: dict[str, Any] = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    raw_choices = chunk.get("choices")
+                    choices: list[dict[str, Any]] = (
+                        cast(list[dict[str, Any]], raw_choices)
+                        if isinstance(raw_choices, list)
+                        else []
+                    )
+                    if not choices:
+                        continue
+
+                    delta = cast(dict[str, Any], choices[0].get("delta") or {})
+                    content = delta.get("content")
+                    if content:
+                        token = str(content)
+                        accumulated.append(token)
+                        yield _working_event(token)
+
+        except Exception as exc:
+            logger.debug(
+                "OpenClaw stream_send fell back to non-streaming (task=%s): %s",
+                tid,
+                exc,
+            )
+            # Graceful fallback: call blocking send and emit a single event
+            task = await self.send(
+                text,
+                task_id=tid,
+                context_id=cid,
+                system_prompt=system_prompt,
+                history=history,
+            )
+            reply_text = ""
+            if task.artifacts:
+                artifact_parts = task.artifacts[0].parts
+                reply_text = "".join(
+                    p.text for p in artifact_parts if isinstance(p, TextPart)
+                )
+            yield _completed_event(reply_text)
+            return
+
+        yield _completed_event("".join(accumulated))
+
+    # ------------------------------------------------------------------
     # Health check
     # ------------------------------------------------------------------
 
@@ -465,7 +619,81 @@ class OpenClawBridge:
             return False
 
 
+# ---------------------------------------------------------------------------
+# Multi-turn context
+# ---------------------------------------------------------------------------
+
+
+class OpenClawContext:
+    """Manages multi-turn conversation state for :class:`OpenClawBridge`.
+
+    Maintains a running OpenAI-format message history so each call to
+    :meth:`send` automatically includes prior turns.  Useful for back-and-forth
+    conversations where the caller does not want to manage history manually.
+
+    Parameters
+    ----------
+    context_id:
+        Identifier for this context window.  A UUID is generated when omitted.
+
+    Examples
+    --------
+    ::
+
+        async with bridge:
+            ctx = OpenClawContext()
+            t1 = await ctx.send(bridge, "Hello!")
+            t2 = await ctx.send(bridge, "What did I just say?")
+            print(len(ctx))   # 2
+
+    """
+
+    def __init__(self, context_id: str | None = None) -> None:
+        self.context_id: str = context_id or f"ctx-{uuid.uuid4().hex[:12]}"
+        self.history: list[dict[str, str]] = []
+
+    async def send(self, bridge: OpenClawBridge, text: str) -> A2ATask:
+        """Append *text* as a user turn, call *bridge*, record the reply.
+
+        Parameters
+        ----------
+        bridge:
+            A connected :class:`OpenClawBridge` instance.
+        text:
+            User message for this turn.
+
+        Returns
+        -------
+        A2ATask
+            The completed (or failed) task returned by the bridge.
+
+        """
+        self.history.append({"role": "user", "content": text})
+        task = await bridge.send(
+            text,
+            context_id=self.context_id,
+            history=self.history[:-1],  # send prior turns; bridge appends current
+        )
+        # Extract reply text from the task artifact for history
+        reply_text = ""
+        if task.artifacts:
+            reply_text = "".join(
+                p.text for p in task.artifacts[0].parts if isinstance(p, TextPart)
+            )
+        self.history.append({"role": "assistant", "content": reply_text})
+        return task
+
+    def clear(self) -> None:
+        """Reset conversation history (keeps context_id)."""
+        self.history = []
+
+    def __len__(self) -> int:
+        """Return the number of completed turns (user+assistant pairs)."""
+        return len(self.history) // 2
+
+
 __all__ = [
     "OpenClawBridge",
     "OpenClawBridgeConfig",
+    "OpenClawContext",
 ]
