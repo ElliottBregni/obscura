@@ -59,6 +59,8 @@ from obscura.integrations.messaging.store import (
 
 logger = logging.getLogger(__name__)
 
+_MAX_REPLY_LEN: int = 4_000  # chars — platform reply size cap (WhatsApp/Telegram limit ~4096)
+
 
 # ---------------------------------------------------------------------------
 # Adapter protocol (subset needed by the router)
@@ -411,6 +413,9 @@ class ChannelRouter:
             async def _reply(text: str) -> bool:
                 if _adapter is None:
                     return False
+                # Truncate reply to platform message limit
+                if len(text) > _MAX_REPLY_LEN:
+                    text = text[:_MAX_REPLY_LEN] + "… [reply truncated]"
                 try:
                     return await _adapter.send(sender_id, text)
                 except Exception:

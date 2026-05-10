@@ -583,12 +583,20 @@ async def repl(
                             _t.cancel()
                             with contextlib.suppress(asyncio.CancelledError, Exception):
                                 await _t
+                        # If a channel message arrived just as we cancelled, put it back
+                        if _channel_task in _pending and not _channel_task.cancelled():
+                            with contextlib.suppress(Exception):
+                                _stray = _channel_task.result()
+                                get_channel_queue().put_nowait(_stray)
+                        _is_channel_injected = False
                         if _channel_task in _done and not _channel_task.cancelled():
                             _ch_msg: _ChannelMessage = _channel_task.result()
                             _label = _ch_msg.display_name or _ch_msg.sender_id
                             _plat = _ch_msg.platform.capitalize()
                             user_input = f"[{_plat} from {_label}]: {_ch_msg.text}"
                             ctx._pending_channel_reply = _ch_msg.reply_fn  # type: ignore[attr-defined]
+                            # Mark this turn as channel-injected so slash-command path is skipped
+                            _is_channel_injected = True
                         else:
                             user_input = _prompt_task.result()
                             ctx._pending_channel_reply = None  # type: ignore[attr-defined]
@@ -596,6 +604,7 @@ async def repl(
                         _log.debug("channel inject race failed, falling back to plain prompt", exc_info=True)
                         user_input = await bordered_prompt(session, status=prompt_status)
                         ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                        _is_channel_injected = False
                 except (EOFError, KeyboardInterrupt):
                     _log.debug("suppressed exception in repl", exc_info=True)
                     console.print()
@@ -685,7 +694,7 @@ async def repl(
                         _log.debug("suppressed exception in repl", exc_info=True)
 
                 # Slash command
-                if user_input.startswith("/"):
+                if user_input.startswith("/") and not _is_channel_injected:
                     if not ctx.tools_enabled:
                         loop_kwargs["tool_choice"] = ToolChoice.none()
                     else:
@@ -1043,7 +1052,7 @@ async def repl(
                                 import asyncio as _asyncio
                                 import collections.abc as _abc
                                 if callable(_reply_fn) and isinstance(_reply_fn, _abc.Callable):
-                                    _asyncio.get_event_loop().create_task(
+                                    _asyncio.get_running_loop().create_task(
                                         _reply_fn(resp_text)  # type: ignore[arg-type]
                                     )
                         except Exception:
