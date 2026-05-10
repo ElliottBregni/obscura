@@ -1,0 +1,101 @@
+{
+  "name": "Obscura Agent",
+  "description": "Multi-backend AI agent runtime with 100+ tools, vector memory, multi-agent orchestration, and A2A protocol support.",
+  "url": "http://localhost:8080",
+  "version": "1.0",
+  "protocolVersion": "0.3",
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["text/plain", "application/json", "text/event-stream"],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": true,
+    "extensions": []
+  },
+  "skills": [
+    {
+      "id": "general-task",
+      "name": "General Task Execution",
+      "description": "Execute arbitrary tasks using 100+ integrated tools including file ops, shell, web, git, finance, crypto, and more.",
+      "tags": ["general", "automation", "tools"],
+      "examples": [
+        "Search the web and summarize findings",
+        "Read a file and suggest improvements",
+        "Run a shell command and return output"
+      ]
+    },
+    {
+      "id": "code-assist",
+      "name": "Code Assistance",
+      "description": "Read, write, edit, and review code across any language. Runs linters, tests, and formatters.",
+      "tags": ["code", "review", "refactor"],
+      "examples": [
+        "Review this Python file for issues",
+        "Write unit tests for this function",
+        "Refactor this module to use async"
+      ]
+    },
+    {
+      "id": "research",
+      "name": "Research & Analysis",
+      "description": "Search the web, fetch URLs, analyze data, query financial/crypto markets, and produce structured reports.",
+      "tags": ["research", "analysis", "finance", "data"],
+      "examples": [
+        "Research the latest LLM benchmarks",
+        "Get AAPL stock data and summarize trends",
+        "Summarize this URL"
+      ]
+    },
+    {
+      "id": "multi-agent-coord",
+      "name": "Multi-Agent Coordination",
+      "description": "Spawn sub-agents, delegate tasks, coordinate peer A2A agents, and aggregate results.",
+      "tags": ["coordination", "orchestration", "a2a"],
+      "examples": [
+        "Delegate this task to a specialist agent",
+        "Coordinate three agents to complete a workflow",
+        "Discover and invoke a peer A2A agent"
+      ]
+    }
+  ],
+  "provider": {
+    "name": "Obscura",
+    "url": "https://obscura.dev"
+  },
+  "securitySchemes": {
+    "bearerAuth": {
+      "type": "http",
+      "scheme": "bearer"
+    }
+  },
+  "security": [
+    {"bearerAuth": []}
+  ],
+  "extensions": [
+    {
+      "uri": "https://openclaw.dev/extensions/agent/v1",
+      "id": "openclaw-discovery",
+      "required": false,
+      "params": {
+        "runtime": "obscura",
+        "team": "default",
+        "role": "general",
+        "peers": []
+      }
+    },
+    {
+      "uri": "https://obscura.dev/extensions/a2a/v1",
+      "id": "obscura-discovery",
+      "required": false,
+      "params": {
+        "backends": ["claude", "copilot", "openai", "localllm"],
+        "vectorMemory": true,
+        "mcpSupport": true,
+        "toolCategories": [
+          "file", "shell", "git", "web", "finance", "crypto",
+          "code", "data", "calendar", "drive", "email", "social"
+        ]
+      }
+    }
+  ]
+}
