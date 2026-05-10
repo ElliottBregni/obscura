@@ -28,10 +28,18 @@ from starlette.responses import JSONResponse, Response
 logger = logging.getLogger(__name__)
 
 # Paths exempt from bearer-token authentication.
-# /webhook/ is excluded from *bearer auth* because it uses HMAC signing instead;
-# it is NOT exempt from rate limiting or size limits.
+# /webhook/ — A2A push notification callbacks; uses HMAC-SHA256 instead.
+# /channels/telegram/webhook — Telegram Bot API updates; signed by Telegram.
+# /channels/whatsapp/ — covers both /webhook (Meta HMAC) and /verify (hub challenge).
 # /peers/ exposes synthetic A2A cards for bridge-only peers (e.g. OpenClaw).
-_AUTH_EXEMPT_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/", "/webhook/")
+_AUTH_EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/health",
+    "/.well-known/",
+    "/peers/",
+    "/webhook/",
+    "/channels/telegram/webhook",
+    "/channels/whatsapp/",
+)
 
 # Paths exempt from rate limiting and request-size enforcement.
 # /webhook/ is intentionally absent — it must be rate-limited to prevent

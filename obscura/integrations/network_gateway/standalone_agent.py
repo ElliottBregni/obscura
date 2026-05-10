@@ -33,6 +33,7 @@ import hmac as _hmac
 import json as _json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -52,6 +53,7 @@ from obscura.integrations.network_gateway.chat_completions import (
 from obscura.integrations.network_gateway.config import GatewayConfig
 from obscura.integrations.network_gateway.models import router as models_router
 from obscura.integrations.network_gateway.sessions import get_session_store
+from obscura.routes.channels import router as channels_router
 
 if TYPE_CHECKING:
     pass
@@ -353,12 +355,99 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
     if config is None:
         config = GatewayConfig()
 
+    # ------------------------------------------------------------------
+    # Lifespan: wire messaging platform adapters into the ChannelRouter
+    # ------------------------------------------------------------------
+
+    @asynccontextmanager
+    async def _sa_lifespan(app: FastAPI):  # type: ignore[type-arg]
+        """Start-up: load messaging platforms from config and wire the ChannelRouter."""
+        try:
+            from obscura.integrations.messaging.platform_loader import (
+                load_messaging_platforms,
+            )
+            from obscura.integrations.messaging.router import (
+                ChannelRouter,
+                ChannelRouterConfig,
+            )
+            from obscura.integrations.messaging.runners import ObscuraAgentRunner
+            from obscura.integrations.messaging.store import ChannelConfigRecord
+            from obscura.core.enums.messaging import ChannelMode
+            from obscura.routes.channels import init_channel_router
+            import hashlib
+            import time
+
+            platforms = load_messaging_platforms()
+
+            # ObscuraAgentRunner requires backend + tool_registry.
+            # The standalone agent doesn't maintain a persistent tool registry here;
+            # pass None — the runner will operate without extra tools beyond what the
+            # backend itself provides.  Callers that need a full registry should wire
+            # it separately via the REST config API.
+            runner = ObscuraAgentRunner(
+                backend=config.agent_backend,
+                tool_registry=None,
+            )
+            ch_router = ChannelRouter(
+                runner=runner,
+                config=ChannelRouterConfig(mode=ChannelMode.CHANNEL_INJECT),
+            )
+
+            loaded_count = 0
+            for pconf in platforms:
+                if not pconf.get("enabled", True):
+                    logger.debug(
+                        "Standalone agent: skipping disabled platform=%s",
+                        pconf.get("platform"),
+                    )
+                    continue
+                try:
+                    platform_id = str(pconf.get("platform", "unknown"))
+                    record = ChannelConfigRecord.from_dict(
+                        {
+                            "id": hashlib.md5(platform_id.encode()).hexdigest(),
+                            "platform": platform_id,
+                            "label": pconf.get("label", platform_id),
+                            "enabled": pconf.get("enabled", True),
+                            "mode": pconf.get("mode", "channel_inject"),
+                            "credentials": pconf.get("credentials", {}),
+                            "contacts": pconf.get("contacts", []),
+                            "router_config": {},
+                            "created_at_epoch_s": time.time(),
+                            "updated_at_epoch_s": time.time(),
+                        }
+                    )
+                    await ch_router.apply_config(record)
+                    loaded_count += 1
+                except Exception:
+                    logger.warning(
+                        "Standalone agent: failed to apply config for platform=%s",
+                        pconf.get("platform"),
+                        exc_info=True,
+                    )
+
+            init_channel_router(ch_router)
+            logger.info(
+                "Standalone agent: messaging platforms loaded — %d active",
+                loaded_count,
+            )
+
+        except Exception:
+            logger.warning(
+                "Standalone agent: messaging platform wiring failed — "
+                "channels will be unavailable",
+                exc_info=True,
+            )
+
+        yield  # app runs here
+
     app = FastAPI(
         title="Obscura Standalone Agent",
         description="Direct Obscura agent server for remote chat (Tailscale / LAN).",
         version="0.7.0",
         docs_url=None,
         redoc_url=None,
+        lifespan=_sa_lifespan,
     )
 
     # Stash config so route handlers can reach it.
@@ -401,6 +490,10 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
 
     app.include_router(chat_router)
     app.include_router(models_router)
+
+    # -- Messaging channel webhook + config CRUD routes --------------------
+
+    app.include_router(channels_router)
 
     # -- WebSocket streaming chat ------------------------------------------
 
