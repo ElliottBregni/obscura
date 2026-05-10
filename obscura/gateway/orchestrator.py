@@ -63,9 +63,9 @@ class GatewayOrchestrator:
     
     def _register_modes(self) -> None:
         """Register available gateway modes."""
-        from obscura.gateway.modes.openclaw import OpenClawMode
-        from obscura.gateway.modes.native import NativeMode
-        from obscura.gateway.modes.mcp import MCPMode
+        from obscura.gateway.modes.openclaw import OpenClawMode  # noqa: PLC0415
+        from obscura.gateway.modes.native import NativeMode  # noqa: PLC0415
+        from obscura.gateway.modes.mcp import MCPMode  # noqa: PLC0415
         
         self._modes[GatewayMode.OPENCLAW] = OpenClawMode
         self._modes[GatewayMode.NATIVE] = NativeMode

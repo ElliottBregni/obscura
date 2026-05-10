@@ -15,7 +15,7 @@ Usage::
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -281,9 +281,65 @@ def load_definition_from_toml(path: str | Path) -> AgentDefinition:
     )
 
 
+# ---------------------------------------------------------------------------
+# OpenClaw-compatible definition factory
+# ---------------------------------------------------------------------------
+
+
+def openclaw_compatible_definition(
+    base_url: str = "http://localhost:8080",
+    *,
+    gateway_url: str = "http://localhost:18789",
+) -> AgentDefinition:
+    """Build an ``AgentDefinition`` tuned for OpenClaw gateway discovery.
+
+    Returns an ``AgentDefinition`` that:
+
+    - Sets ``url`` to ``base_url`` (the Obscura standalone A2A server)
+    - Extends the default skills with an ``"openclaw"`` tag so OpenClaw's
+      skill router can match them
+    - Adds a ``"kimi-k2"`` tag to the tool-use skill, advertising that the
+      backend can use the Kimi K2.5 model via the OpenClaw gateway
+    - Sets ``provider_name`` to ``"Obscura / OpenClaw"``
+
+    Parameters
+    ----------
+    base_url:
+        Public URL of the Obscura standalone A2A server.
+    gateway_url:
+        OpenClaw gateway URL (informational; embedded in the description).
+    """
+    # Add "openclaw" tag to all skills
+    skills_with_oc = [
+        replace(s, tags=[*s.tags, "openclaw"])
+        for s in DEFAULT_AGENT_DEFINITION.skills
+    ]
+    # Add "kimi-k2" tag specifically to the tool-use skill
+    skills_with_oc = [
+        replace(s, tags=[*s.tags, "kimi-k2"]) if s.id == "tool-use" else s
+        for s in skills_with_oc
+    ]
+    return AgentDefinition(
+        name="Obscura Agent (OpenClaw)",
+        description=(
+            f"Obscura agent integrated with OpenClaw gateway at {gateway_url}. "
+            "Supports Kimi K2.5, Claude, and Copilot backends via OpenClaw model routing."
+        ),
+        version=DEFAULT_AGENT_DEFINITION.version,
+        url=base_url,
+        skills=skills_with_oc,
+        streaming=DEFAULT_AGENT_DEFINITION.streaming,
+        push_notifications=DEFAULT_AGENT_DEFINITION.push_notifications,
+        auth_required=DEFAULT_AGENT_DEFINITION.auth_required,
+        provider_name="Obscura / OpenClaw",
+        provider_url=DEFAULT_AGENT_DEFINITION.provider_url,
+    )
+
+
 __all__ = [
     "AgentDefinition",
     "DEFAULT_AGENT_DEFINITION",
     "SkillDefinition",
     "load_definition_from_toml",
+    "openclaw_compatible_definition",
 ]

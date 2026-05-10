@@ -119,7 +119,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
     async def get_agent_card() -> dict[str, Any]:
         """Get the agent card."""
         card = service.get_agent_card()
-        return card.model_dump(mode="json")
+        return card.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     return router
 
@@ -131,7 +131,7 @@ def create_wellknown_router(service: A2AService) -> APIRouter:
     @router.get("/.well-known/agent.json")
     async def wellknown_agent_card() -> dict[str, Any]:
         """A2A agent discovery endpoint."""
-        return service.get_agent_card().model_dump(mode="json")
+        return service.get_agent_card().model_dump(mode="json", by_alias=True, exclude_none=True)
 
     return router
 

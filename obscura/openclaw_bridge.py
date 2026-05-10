@@ -26,6 +26,7 @@ class OpenClawBridgeConfig:
     timeout_seconds: float = 300.0
     workflow_max_retries: int = 2
     workflow_retry_backoff_seconds: float = 0.25
+    a2a_base_url: str = "http://localhost:8080"
 
 
 @dataclass(frozen=True)
@@ -422,3 +423,87 @@ class OpenClawBridge:
     @staticmethod
     def _is_retryable_status(status_code: int) -> bool:
         return status_code in (408, 425, 429, 500, 502, 503, 504)
+
+    # ------------------------------------------------------------------
+    # A2A interop — Obscura standalone A2A server
+    # ------------------------------------------------------------------
+
+    async def discover_obscura_a2a(
+        self,
+        a2a_base_url: str | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> dict[str, Any]:
+        """Fetch the Obscura standalone A2A agent card.
+
+        Retrieves ``/.well-known/agent.json`` from the Obscura A2A standalone
+        server and returns the raw JSON dict. Useful for verifying the server
+        is up and inspecting its declared skills and capabilities.
+
+        Parameters
+        ----------
+        a2a_base_url:
+            Override the A2A server URL. Defaults to ``config.a2a_base_url``.
+        transport:
+            Optional transport injected for testing (e.g.
+            ``httpx.ASGITransport``). When ``None``, real HTTP is used.
+        """
+        url = (a2a_base_url or self._config.a2a_base_url).rstrip("/")
+        async with httpx.AsyncClient(
+            transport=transport,
+            timeout=self._config.timeout_seconds,
+        ) as ac:
+            resp = await ac.get(f"{url}/.well-known/agent.json")
+            resp.raise_for_status()
+            return resp.json()
+
+    async def send_a2a_message(
+        self,
+        text: str,
+        *,
+        a2a_base_url: str | None = None,
+        blocking: bool = False,
+        context_id: str | None = None,
+        message_id: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> dict[str, Any]:
+        """Send a message to the Obscura standalone A2A server.
+
+        Creates an A2A task via ``POST /a2a/v1/tasks`` and returns the raw
+        task JSON dict from the server.
+
+        Parameters
+        ----------
+        text:
+            The user message text to send.
+        a2a_base_url:
+            Override the A2A server URL. Defaults to ``config.a2a_base_url``.
+        blocking:
+            If ``True``, wait for the task to complete before returning.
+        context_id:
+            Optional A2A context ID for grouping related tasks.
+        message_id:
+            Optional message ID (auto-generated if not provided).
+        transport:
+            Optional transport injected for testing (e.g.
+            ``httpx.ASGITransport``). When ``None``, real HTTP is used.
+        """
+        url = (a2a_base_url or self._config.a2a_base_url).rstrip("/")
+        msg_id = message_id or f"msg-{uuid.uuid4().hex[:12]}"
+        payload: dict[str, Any] = {
+            "message": {
+                "role": "user",
+                "messageId": msg_id,
+                "parts": [{"kind": "text", "text": text}],
+            },
+            "blocking": blocking,
+        }
+        if context_id:
+            payload["contextId"] = context_id
+        async with httpx.AsyncClient(
+            transport=transport,
+            timeout=self._config.timeout_seconds,
+        ) as ac:
+            resp = await ac.post(f"{url}/a2a/v1/tasks", json=payload)
+            resp.raise_for_status()
+            return resp.json()

@@ -138,7 +138,7 @@ async def _dispatch(
 
     if method == A2AMethod.AGENT_CARD.value:
         card = service.get_agent_card()
-        return card.model_dump(mode="json")
+        return card.model_dump(mode="json", by_alias=True, exclude_none=True)
 
     # message/stream is handled via SSE, not JSON-RPC response
     if method == A2AMethod.MESSAGE_STREAM.value:

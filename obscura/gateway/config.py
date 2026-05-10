@@ -149,7 +149,7 @@ class GatewayConfig:
     @classmethod
     def from_file(cls, path: Path | str) -> GatewayConfig:
         """Load configuration from YAML file."""
-        import yaml
+        import yaml  # noqa: PLC0415
         
         path = Path(path)
         if not path.exists():
