@@ -77,17 +77,14 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "network_gateway_request_timeout",
         "network_gateway_ws_ping_interval",
         "network_gateway_session_ttl",
-        "moltbook_store_name",
-        "moltbook_store_url",
-        "moltbook_product_category",
-        "moltbook_shopify_store_url",
-        "moltbook_shopify_api_key",
-        "moltbook_lead_gen_enabled",
-        "moltbook_lead_gen_target_titles",
-        "moltbook_lead_gen_max_company_size",
-        "moltbook_scraper_enabled",
-        "moltbook_scraper_interval_hours",
-        "moltbook_scraper_alert_threshold_pct",
+        "moltbook_url",
+        "moltbook_agent_username",
+        "moltbook_agent_token",
+        "moltbook_auto_post_enabled",
+        "moltbook_auto_post_interval_hours",
+        "moltbook_monitor_enabled",
+        "moltbook_monitor_interval_minutes",
+        "moltbook_monitor_alert_response_ms",
         "moltbook_competitors",
         # agent_monitor
         "agent_monitor_enabled",
@@ -236,19 +233,16 @@ class ObscuraConfig(BaseModel):
     network_gateway_session_ttl: float = 3600.0  # OBSCURA_NETWORK_GATEWAY_SESSION_TTL
 
     # ---------------------------------------------------------------------------
-    # Moltbook business automation
+    # Moltbook — AI agent social network platform
     # ---------------------------------------------------------------------------
-    moltbook_store_name: str = "Moltbook"
-    moltbook_store_url: str = ""
-    moltbook_product_category: str = ""
-    moltbook_shopify_store_url: str = ""
-    moltbook_shopify_api_key: str = ""
-    moltbook_lead_gen_enabled: bool = False
-    moltbook_lead_gen_target_titles: list = []
-    moltbook_lead_gen_max_company_size: int = 200
-    moltbook_scraper_enabled: bool = False
-    moltbook_scraper_interval_hours: int = 24
-    moltbook_scraper_alert_threshold_pct: float = 5.0
+    moltbook_url: str = "https://moltbook.com"
+    moltbook_agent_username: str = ""
+    moltbook_agent_token: str = ""
+    moltbook_auto_post_enabled: bool = False
+    moltbook_auto_post_interval_hours: int = 6
+    moltbook_monitor_enabled: bool = True
+    moltbook_monitor_interval_minutes: int = 15
+    moltbook_monitor_alert_response_ms: int = 3000
     moltbook_competitors: list = []
 
     # Agent monitor — peer-session assistance broadcaster
@@ -544,60 +538,34 @@ class ObscuraConfig(BaseModel):
                 "network_gateway_session_ttl",
                 3600.0,
             ),
-            # Moltbook business automation
-            moltbook_store_name=_str(
-                "MOLTBOOK_STORE_NAME",
-                "moltbook_store_name",
-                "Moltbook",
+            # Moltbook — AI agent social network platform
+            moltbook_url=_str("MOLTBOOK_URL", "moltbook_url", "https://moltbook.com"),
+            moltbook_agent_username=_str("MOLTBOOK_AGENT_USERNAME", "moltbook_agent_username", ""),
+            moltbook_agent_token=_str("MOLTBOOK_AGENT_TOKEN", "moltbook_agent_token", ""),
+            moltbook_auto_post_enabled=_bool_optin(
+                "MOLTBOOK_AUTO_POST_ENABLED",
+                "moltbook_auto_post_enabled",
+                False,
             ),
-            moltbook_store_url=_str(
-                "MOLTBOOK_STORE_URL",
-                "moltbook_store_url",
-                "",
+            moltbook_auto_post_interval_hours=_int(
+                "MOLTBOOK_AUTO_POST_INTERVAL_HOURS",
+                "moltbook_auto_post_interval_hours",
+                6,
             ),
-            moltbook_product_category=_str(
-                "MOLTBOOK_PRODUCT_CATEGORY",
-                "moltbook_product_category",
-                "",
+            moltbook_monitor_enabled=_bool_optin(
+                "MOLTBOOK_MONITOR_ENABLED",
+                "moltbook_monitor_enabled",
+                True,
             ),
-            moltbook_shopify_store_url=_str(
-                "SHOPIFY_STORE_URL",
-                "moltbook_shopify_store_url",
-                "",
+            moltbook_monitor_interval_minutes=_int(
+                "MOLTBOOK_MONITOR_INTERVAL_MINUTES",
+                "moltbook_monitor_interval_minutes",
+                15,
             ),
-            moltbook_shopify_api_key=_str(
-                "SHOPIFY_API_KEY",
-                "moltbook_shopify_api_key",
-                "",
-            ),
-            moltbook_lead_gen_enabled=_bool_optin(
-                "MOLTBOOK_LEAD_GEN_ENABLED",
-                "moltbook_lead_gen_enabled",
-                default=False,
-            ),
-            moltbook_lead_gen_target_titles=d.get(
-                "moltbook_lead_gen_target_titles",
-                ["CEO", "Founder", "Owner", "Director"],
-            ),
-            moltbook_lead_gen_max_company_size=_int(
-                "MOLTBOOK_LEAD_GEN_MAX_COMPANY_SIZE",
-                "moltbook_lead_gen_max_company_size",
-                200,
-            ),
-            moltbook_scraper_enabled=_bool_optin(
-                "MOLTBOOK_SCRAPER_ENABLED",
-                "moltbook_scraper_enabled",
-                default=False,
-            ),
-            moltbook_scraper_interval_hours=_int(
-                "MOLTBOOK_SCRAPER_INTERVAL_HOURS",
-                "moltbook_scraper_interval_hours",
-                24,
-            ),
-            moltbook_scraper_alert_threshold_pct=_float(
-                "MOLTBOOK_SCRAPER_ALERT_THRESHOLD_PCT",
-                "moltbook_scraper_alert_threshold_pct",
-                5.0,
+            moltbook_monitor_alert_response_ms=_int(
+                "MOLTBOOK_MONITOR_ALERT_RESPONSE_MS",
+                "moltbook_monitor_alert_response_ms",
+                3000,
             ),
             moltbook_competitors=d.get("moltbook_competitors", []),
             agent_monitor_enabled=_bool_optin(
