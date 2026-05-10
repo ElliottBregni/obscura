@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Paths that never require auth or rate limiting.
 # /peers/ exposes synthetic A2A cards for bridge-only peers (e.g. OpenClaw)
 # so that external A2A clients can discover them without credentials.
-_PUBLIC_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/")
+_PUBLIC_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/", "/webhook/")
 
 _RATE_WINDOW_SECONDS = 60
 
