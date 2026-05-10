@@ -31,14 +31,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 from collections.abc import AsyncGenerator
 
 import httpx
 
+from obscura.core.circuit_breaker import CircuitBreaker, CircuitOpenError
 from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.core.models.a2a import (
     A2AMessage,
@@ -48,6 +52,7 @@ from obscura.core.models.a2a import (
     Artifact,
     TextPart,
 )
+from obscura.core.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_GATEWAY_URL = "http://localhost:18789"
 _DEFAULT_MODEL = "openclaw/main"
 _DEFAULT_TIMEOUT = 120.0
+_MAX_TEXT_LEN = 32_000
+
+# Matches control characters except horizontal tab (\x09) and newline (\x0a)
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+_VALID_ROLES = {"user", "assistant", "system"}
+
+_AUDIT_LOG_PATH = Path.home() / ".obscura" / "logs" / "a2a-bridge.jsonl"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -78,6 +91,8 @@ class OpenClawBridgeConfig:
         Chat completions model identifier.  Defaults to ``"openclaw/main"``.
     timeout:
         HTTP request timeout in seconds.
+    max_retries:
+        Maximum number of retries on 5xx or network errors (default: 2).
 
     """
 
@@ -86,6 +101,60 @@ class OpenClawBridgeConfig:
     model: str = _DEFAULT_MODEL
     timeout: float = _DEFAULT_TIMEOUT
     extra_headers: dict[str, str] = field(default_factory=dict[str, str])
+    max_retries: int = 2
+
+
+# ---------------------------------------------------------------------------
+# Input sanitization helpers
+# ---------------------------------------------------------------------------
+
+
+def _sanitize_text(text: str) -> str:
+    """Strip null bytes and control chars (except \\t and \\n); truncate to 32 000 chars."""
+    cleaned = _CTRL_RE.sub("", text)
+    if len(cleaned) > _MAX_TEXT_LEN:
+        logger.warning(
+            "OpenClawBridge: input text truncated from %d to %d chars",
+            len(cleaned),
+            _MAX_TEXT_LEN,
+        )
+        cleaned = cleaned[:_MAX_TEXT_LEN]
+    return cleaned
+
+
+def _sanitize_history(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """Return a cleaned copy of *history*, dropping entries with invalid role/content."""
+    if not history:
+        return []
+    out: list[dict[str, str]] = []
+    for entry in history:
+        role = entry.get("role")
+        content = entry.get("content")
+        if role not in _VALID_ROLES:
+            logger.warning(
+                "OpenClawBridge: dropping history entry with invalid role %r", role
+            )
+            continue
+        if not isinstance(content, str):
+            logger.warning(
+                "OpenClawBridge: dropping history entry with non-string content (role=%r)",
+                role,
+            )
+            continue
+        out.append({"role": role, "content": content})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Retry predicate
+# ---------------------------------------------------------------------------
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Return True for 5xx HTTP errors and network-level transport errors."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, httpx.TransportError)
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +175,11 @@ class OpenClawBridge:
     def __init__(self, config: OpenClawBridgeConfig) -> None:
         self._config = config
         self._http: httpx.AsyncClient | None = None
+        self._circuit_breaker = CircuitBreaker(
+            name="openclaw",
+            failure_threshold=5,
+            recovery_timeout=30.0,
+        )
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -209,6 +283,29 @@ class OpenClawBridge:
     @staticmethod
     def _make_artifact_id() -> str:
         return f"artifact-{uuid.uuid4().hex[:8]}"
+
+    def _audit_log(
+        self,
+        *,
+        text_len: int,
+        state: str,
+        duration_ms: float,
+    ) -> None:
+        """Append a JSON audit line to ~/.obscura/logs/a2a-bridge.jsonl."""
+        entry = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "direction": "out",
+            "model": self._config.model,
+            "text_len": text_len,
+            "state": state,
+            "duration_ms": round(duration_ms, 2),
+        }
+        try:
+            _AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with _AUDIT_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+        except OSError:
+            logger.debug("OpenClawBridge: failed to write audit log", exc_info=True)
 
     # ------------------------------------------------------------------
     # Core translation methods
@@ -361,6 +458,7 @@ class OpenClawBridge:
             Optional system message prepended to the completions request.
         history:
             Prior conversation turns in OpenAI ``{"role", "content"}`` format.
+            Entries with invalid ``role`` or non-string ``content`` are dropped.
 
         Returns
         -------
@@ -372,45 +470,109 @@ class OpenClawBridge:
         tid = task_id or self._make_task_id()
         cid = context_id or self._make_context_id()
 
+        # --- input sanitization ---
+        clean_text = _sanitize_text(text)
+        clean_history = _sanitize_history(history)
+
         now = datetime.now(UTC)
         input_message = A2AMessage(
             role=A2ARole.USER,
             messageId=f"msg-{uuid.uuid4().hex[:8]}",
-            parts=[TextPart(text=text)],
+            parts=[TextPart(text=clean_text)],
             taskId=tid,
             contextId=cid,
             timestamp=now,
         )
 
         payload = self._build_completions_payload(
-            text,
+            clean_text,
             system_prompt=system_prompt,
-            history=history,
+            history=clean_history or None,
         )
 
-        try:
+        # --- circuit breaker: fast-fail if open ---
+        if not self._circuit_breaker.allow_request():
+            retry_after = self._circuit_breaker.time_until_half_open()
+            error_msg = (
+                f"OpenClaw circuit breaker is open; retry after {retry_after:.1f}s"
+            )
+            logger.warning("OpenClawBridge: %s", error_msg)
+            self._audit_log(
+                text_len=len(clean_text),
+                state="circuit_open",
+                duration_ms=0.0,
+            )
+            return self._build_failed_task(error_msg, task_id=tid, context_id=cid)
+
+        t_start = time.monotonic()
+        final_state = "failed"
+
+        async def _do_post() -> httpx.Response:
             resp = await http.post("/v1/chat/completions", json=payload)
             resp.raise_for_status()
+            return resp
+
+        try:
+            resp = await with_retry(
+                _do_post,
+                max_retries=self._config.max_retries,
+                initial_backoff=1.0,
+                max_backoff=4.0,
+                jitter=False,
+                circuit=self._circuit_breaker,
+                retryable=_is_retryable,
+            )
+        except CircuitOpenError as exc:
+            error_msg = str(exc)
+            logger.warning("OpenClawBridge: %s", error_msg)
+            duration_ms = (time.monotonic() - t_start) * 1000
+            self._audit_log(
+                text_len=len(clean_text),
+                state="circuit_open",
+                duration_ms=duration_ms,
+            )
+            return self._build_failed_task(error_msg, task_id=tid, context_id=cid)
         except httpx.HTTPStatusError as exc:
             error_msg = (
                 f"OpenClaw returned HTTP {exc.response.status_code}: "
                 f"{exc.response.text[:200]}"
             )
             logger.error("OpenClaw HTTP error: %s", error_msg)
+            duration_ms = (time.monotonic() - t_start) * 1000
+            self._audit_log(
+                text_len=len(clean_text),
+                state=final_state,
+                duration_ms=duration_ms,
+            )
             return self._build_failed_task(error_msg, task_id=tid, context_id=cid)
         except httpx.TransportError as exc:
             error_msg = f"OpenClaw transport error: {exc}"
             logger.error("OpenClaw connection error: %s", error_msg)
+            duration_ms = (time.monotonic() - t_start) * 1000
+            self._audit_log(
+                text_len=len(clean_text),
+                state=final_state,
+                duration_ms=duration_ms,
+            )
             return self._build_failed_task(error_msg, task_id=tid, context_id=cid)
 
         body: dict[str, Any] = resp.json()
         reply_text = self._parse_completions_response(body)
+        final_state = "completed"
 
         logger.debug(
             "OpenClaw response: task=%s len=%d chars",
             tid,
             len(reply_text),
         )
+
+        duration_ms = (time.monotonic() - t_start) * 1000
+        self._audit_log(
+            text_len=len(clean_text),
+            state=final_state,
+            duration_ms=duration_ms,
+        )
+
         return self._build_completed_task(
             reply_text,
             task_id=tid,
@@ -429,7 +591,8 @@ class OpenClawBridge:
         ----------
         message:
             Inbound A2A message.  Text is extracted from all
-            :class:`~obscura.core.models.a2a.TextPart` parts.
+            :class:`~obscura.core.models.a2a.TextPart` parts and sanitized
+            before sending.
 
         """
         text = self._extract_text(message)
@@ -483,10 +646,42 @@ class OpenClawBridge:
         tid = task_id or self._make_task_id()
         cid = context_id or self._make_context_id()
 
+        # --- input sanitization ---
+        clean_text = _sanitize_text(text)
+        clean_history = _sanitize_history(history)
+
+        # --- circuit breaker: fast-fail if open ---
+        if not self._circuit_breaker.allow_request():
+            retry_after = self._circuit_breaker.time_until_half_open()
+            error_msg = (
+                f"OpenClaw circuit breaker is open; retry after {retry_after:.1f}s"
+            )
+            logger.warning("OpenClawBridge stream_send: %s", error_msg)
+            now = datetime.now(UTC)
+            err_message = A2AMessage(
+                role=A2ARole.AGENT,
+                messageId=f"msg-{uuid.uuid4().hex[:8]}",
+                parts=[TextPart(text=error_msg)],
+                taskId=tid,
+                contextId=cid,
+                timestamp=now,
+            )
+            yield A2AStatusUpdateEvent(
+                taskId=tid,
+                contextId=cid,
+                status=A2ATaskStatus(
+                    state=A2ATaskState.FAILED,
+                    message=err_message,
+                    timestamp=now,
+                ),
+                final=True,
+            )
+            return
+
         payload = self._build_completions_payload(
-            text,
+            clean_text,
             system_prompt=system_prompt,
-            history=history,
+            history=clean_history or None,
         )
         payload["stream"] = True
 
@@ -537,6 +732,7 @@ class OpenClawBridge:
         try:
             async with http.stream("POST", "/v1/chat/completions", json=payload) as resp:
                 resp.raise_for_status()
+                self._circuit_breaker.record_success()
                 async for raw_line in resp.aiter_lines():
                     line = raw_line.strip()
                     if not line or not line.startswith("data:"):
@@ -566,6 +762,7 @@ class OpenClawBridge:
                         yield _working_event(token)
 
         except Exception as exc:
+            self._circuit_breaker.record_failure()
             logger.debug(
                 "OpenClaw stream_send fell back to non-streaming (task=%s): %s",
                 tid,
@@ -573,11 +770,11 @@ class OpenClawBridge:
             )
             # Graceful fallback: call blocking send and emit a single event
             task = await self.send(
-                text,
+                clean_text,
                 task_id=tid,
                 context_id=cid,
                 system_prompt=system_prompt,
-                history=history,
+                history=clean_history or None,
             )
             reply_text = ""
             if task.artifacts:
