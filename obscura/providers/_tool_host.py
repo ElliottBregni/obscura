@@ -24,11 +24,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from obscura.core.tools import ToolRegistry
+from obscura.integrations.a2a.token_manager import A2ATokenManager
 
 if TYPE_CHECKING:
     from obscura.core.types import ToolSpec
@@ -95,31 +94,11 @@ class BackendToolHostMixin:
     def _read_openclaw_token(self) -> str | None:
         """Return the OpenClaw gateway token, or ``None`` if not configured.
 
-        Resolution order:
-        1. ``OPENCLAW_TOKEN`` environment variable.
-        2. ``~/.openclaw/openclaw.json`` → ``gateway.auth.token``.
+        Delegates to :class:`~obscura.integrations.a2a.token_manager.A2ATokenManager`
+        which checks ``OPENCLAW_TOKEN`` env var first, then falls back to
+        ``~/.openclaw/openclaw.json`` → ``gateway.auth.token``.
         """
-        env_token = os.environ.get("OPENCLAW_TOKEN", "").strip()
-        if env_token:
-            return env_token
-
-        config_path = Path.home() / ".openclaw" / "openclaw.json"
-        if config_path.exists():
-            try:
-                raw_data: object = json.loads(config_path.read_text())
-                data: dict[str, Any] = cast(dict[str, Any], raw_data) if isinstance(raw_data, dict) else {}
-                raw_gateway = data.get("gateway")
-                gateway: dict[str, Any] = cast(dict[str, Any], raw_gateway) if isinstance(raw_gateway, dict) else {}
-                raw_auth = gateway.get("auth")
-                auth: dict[str, Any] = cast(dict[str, Any], raw_auth) if isinstance(raw_auth, dict) else {}
-                raw_token = auth.get("token")
-                token: str | None = raw_token if isinstance(raw_token, str) else None
-                if token:
-                    return token.strip() or None
-            except Exception:
-                logger.debug("Failed to parse %s", config_path, exc_info=True)
-
-        return None
+        return A2ATokenManager().load_openclaw_token()
 
     async def _init_openclaw_bridge(self) -> None:
         """Connect to the OpenClaw gateway and register the ``ask_openclaw`` tool.

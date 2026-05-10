@@ -213,6 +213,46 @@ DEFAULT_REGISTRY.register(WellKnownAgent(
 
 ---
 
+## Secrets Management
+
+Token resolution is centralised in
+`obscura.integrations.a2a.token_manager.A2ATokenManager`.
+
+### Environment variables (production)
+
+Set these in your shell or in `~/.obscura/.env` before starting Obscura:
+
+| Variable            | Used for                              |
+|---------------------|---------------------------------------|
+| `OPENCLAW_TOKEN`    | Bearer token sent to OpenClaw gateway |
+| `OBSCURA_A2A_TOKEN` | Bearer token accepted by Obscura A2A server (inbound) |
+
+A template is provided at `~/.obscura/.env.a2a.example`.
+
+### Token files (local dev fallback)
+
+When the env vars are absent, the manager falls back to on-disk files:
+
+| Token               | File                                  |
+|---------------------|---------------------------------------|
+| `OPENCLAW_TOKEN`    | `~/.openclaw/openclaw.json` → `gateway.auth.token` |
+| `OBSCURA_A2A_TOKEN` | `~/.obscura/a2a-gateway.token`        |
+
+### Token rotation
+
+Use `A2ATokenManager.rotate_a2a_token()` to generate a new 64-hex-character
+Obscura A2A token and persist it automatically:
+
+```python
+from obscura.integrations.a2a.token_manager import A2ATokenManager
+
+new_token = A2ATokenManager().rotate_a2a_token()
+print(f"New token: {new_token}")
+# Update OBSCURA_A2A_TOKEN in ~/.obscura/.env and restart the A2A server.
+```
+
+---
+
 ## Ports reference
 
 | Service         | Port  | Protocol                   |
