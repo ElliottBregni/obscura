@@ -21,6 +21,7 @@ Usage in ``create_standalone_app``::
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import threading
@@ -146,7 +147,7 @@ class A2ABearerAuthMiddleware(BaseHTTPMiddleware):
             )
 
         token = _extract_bearer(request)
-        if token and token in self._tokens:
+        if token and any(hmac.compare_digest(token, t) for t in self._tokens):
             return await call_next(request)
 
         client_ip = _client_ip(request)
@@ -210,7 +211,12 @@ class A2ARateLimitMiddleware(BaseHTTPMiddleware):
     ``Retry-After`` header when the limit is breached.
 
     ``/.well-known/`` paths are exempt (same as bearer auth).
+
+    Every ``_GC_INTERVAL`` requests the stale-bucket GC runs to prevent
+    unbounded memory growth from idle IPs.
     """
+
+    _GC_INTERVAL = 1000
 
     def __init__(
         self,
@@ -225,6 +231,7 @@ class A2ARateLimitMiddleware(BaseHTTPMiddleware):
         # { ip: [timestamp, ...] }
         self._buckets: dict[str, list[float]] = {}
         self._lock = threading.Lock()
+        self._gc_counter: int = 0
 
     @override
     async def dispatch(
@@ -269,6 +276,17 @@ class A2ARateLimitMiddleware(BaseHTTPMiddleware):
                 )
             fresh.append(now)
             self._buckets[ip] = fresh
+
+            # Periodic GC: remove buckets whose last timestamp is expired.
+            self._gc_counter += 1
+            if self._gc_counter >= self._GC_INTERVAL:
+                self._gc_counter = 0
+                stale_cutoff = now - self._window
+                stale_keys = [
+                    k for k, v in self._buckets.items() if not v or v[-1] <= stale_cutoff
+                ]
+                for k in stale_keys:
+                    del self._buckets[k]
 
         return await call_next(request)
 

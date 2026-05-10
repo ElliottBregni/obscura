@@ -70,7 +70,13 @@ class GatewayConfig:
         from ``OBSCURA_NETWORK_TOKEN`` env var or
         ``~/.obscura/network-gateway.token``.
     cors_origins:
-        CORS ``allow_origins`` list. Defaults to ``["*"]``.
+        CORS ``allow_origins`` list. Defaults to OpenClaw's localhost origins.
+    debug:
+        Enable Swagger UI (``/docs``) and ReDoc (``/redoc``). Defaults to
+        ``False`` (disabled in production).
+    max_request_bytes:
+        Maximum request body size in bytes enforced by
+        ``RequestSizeLimitMiddleware``. Defaults to 1 MB.
     rate_limit:
         Max requests per 60-second window per client IP. Defaults to 60.
     request_timeout:
@@ -89,13 +95,20 @@ class GatewayConfig:
     agent_backend: str = "claude"
     agent_model: str = ""
     token: str = ""
-    cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = field(
+        default_factory=lambda: [
+            "http://localhost:18789",
+            "http://127.0.0.1:18789",
+        ]
+    )
     rate_limit: int = 60
     tailscale_enabled: bool = False
     tailscale_url: str = ""  # e.g. https://modernizedai.tail91e620.ts.net
     request_timeout: float = 120.0
     ws_ping_interval: float = 30.0
     session_ttl: float = 3600.0
+    debug: bool = False
+    max_request_bytes: int = 1 * 1024 * 1024  # 1 MB
 
     @classmethod
     def from_obscura_config(cls) -> "GatewayConfig":
@@ -103,16 +116,23 @@ class GatewayConfig:
         from obscura.core.config import ObscuraConfig
 
         cfg = ObscuraConfig.load()
+        cors_origins: list[str] = [
+            "http://localhost:18789",
+            "http://127.0.0.1:18789",
+        ]
+        tailscale_url = cfg.network_gateway_tailscale_url
+        if tailscale_url:
+            cors_origins.append(tailscale_url)
         return cls(
             host=os.environ.get("OBSCURA_GATEWAY_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_GATEWAY_PORT", "18790")),
             agent_backend=cfg.default_backend or "claude",
             agent_model="",
             token=_resolve_token(),
-            cors_origins=["*"],
+            cors_origins=cors_origins,
             rate_limit=cfg.a2a_inbound_rate_limit,
             tailscale_enabled=cfg.network_gateway_tailscale_enabled,
-            tailscale_url=cfg.network_gateway_tailscale_url,
+            tailscale_url=tailscale_url,
             request_timeout=cfg.network_gateway_request_timeout,
             ws_ping_interval=cfg.network_gateway_ws_ping_interval,
             session_ttl=cfg.network_gateway_session_ttl,

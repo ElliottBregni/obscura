@@ -1,17 +1,22 @@
 """obscura.integrations.network_gateway.auth — Bearer auth + rate limiting.
 
-Two middlewares:
+Three middlewares:
 
 * :class:`GatewayBearerAuthMiddleware` — requires ``Authorization: Bearer
   <token>`` on all protected paths.  Skips ``/health`` and
   ``/.well-known/``.  When no token is configured auth is bypassed (warn
-  logged once).
+  logged once).  Uses timing-safe comparison to prevent timing attacks.
 * :class:`GatewayRateLimitMiddleware` — sliding-window per-IP rate limiter.
-  Exempt paths: ``/health``, ``/.well-known/``.
+  Exempt paths: ``/health``, ``/.well-known/``.  GC's stale buckets every
+  1000 requests to prevent unbounded memory growth.
+* :class:`RequestSizeLimitMiddleware` — rejects requests whose
+  ``Content-Length`` exceeds ``max_bytes`` (default 1 MB) with 413 before
+  auth/rate-limit processing reaches the route handler.
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import threading
 import time as _time
@@ -84,7 +89,7 @@ class GatewayBearerAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = _extract_bearer(request)
-        if token and token == self._token:
+        if token and hmac.compare_digest(token, self._token):
             return await call_next(request)
 
         logger.warning(
@@ -105,13 +110,19 @@ class GatewayRateLimitMiddleware(BaseHTTPMiddleware):
 
     Returns ``429 {"error": "rate_limit_exceeded"}`` with a ``Retry-After``
     header when the limit is breached. Public paths are exempt.
+
+    Every ``_GC_INTERVAL`` requests the stale-bucket GC runs to prevent
+    unbounded memory growth from idle IPs.
     """
+
+    _GC_INTERVAL = 1000
 
     def __init__(self, app: Any, *, max_requests: int = 60) -> None:
         super().__init__(app)
         self._max = max_requests
         self._buckets: dict[str, list[float]] = {}
         self._lock = threading.Lock()
+        self._gc_counter: int = 0
 
     @override
     async def dispatch(
@@ -146,7 +157,74 @@ class GatewayRateLimitMiddleware(BaseHTTPMiddleware):
             fresh.append(now)
             self._buckets[ip] = fresh
 
+            # Periodic GC: remove buckets whose last timestamp is expired.
+            self._gc_counter += 1
+            if self._gc_counter >= self._GC_INTERVAL:
+                self._gc_counter = 0
+                stale_cutoff = now - _RATE_WINDOW_SECONDS
+                stale_keys = [
+                    k for k, v in self._buckets.items() if not v or v[-1] <= stale_cutoff
+                ]
+                for k in stale_keys:
+                    del self._buckets[k]
+
         return await call_next(request)
 
 
-__all__ = ["GatewayBearerAuthMiddleware", "GatewayRateLimitMiddleware"]
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose ``Content-Length`` exceeds ``max_bytes``.
+
+    Checks the ``Content-Length`` header before auth or rate-limit processing
+    reaches the route handler.  Skips ``/health`` and ``/.well-known/``
+    paths.  Returns ``413 {"error": "request_too_large"}`` for oversized
+    requests.
+
+    Parameters
+    ----------
+    max_bytes:
+        Maximum allowed request body size in bytes.  Defaults to 1 MB.
+    """
+
+    def __init__(self, app: Any, *, max_bytes: int = 1 * 1024 * 1024) -> None:
+        super().__init__(app)
+        self._max_bytes = max_bytes
+
+    @override
+    async def dispatch(
+        self,
+        request: Any,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        path: str = request.url.path
+
+        # Skip public / health paths.
+        if any(path.startswith(p) for p in _PUBLIC_PREFIXES) or path == "/health":
+            return await call_next(request)
+
+        content_length = request.headers.get("Content-Length")
+        if content_length is not None:
+            try:
+                size = int(content_length)
+            except ValueError:
+                size = 0
+            if size > self._max_bytes:
+                logger.warning(
+                    "Gateway request too large: ip=%s path=%s size=%d max=%d",
+                    _client_ip(request),
+                    path,
+                    size,
+                    self._max_bytes,
+                )
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": "request_too_large"},
+                )
+
+        return await call_next(request)
+
+
+__all__ = [
+    "GatewayBearerAuthMiddleware",
+    "GatewayRateLimitMiddleware",
+    "RequestSizeLimitMiddleware",
+]

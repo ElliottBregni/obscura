@@ -11,7 +11,7 @@ Exposes Obscura agents over HTTP on port 18790 with:
 
 Middleware stack (outermost → innermost, request direction):
 
-    SecurityHeaders → GatewayRateLimit → GatewayBearerAuth → CORS → routes
+    RequestSizeLimit → SecurityHeaders → GatewayRateLimit → GatewayBearerAuth → CORS → routes
 
 Security note: ``/health`` and ``/.well-known/`` are exempt from both auth
 and rate limiting.  All other paths require a valid bearer token when one is
@@ -43,6 +43,7 @@ from obscura.auth.security_headers import SecurityHeadersMiddleware
 from obscura.integrations.network_gateway.auth import (
     GatewayBearerAuthMiddleware,
     GatewayRateLimitMiddleware,
+    RequestSizeLimitMiddleware,
 )
 from obscura.integrations.network_gateway.chat_completions import (
     router as chat_router,
@@ -113,12 +114,14 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         Fully configured application ready to be served with uvicorn.
 
     Security middleware stack (outermost → innermost):
-        1. ``SecurityHeadersMiddleware``
-        2. ``GatewayRateLimitMiddleware``
+        1. ``RequestSizeLimitMiddleware``
+           (rejects oversized bodies before auth/rate-limit)
+        2. ``SecurityHeadersMiddleware``
+        3. ``GatewayRateLimitMiddleware``
            (60 req/min per IP; exempt: ``/health``, ``/.well-known/``)
-        3. ``GatewayBearerAuthMiddleware``
+        4. ``GatewayBearerAuthMiddleware``
            (when token configured; exempt: ``/health``, ``/.well-known/``)
-        4. CORS
+        5. CORS
 
     """
     from obscura.integrations.a2a.definition import DEFAULT_AGENT_DEFINITION
@@ -149,8 +152,8 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
             "OpenAI-compatible + A2A gateway for Obscura AI agents. Runs on port 18790."
         ),
         version="0.7.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if config.debug else None,
+        redoc_url="/redoc" if config.debug else None,
         lifespan=_lifespan,
     )
 
@@ -160,15 +163,15 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
 
     # -- Middleware stack (add_middleware wraps in LIFO order) ---------------
     # Desired inbound order:
-    #   SecurityHeaders → GatewayRateLimit → GatewayBearerAuth → CORS → routes
-    # Register innermost first (CORS), outermost last (SecurityHeaders).
+    #   RequestSizeLimit → SecurityHeaders → GatewayRateLimit → GatewayBearerAuth → CORS → routes
+    # Register innermost first (CORS), outermost last (RequestSizeLimit).
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=config.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "A2A-Version"],
     )
 
     # Bearer auth (token from GatewayConfig.token; empty = no auth)
@@ -177,8 +180,11 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     # Per-IP sliding-window rate limiter
     app.add_middleware(GatewayRateLimitMiddleware, max_requests=config.rate_limit)
 
-    # Security headers (outermost)
+    # Security headers
     app.add_middleware(SecurityHeadersMiddleware)
+
+    # Request body size limit (outermost — catches oversized requests first)
+    app.add_middleware(RequestSizeLimitMiddleware, max_bytes=config.max_request_bytes)
 
     # -- Unauthenticated health probe ---------------------------------------
 

@@ -31,7 +31,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -104,6 +104,9 @@ _MODEL_TO_BACKEND: dict[str, str] = {
     "obscura/codex": "codex",
     "obscura/localllm": "localllm",
 }
+
+_ALLOWED_MODELS: frozenset[str] = frozenset(_MODEL_TO_BACKEND.keys())
+_MAX_PROMPT_BYTES: int = 131_072  # 128 KB
 
 
 def _resolve_backend(model: str, default_backend: str) -> str:
