@@ -77,6 +77,18 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "network_gateway_request_timeout",
         "network_gateway_ws_ping_interval",
         "network_gateway_session_ttl",
+        "moltbook_store_name",
+        "moltbook_store_url",
+        "moltbook_product_category",
+        "moltbook_shopify_store_url",
+        "moltbook_shopify_api_key",
+        "moltbook_lead_gen_enabled",
+        "moltbook_lead_gen_target_titles",
+        "moltbook_lead_gen_max_company_size",
+        "moltbook_scraper_enabled",
+        "moltbook_scraper_interval_hours",
+        "moltbook_scraper_alert_threshold_pct",
+        "moltbook_competitors",
     },
 )
 
@@ -217,6 +229,22 @@ class ObscuraConfig(BaseModel):
     network_gateway_request_timeout: float = 120.0  # OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT
     network_gateway_ws_ping_interval: float = 30.0  # OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL
     network_gateway_session_ttl: float = 3600.0  # OBSCURA_NETWORK_GATEWAY_SESSION_TTL
+
+    # ---------------------------------------------------------------------------
+    # Moltbook business automation
+    # ---------------------------------------------------------------------------
+    moltbook_store_name: str = "Moltbook"
+    moltbook_store_url: str = ""
+    moltbook_product_category: str = ""
+    moltbook_shopify_store_url: str = ""
+    moltbook_shopify_api_key: str = ""
+    moltbook_lead_gen_enabled: bool = False
+    moltbook_lead_gen_target_titles: list = []
+    moltbook_lead_gen_max_company_size: int = 200
+    moltbook_scraper_enabled: bool = False
+    moltbook_scraper_interval_hours: int = 24
+    moltbook_scraper_alert_threshold_pct: float = 5.0
+    moltbook_competitors: list = []
 
     def validate_deployment_safety(self) -> None:
         """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
@@ -500,4 +528,60 @@ class ObscuraConfig(BaseModel):
                 "network_gateway_session_ttl",
                 3600.0,
             ),
+            # Moltbook business automation
+            moltbook_store_name=_str(
+                "MOLTBOOK_STORE_NAME",
+                "moltbook_store_name",
+                "Moltbook",
+            ),
+            moltbook_store_url=_str(
+                "MOLTBOOK_STORE_URL",
+                "moltbook_store_url",
+                "",
+            ),
+            moltbook_product_category=_str(
+                "MOLTBOOK_PRODUCT_CATEGORY",
+                "moltbook_product_category",
+                "",
+            ),
+            moltbook_shopify_store_url=_str(
+                "SHOPIFY_STORE_URL",
+                "moltbook_shopify_store_url",
+                "",
+            ),
+            moltbook_shopify_api_key=_str(
+                "SHOPIFY_API_KEY",
+                "moltbook_shopify_api_key",
+                "",
+            ),
+            moltbook_lead_gen_enabled=_bool_optin(
+                "MOLTBOOK_LEAD_GEN_ENABLED",
+                "moltbook_lead_gen_enabled",
+                default=False,
+            ),
+            moltbook_lead_gen_target_titles=d.get(
+                "moltbook_lead_gen_target_titles",
+                ["CEO", "Founder", "Owner", "Director"],
+            ),
+            moltbook_lead_gen_max_company_size=_int(
+                "MOLTBOOK_LEAD_GEN_MAX_COMPANY_SIZE",
+                "moltbook_lead_gen_max_company_size",
+                200,
+            ),
+            moltbook_scraper_enabled=_bool_optin(
+                "MOLTBOOK_SCRAPER_ENABLED",
+                "moltbook_scraper_enabled",
+                default=False,
+            ),
+            moltbook_scraper_interval_hours=_int(
+                "MOLTBOOK_SCRAPER_INTERVAL_HOURS",
+                "moltbook_scraper_interval_hours",
+                24,
+            ),
+            moltbook_scraper_alert_threshold_pct=_float(
+                "MOLTBOOK_SCRAPER_ALERT_THRESHOLD_PCT",
+                "moltbook_scraper_alert_threshold_pct",
+                5.0,
+            ),
+            moltbook_competitors=d.get("moltbook_competitors", []),
         )
