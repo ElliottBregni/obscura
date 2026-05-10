@@ -72,6 +72,8 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "network_gateway_host",
         "network_gateway_backend",
         "network_gateway_rate_limit",
+        "network_gateway_tailscale_enabled",
+        "network_gateway_tailscale_url",
     },
 )
 
@@ -207,6 +209,8 @@ class ObscuraConfig(BaseModel):
     network_gateway_backend: str = "claude"
     network_gateway_token: str = ""  # loaded from env/file only — never settings.json
     network_gateway_rate_limit: int = 60
+    network_gateway_tailscale_enabled: bool = False
+    network_gateway_tailscale_url: str = ""  # e.g. https://modernizedai.tail91e620.ts.net
 
     def validate_deployment_safety(self) -> None:
         """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
@@ -464,5 +468,15 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_NETWORK_GATEWAY_RATE_LIMIT",
                 "network_gateway_rate_limit",
                 60,
+            ),
+            network_gateway_tailscale_enabled=_bool_optin(
+                "OBSCURA_NETWORK_TAILSCALE_ENABLED",
+                "network_gateway_tailscale_enabled",
+                default=False,
+            ),
+            network_gateway_tailscale_url=_str(
+                "OBSCURA_NETWORK_TAILSCALE_URL",
+                "network_gateway_tailscale_url",
+                "",
             ),
         )

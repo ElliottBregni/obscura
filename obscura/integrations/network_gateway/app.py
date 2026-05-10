@@ -60,12 +60,35 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage embedded A2A server lifecycle alongside the gateway."""
+    from obscura.integrations.network_gateway.tailscale import (
+        configure_tailscale_serve,
+        detect_tailscale_url,
+        remove_tailscale_serve,
+    )
+
     a2a_server = getattr(app.state, "a2a_server", None)
+    gateway_config: GatewayConfig | None = getattr(app.state, "gateway_config", None)
+
     if a2a_server is not None:
         await a2a_server.startup()
+
+    # Tailscale serve — expose gateway to tailnet peers
+    _tailscale_active = False
+    if gateway_config is not None and gateway_config.tailscale_enabled:
+        _tailscale_active = await configure_tailscale_serve(gateway_config.port)
+        if _tailscale_active:
+            ts_url = (
+                detect_tailscale_url()
+                or gateway_config.tailscale_url
+                or "<tailscale-url>"
+            )
+            logger.info("Gateway also reachable at %s", ts_url)
+
     try:
         yield
     finally:
+        if _tailscale_active and gateway_config is not None:
+            await remove_tailscale_serve(gateway_config.port)
         if a2a_server is not None:
             await a2a_server.shutdown()
 

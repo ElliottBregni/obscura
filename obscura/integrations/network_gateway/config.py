@@ -82,6 +82,8 @@ class GatewayConfig:
     token: str = ""
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     rate_limit: int = 60
+    tailscale_enabled: bool = False
+    tailscale_url: str = ""  # e.g. https://modernizedai.tail91e620.ts.net
 
     @classmethod
     def from_obscura_config(cls) -> "GatewayConfig":
@@ -97,6 +99,8 @@ class GatewayConfig:
             token=_resolve_token(),
             cors_origins=["*"],
             rate_limit=cfg.a2a_inbound_rate_limit,
+            tailscale_enabled=cfg.network_gateway_tailscale_enabled,
+            tailscale_url=cfg.network_gateway_tailscale_url,
         )
 
 
