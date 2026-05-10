@@ -17,6 +17,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TOKEN_FILE = Path.home() / ".obscura" / "network-gateway.token"
+_DEFAULT_WEBHOOK_SECRET_FILE = Path.home() / ".obscura" / "network-gateway-webhook.secret"
 
 # Obscura backends advertised by the gateway
 KNOWN_BACKENDS: tuple[str, ...] = (
@@ -45,6 +46,22 @@ def _resolve_token() -> str:
             logger.debug("Network gateway: loaded token from %s", _DEFAULT_TOKEN_FILE)
             return line
 
+    return ""
+
+
+def _resolve_webhook_secret() -> str:
+    """Return the webhook HMAC secret, or empty string if not configured."""
+    env_val = os.environ.get("OBSCURA_WEBHOOK_SECRET", "").strip()
+    if env_val:
+        return env_val
+    try:
+        lines = _DEFAULT_WEBHOOK_SECRET_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for raw in lines:
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            return line
     return ""
 
 
@@ -95,6 +112,7 @@ class GatewayConfig:
     agent_backend: str = "claude"
     agent_model: str = ""
     token: str = ""
+    webhook_secret: str = field(default_factory=_resolve_webhook_secret)
     cors_origins: list[str] = field(
         default_factory=lambda: [
             "http://localhost:18789",
@@ -122,7 +140,14 @@ class GatewayConfig:
         ]
         tailscale_url = cfg.network_gateway_tailscale_url
         if tailscale_url:
-            cors_origins.append(tailscale_url)
+            if tailscale_url != "*" and tailscale_url.startswith("https://"):
+                cors_origins.append(tailscale_url)
+            else:
+                logger.warning(
+                    "GatewayConfig: ignoring unsafe cors tailscale_url=%r "
+                    "(must start with https://)",
+                    tailscale_url,
+                )
         return cls(
             host=os.environ.get("OBSCURA_GATEWAY_HOST", "0.0.0.0"),
             port=int(os.environ.get("OBSCURA_GATEWAY_PORT", "18790")),
@@ -136,6 +161,7 @@ class GatewayConfig:
             request_timeout=cfg.network_gateway_request_timeout,
             ws_ping_interval=cfg.network_gateway_ws_ping_interval,
             session_ttl=cfg.network_gateway_session_ttl,
+            debug=os.environ.get("OBSCURA_GATEWAY_DEBUG", "").lower() in ("1", "true"),
         )
 
 

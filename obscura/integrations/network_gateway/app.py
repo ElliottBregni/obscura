@@ -32,7 +32,10 @@ Or programmatically::
 
 from __future__ import annotations
 
+import hmac as _hmac
+import json as _json
 import logging
+import re as _re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +48,7 @@ from obscura.integrations.network_gateway.auth import (
     GatewayBearerAuthMiddleware,
     GatewayRateLimitMiddleware,
     RequestSizeLimitMiddleware,
+    _client_ip,
 )
 from obscura.integrations.network_gateway.chat_completions import (
     router as chat_router,
@@ -161,6 +165,7 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     # Stash config + A2A server on state so route handlers can access them.
     app.state.gateway_config = config
     app.state.a2a_server = a2a_server
+    app.state.webhook_secret = config.webhook_secret
 
     # -- Middleware stack (add_middleware wraps in LIFO order) ---------------
     # Desired inbound order:
@@ -173,6 +178,7 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "A2A-Version"],
+        expose_headers=[],  # don't leak internal response headers to JS callers
     )
 
     # Bearer auth (token from GatewayConfig.token; empty = no auth)
@@ -245,34 +251,82 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
 
         Extracts the task result text and injects it into the REPL channel
         so it appears as a peer message in the active session.
+
+        Security: when ``app.state.webhook_secret`` is set, the request must
+        carry ``X-Webhook-Signature: sha256=<hex>`` computed over the raw body
+        using the shared secret.  When absent the handler logs a loud warning
+        and continues (permissive until OpenClaw gains signing support).
         """
+        raw = await request.body()
+
+        # -- HMAC verification -----------------------------------------------
+        wh_secret: str = getattr(request.app.state, "webhook_secret", "")
+        if wh_secret:
+            sig_header = request.headers.get("X-Webhook-Signature", "")
+            expected = "sha256=" + _hmac.new(
+                wh_secret.encode(), raw, "sha256"
+            ).hexdigest()
+            if not sig_header or not _hmac.compare_digest(sig_header, expected):
+                logger.warning(
+                    "webhook_a2a: invalid/missing signature from ip=%s",
+                    _client_ip(request),
+                )
+                return JSONResponse({"error": "invalid_signature"}, status_code=401)
+        else:
+            logger.warning(
+                "webhook_a2a: no webhook secret configured — request from ip=%s accepted "
+                "without signature verification. Set OBSCURA_WEBHOOK_SECRET or "
+                "~/.obscura/network-gateway-webhook.secret to require signing.",
+                _client_ip(request),
+            )
+
+        # -- Parse + structural validation -----------------------------------
         try:
-            body: dict = await request.json()
+            body: dict = _json.loads(raw)
         except Exception:
             return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_payload"}, status_code=400)
+
+        if len(body) > 50:
+            return JSONResponse({"error": "payload_too_large"}, status_code=400)
 
         task_id = body.get("task_id") or body.get("id", "?")
         task_type = body.get("type", "push_notification")
 
-        # Extract result text from various payload shapes
+        # -- Extract result text from various payload shapes -----------------
         text: str = ""
         if "result" in body:
-            text = str(body["result"])
+            result_val = body["result"]
+            text = result_val if isinstance(result_val, str) else str(result_val)
         elif "artifacts" in body:
             for art in body.get("artifacts", []):
+                if not isinstance(art, dict):
+                    continue
                 for part in art.get("parts", []):
                     if isinstance(part, dict) and part.get("kind") == "text":
-                        text += part.get("text", "")
+                        part_text = part.get("text", "")
+                        if isinstance(part_text, str):
+                            text += part_text
         elif "message" in body:
-            for part in body.get("message", {}).get("parts", []):
-                if isinstance(part, dict) and part.get("kind") == "text":
-                    text += part.get("text", "")
+            msg = body.get("message")
+            if isinstance(msg, dict):
+                for part in msg.get("parts", []):
+                    if isinstance(part, dict) and part.get("kind") == "text":
+                        part_text = part.get("text", "")
+                        if isinstance(part_text, str):
+                            text += part_text
         if not text:
             text = f"[{task_type}] task={task_id}"
 
-        sender = body.get("from") or body.get("agent", "openclaw")
+        # -- Sanitize sender identity ----------------------------------------
+        raw_sender = str(body.get("from") or body.get("agent") or "")[:64]
+        # Allow alphanumeric + safe punctuation only; fall back to generic label
+        sender = raw_sender if _re.fullmatch(r"[\w.\-]+", raw_sender) else "webhook-peer"
 
-        # Inject into REPL channel (best-effort — silently skips if no REPL active)
+        # -- Inject into REPL channel ----------------------------------------
+        # Best-effort — silently skips if no REPL active
         try:
             from obscura.integrations.messaging.channel_inject import (
                 ChannelMessage,
@@ -292,7 +346,10 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         except Exception:
             logger.debug("webhook_a2a: channel inject failed", exc_info=True)
 
-        logger.info("webhook/a2a: received task=%s type=%s from=%s", task_id, task_type, sender)
+        logger.info(
+            "webhook/a2a: received task=%s type=%s from=%s",
+            task_id, task_type, sender,
+        )
         return JSONResponse({"ok": True, "task_id": task_id})
 
     logger.info(

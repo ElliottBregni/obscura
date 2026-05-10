@@ -27,10 +27,16 @@ from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
-# Paths that never require auth or rate limiting.
-# /peers/ exposes synthetic A2A cards for bridge-only peers (e.g. OpenClaw)
-# so that external A2A clients can discover them without credentials.
-_PUBLIC_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/", "/webhook/")
+# Paths exempt from bearer-token authentication.
+# /webhook/ is excluded from *bearer auth* because it uses HMAC signing instead;
+# it is NOT exempt from rate limiting or size limits.
+# /peers/ exposes synthetic A2A cards for bridge-only peers (e.g. OpenClaw).
+_AUTH_EXEMPT_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/", "/webhook/")
+
+# Paths exempt from rate limiting and request-size enforcement.
+# /webhook/ is intentionally absent — it must be rate-limited to prevent
+# queue floods and CPU exhaustion via unauthenticated bulk delivery.
+_RATE_EXEMPT_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/")
 
 _RATE_WINDOW_SECONDS = 60
 
@@ -83,7 +89,7 @@ class GatewayBearerAuthMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         path: str = request.url.path
 
-        if any(path.startswith(p) for p in _PUBLIC_PREFIXES) or path == "/health":
+        if any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES) or path == "/health":
             return await call_next(request)
 
         # No token configured → open access
@@ -134,7 +140,7 @@ class GatewayRateLimitMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         path: str = request.url.path
 
-        if any(path.startswith(p) for p in _PUBLIC_PREFIXES) or path == "/health":
+        if any(path.startswith(p) for p in _RATE_EXEMPT_PREFIXES) or path == "/health":
             return await call_next(request)
 
         ip = _client_ip(request)
@@ -200,7 +206,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         path: str = request.url.path
 
         # Skip public / health paths.
-        if any(path.startswith(p) for p in _PUBLIC_PREFIXES) or path == "/health":
+        if any(path.startswith(p) for p in _RATE_EXEMPT_PREFIXES) or path == "/health":
             return await call_next(request)
 
         content_length = request.headers.get("Content-Length")

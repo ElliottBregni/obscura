@@ -1,10 +1,9 @@
 """obscura.auth.security_headers -- Defense-in-depth HTTP response headers.
 
 Adds the low-risk, broadly-compatible set of security headers recommended
-by OWASP to every response. Tuned for an API server that also serves a
-SPA bundle — CSP uses ``connect-src 'self' https://*.supabase.co`` and
-does NOT set ``frame-ancestors 'none'`` because some routes legitimately
-render SSE in iframes during e2e testing. Override via env:
+by OWASP to every response. Tuned for a pure API / gateway server.
+
+Override via env:
 
 * ``OBSCURA_SECURITY_HEADERS_DISABLE=1`` — skip adding any headers.
 * ``OBSCURA_CSP_OVERRIDE=<policy>`` — replace the built-in CSP.
@@ -30,7 +29,7 @@ _DEFAULT_CSP = (
     "img-src 'self' data: https:; "
     "font-src 'self' data:; "
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
-    "frame-ancestors 'self'; "
+    "frame-ancestors 'none'; "
     "base-uri 'self'; "
     "form-action 'self'"
 )
@@ -76,6 +75,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
         # Don't leak server fingerprint. Starlette's MutableHeaders
         # supports `del` but not `pop`.
         if "Server" in headers:
