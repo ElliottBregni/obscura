@@ -40,6 +40,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from obscura.auth.security_headers import SecurityHeadersMiddleware
+from obscura.integrations.messaging.channel_inject import subscribe, unsubscribe
 from obscura.integrations.network_gateway.auth import (
     GatewayBearerAuthMiddleware,
     GatewayRateLimitMiddleware,
@@ -88,6 +89,17 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
   .msg.user { background: #1c2a3e; border: 1px solid #264a74; align-self: flex-end; color: #79c0ff; }
   .msg.assistant { background: #161b22; border: 1px solid #21262d; align-self: flex-start; white-space: pre-wrap; }
   .msg.thinking { color: #6e7681; font-style: italic; }
+  .msg.incoming {
+    background: #1c2a1c; border: 1px solid #2d4a1e;
+    border-left: 3px solid #3fb950;
+    align-self: flex-start;
+  }
+  .msg.incoming .platform-badge {
+    font-size: 11px; color: #3fb950; margin-bottom: 4px; display: block;
+  }
+  .msg.incoming .reply-hint {
+    font-size: 11px; color: #6e7681; margin-top: 6px; display: block;
+  }
   #footer { padding: 12px 16px; border-top: 1px solid #21262d; display: flex; gap: 8px; }
   #input {
     flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px;
@@ -127,6 +139,18 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
   let sessionId = null;
   let currentMsg = null;
   let thinking = null;
+  let unreadCount = 0;
+
+  function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text));
+    return d.innerHTML;
+  }
+
+  window.addEventListener('focus', () => {
+    unreadCount = 0;
+    document.title = 'Obscura Agent';
+  });
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -175,6 +199,15 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
         sendBtn.disabled = false;
         input.disabled = false;
         statusEl.textContent = 'error';
+      } else if (frame.type === 'incoming') {
+        const platformIcons = {whatsapp:'📱', telegram:'✈️', imessage:'🍎', signal:'🔒', sms:'💬'};
+        const icon = platformIcons[frame.platform] || '💬';
+        const div = document.createElement('div');
+        div.className = 'msg incoming';
+        div.innerHTML = `<span class="platform-badge">${icon} ${escapeHtml(frame.platform)} · ${escapeHtml(frame.sender)}</span>${escapeHtml(frame.text)}<span class="reply-hint">↩ reply to respond via ${escapeHtml(frame.platform)}</span>`;
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+        document.title = `(${++unreadCount}) Obscura Agent`;
       }
     };
   }
@@ -265,8 +298,11 @@ async def _sa_stream_completion(
     content: str,
     backend: str,
     model: str,
-) -> None:
-    """Run one agent turn and stream tokens back over *websocket*."""
+) -> str:
+    """Run one agent turn and stream tokens back over *websocket*.
+
+    Returns the full assistant response text (empty string on error).
+    """
     store = get_session_store()
     accumulated: list[str] = []
 
@@ -281,7 +317,7 @@ async def _sa_stream_completion(
         await websocket.send_json(
             {"type": "error", "message": str(exc), "code": "internal_error"}
         )
-        return
+        return ""
 
     assistant_text = "".join(accumulated)
 
@@ -291,6 +327,7 @@ async def _sa_stream_completion(
         await store.append(session_id, "assistant", assistant_text)
 
     await websocket.send_json({"type": "done", "session_id": session_id, "usage": {}})
+    return assistant_text
 
 
 # ---------------------------------------------------------------------------
@@ -391,13 +428,35 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
         store = get_session_store()
         active_session_ids: set[str] = set()
 
+        # Mutable cell to hold the reply_fn of the most-recently received platform message.
+        _active_reply: list[Any] = [None]  # [reply_fn | None]
+
+        # Subscribe to incoming platform messages (WhatsApp / iMessage / Telegram …)
+        sub_queue = subscribe()
+
         async def _keepalive() -> None:
             while True:
                 await asyncio.sleep(_sa_ping_interval)
                 with contextlib.suppress(Exception):
                     await websocket.send_json({"type": "ping"})
 
+        async def _drain_incoming() -> None:
+            """Forward platform messages from the channel bus to the browser."""
+            while True:
+                msg = await sub_queue.get()
+                label = msg.display_name or msg.sender_id
+                _active_reply[0] = msg.reply_fn
+                with contextlib.suppress(Exception):
+                    await websocket.send_json({
+                        "type": "incoming",
+                        "platform": msg.platform,
+                        "sender": label,
+                        "sender_id": msg.sender_id,
+                        "text": msg.text,
+                    })
+
         keepalive_task = asyncio.create_task(_keepalive())
+        drain_task = asyncio.create_task(_drain_incoming())
 
         try:
             while True:
@@ -442,7 +501,7 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                 session_id: str = str(frame.get("session_id") or uuid.uuid4())
                 active_session_ids.add(session_id)
 
-                await _sa_stream_completion(
+                assistant_text = await _sa_stream_completion(
                     websocket,
                     session_id,
                     content,
@@ -450,14 +509,27 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                     _sa_model,
                 )
 
+                # If a platform message was pending, route the reply back to its origin.
+                reply_fn = _active_reply[0]
+                if reply_fn is not None and assistant_text:
+                    _active_reply[0] = None
+                    try:
+                        await reply_fn(assistant_text)
+                    except Exception:
+                        logger.exception("Failed to send reply to platform via reply_fn")
+
         except WebSocketDisconnect:
             logger.debug("Standalone agent WS disconnected ids=%s", active_session_ids)
         except Exception:
             logger.exception("Unhandled error in standalone_ws")
         finally:
             keepalive_task.cancel()
+            drain_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await keepalive_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await drain_task
+            unsubscribe(sub_queue)
             for sid in active_session_ids:
                 await store.clear(sid)
 

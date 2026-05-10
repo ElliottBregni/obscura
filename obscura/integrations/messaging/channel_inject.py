@@ -53,6 +53,25 @@ def get_channel_queue() -> asyncio.Queue[ChannelMessage]:
     return _ensure_queue()
 
 
+# Subscriber list — each entry is an asyncio.Queue that gets a copy of every push
+_subscribers: list[asyncio.Queue[ChannelMessage]] = []
+
+
+def subscribe() -> asyncio.Queue[ChannelMessage]:
+    """Create and register a subscriber queue. Returns the queue."""
+    q: asyncio.Queue[ChannelMessage] = asyncio.Queue(maxsize=64)
+    _subscribers.append(q)
+    return q
+
+
+def unsubscribe(q: asyncio.Queue[ChannelMessage]) -> None:
+    """Remove a subscriber queue (call on WebSocket disconnect)."""
+    try:
+        _subscribers.remove(q)
+    except ValueError:
+        pass
+
+
 def push_channel_message(msg: ChannelMessage) -> bool:
     """Sanitize and non-blocking push. Returns False if queue is full (message dropped)."""
     # Sanitize in place — create a new dataclass rather than mutate the caller's object
@@ -66,9 +85,17 @@ def push_channel_message(msg: ChannelMessage) -> bool:
     )
     try:
         _ensure_queue().put_nowait(safe)
-        return True
     except asyncio.QueueFull:
         return False
 
+    # Broadcast to all subscribers (non-blocking, drop if full)
+    for sub in list(_subscribers):
+        try:
+            sub.put_nowait(safe)
+        except asyncio.QueueFull:
+            pass  # subscriber too slow — drop silently
 
-__all__ = ["ChannelMessage", "get_channel_queue", "push_channel_message"]
+    return True
+
+
+__all__ = ["ChannelMessage", "get_channel_queue", "push_channel_message", "subscribe", "unsubscribe"]
