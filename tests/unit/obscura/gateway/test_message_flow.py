@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,6 +31,7 @@ from obscura.gateway.poll_daemon import GatewayPollDaemon
 from obscura.integrations.messaging.identity import build_conversation_key
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.messaging.router import ChannelRouter, ChannelRouterConfig
+from obscura.integrations.messaging.store import ConversationStore, MessageDedupeStore
 
 pytestmark = pytest.mark.unit
 
@@ -44,29 +47,37 @@ def _make_msg(
     text: str = "hello",
     message_id: str | None = None,
 ) -> PlatformMessage:
+    """Build a PlatformMessage with a unique message_id by default."""
     return PlatformMessage(
         platform=platform,
         account_id="test",
         channel_id=f"dm:{sender}",
         sender_id=sender,
         recipient_id="me",
-        message_id=message_id or f"{platform}-msg-001",
+        message_id=message_id or str(uuid.uuid4()),
         text=text,
         timestamp=datetime.datetime.now(tz=datetime.UTC),
         metadata={},
     )
 
 
-def _conv_key(
-    platform: str = "whatsapp",
-    sender: str = "+15550001234",
-) -> str:
-    return build_conversation_key(
-        platform=platform,
-        account_id="test",
-        channel_id=f"dm:{sender}",
-        participants=[sender],
+def _build_bridge(
+    mock_orchestrator: MagicMock,
+    db_path: Path,
+) -> GatewayNetworkBridge:
+    """Build an isolated bridge with its own SQLite state in *db_path*."""
+    store = ConversationStore(db_path=db_path)
+    dedupe = MessageDedupeStore(db_path=db_path)
+    runner = GatewayAgentRunner(mock_orchestrator)
+    router = ChannelRouter(
+        runner=runner,
+        config=ChannelRouterConfig(send_typing_indicator=False),
+        store=store,
+        dedupe=dedupe,
     )
+    b = GatewayNetworkBridge(mock_orchestrator, router)
+    b._started = True  # skip actual start()
+    return b
 
 
 # ---------------------------------------------------------------------------
@@ -104,19 +115,12 @@ def mock_adapter() -> MagicMock:
 
 
 @pytest.fixture
-def bridge(mock_orchestrator: MagicMock) -> GatewayNetworkBridge:
-    runner = GatewayAgentRunner(mock_orchestrator)
-    router = ChannelRouter(
-        runner=runner,
-        config=ChannelRouterConfig(send_typing_indicator=False),
-    )
-    b = GatewayNetworkBridge(mock_orchestrator, router)
-    b._started = True  # skip actual start()
-    return b
+def bridge(mock_orchestrator: MagicMock, tmp_path: Path) -> GatewayNetworkBridge:
+    return _build_bridge(mock_orchestrator, tmp_path / "state.db")
 
 
 # ---------------------------------------------------------------------------
-# 1. GatewayAgentRunner calls orchestrator
+# 1. GatewayAgentRunner calls orchestrator with correct args
 # ---------------------------------------------------------------------------
 
 
@@ -241,7 +245,7 @@ async def test_dispatch_discord(
 
 
 # ---------------------------------------------------------------------------
-# 7. Duplicate message_id is deduped
+# 7. Same message_id dispatched twice is deduped
 # ---------------------------------------------------------------------------
 
 
@@ -252,7 +256,8 @@ async def test_dispatch_deduplicates(
 ) -> None:
     bridge.router.register("imessage", mock_adapter)
 
-    msg = _make_msg("imessage", message_id="dedup-001")
+    fixed_id = "dedup-" + str(uuid.uuid4())
+    msg = _make_msg("imessage", message_id=fixed_id)
     await bridge.dispatch(msg)
     await bridge.dispatch(msg)  # same message_id — should be deduped
 
@@ -284,44 +289,30 @@ async def test_dispatch_await_returns_response_string(
 
 async def test_dispatch_await_persists_session_history(
     mock_orchestrator: MagicMock,
+    tmp_path: Path,
     mock_adapter: MagicMock,
 ) -> None:
-    # Use a fresh bridge+router so ConversationStore starts empty
-    runner = GatewayAgentRunner(mock_orchestrator)
-    router = ChannelRouter(
-        runner=runner,
-        config=ChannelRouterConfig(send_typing_indicator=False),
-    )
-    fresh_bridge = GatewayNetworkBridge(mock_orchestrator, router)
-    fresh_bridge._started = True
+    # Fresh isolated bridge so the store starts empty
+    fresh_bridge = _build_bridge(mock_orchestrator, tmp_path / "hist_state.db")
     fresh_bridge.router.register("whatsapp", mock_adapter)
 
     sender = "+15559990001"
-    msg1 = PlatformMessage(
-        platform="whatsapp",
-        account_id="test",
-        channel_id=f"dm:{sender}",
-        sender_id=sender,
-        recipient_id="me",
-        message_id="history-msg-001",
-        text="first message",
-        timestamp=datetime.datetime.now(tz=datetime.UTC),
-        metadata={},
-    )
-    msg2 = PlatformMessage(
-        platform="whatsapp",
-        account_id="test",
-        channel_id=f"dm:{sender}",
-        sender_id=sender,
-        recipient_id="me",
-        message_id="history-msg-002",
-        text="second message",
-        timestamp=datetime.datetime.now(tz=datetime.UTC),
-        metadata={},
-    )
 
-    await fresh_bridge.dispatch_await(msg1)
-    await fresh_bridge.dispatch_await(msg2)
+    def _wa_msg(text: str) -> PlatformMessage:
+        return PlatformMessage(
+            platform="whatsapp",
+            account_id="test",
+            channel_id=f"dm:{sender}",
+            sender_id=sender,
+            recipient_id="me",
+            message_id=str(uuid.uuid4()),
+            text=text,
+            timestamp=datetime.datetime.now(tz=datetime.UTC),
+            metadata={},
+        )
+
+    await fresh_bridge.dispatch_await(_wa_msg("first message"))
+    await fresh_bridge.dispatch_await(_wa_msg("second message"))
 
     conv_key = build_conversation_key(
         platform="whatsapp",
@@ -344,24 +335,42 @@ async def test_dispatch_await_persists_session_history(
 
 
 async def test_clear_session(
-    bridge: GatewayNetworkBridge,
+    mock_orchestrator: MagicMock,
+    tmp_path: Path,
     mock_adapter: MagicMock,
 ) -> None:
-    bridge.router.register("whatsapp", mock_adapter)
+    fresh_bridge = _build_bridge(mock_orchestrator, tmp_path / "clear_state.db")
+    fresh_bridge.router.register("whatsapp", mock_adapter)
 
-    # Create a session by dispatching one message
-    await bridge.dispatch_await(_make_msg("whatsapp", message_id="msg-setup"))
+    sender = "+15558887777"
+    msg = PlatformMessage(
+        platform="whatsapp",
+        account_id="test",
+        channel_id=f"dm:{sender}",
+        sender_id=sender,
+        recipient_id="me",
+        message_id=str(uuid.uuid4()),
+        text="hello",
+        timestamp=datetime.datetime.now(tz=datetime.UTC),
+        metadata={},
+    )
+    await fresh_bridge.dispatch_await(msg)
 
-    conv_key = _conv_key("whatsapp")
-    # Verify session exists with history
-    history_before = await bridge.get_session_context(conv_key)
+    conv_key = build_conversation_key(
+        platform="whatsapp",
+        account_id="test",
+        channel_id=f"dm:{sender}",
+        participants=[sender],
+    )
+
+    history_before = await fresh_bridge.get_session_context(conv_key)
     assert history_before is not None
     assert len(history_before) > 0
 
-    cleared = await bridge.clear_session(conv_key)
+    cleared = await fresh_bridge.clear_session(conv_key)
     assert cleared is True
 
-    history_after = await bridge.get_session_context(conv_key)
+    history_after = await fresh_bridge.get_session_context(conv_key)
     assert history_after == []
 
 
@@ -371,82 +380,85 @@ async def test_clear_session(
 
 
 async def test_poll_daemon_dispatches_all_platforms(
-    bridge: GatewayNetworkBridge,
     mock_orchestrator: MagicMock,
+    tmp_path: Path,
 ) -> None:
-    daemon = GatewayPollDaemon(bridge, poll_interval=0.0)
+    fresh_bridge = _build_bridge(mock_orchestrator, tmp_path / "poll_state.db")
+    daemon = GatewayPollDaemon(fresh_bridge, poll_interval=0.05)
 
-    # Build per-platform adapters with distinct message_ids to avoid dedup
+    # Build per-platform adapters — unique message_ids so dedup doesn't suppress
     imessage_adapter = MagicMock()
     imessage_adapter.poll = AsyncMock(
-        return_value=[_make_msg("imessage", message_id="im-poll-001")]
+        return_value=[_make_msg("imessage")]
     )
     imessage_adapter.send = AsyncMock(return_value=True)
 
     whatsapp_adapter = MagicMock()
     whatsapp_adapter.poll = AsyncMock(
-        return_value=[_make_msg("whatsapp", message_id="wa-poll-001")]
+        return_value=[_make_msg("whatsapp")]
     )
     whatsapp_adapter.send = AsyncMock(return_value=True)
 
     discord_adapter = MagicMock()
     discord_adapter.poll = AsyncMock(
-        return_value=[_make_msg("discord", message_id="dc-poll-001")]
+        return_value=[_make_msg("discord")]
     )
     discord_adapter.send = AsyncMock(return_value=True)
 
-    # Register with both daemon (for poll) and router (for send)
+    # Register with both daemon (poll loop) and router (send replies)
     daemon.register("imessage", imessage_adapter)
     daemon.register("whatsapp", whatsapp_adapter)
     daemon.register("discord", discord_adapter)
-    bridge.router.register("imessage", imessage_adapter)
-    bridge.router.register("whatsapp", whatsapp_adapter)
-    bridge.router.register("discord", discord_adapter)
+    fresh_bridge.router.register("imessage", imessage_adapter)
+    fresh_bridge.router.register("whatsapp", whatsapp_adapter)
+    fresh_bridge.router.register("discord", discord_adapter)
 
     await daemon.start()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     await daemon.stop()
 
     imessage_adapter.poll.assert_called()
     whatsapp_adapter.poll.assert_called()
     discord_adapter.poll.assert_called()
 
-    # At least one execute_tool call per platform (3 messages dispatched)
+    # At least one execute_tool call per platform
     assert mock_orchestrator.execute_tool.call_count >= 3
 
 
 # ---------------------------------------------------------------------------
-# 12. GatewayPollDaemon isolates errors — healthy platform still sends
+# 12. GatewayPollDaemon isolates platform errors
 # ---------------------------------------------------------------------------
 
 
 async def test_poll_daemon_isolates_platform_errors(
-    bridge: GatewayNetworkBridge,
+    mock_orchestrator: MagicMock,
+    tmp_path: Path,
 ) -> None:
-    daemon = GatewayPollDaemon(bridge, poll_interval=0.0)
+    fresh_bridge = _build_bridge(mock_orchestrator, tmp_path / "isolate_state.db")
+    daemon = GatewayPollDaemon(fresh_bridge, poll_interval=0.05)
 
-    # Broken adapter — poll raises
+    # Broken adapter — poll always raises
     broken_adapter = MagicMock()
     broken_adapter.poll = AsyncMock(side_effect=RuntimeError("adapter down"))
     broken_adapter.send = AsyncMock(return_value=True)
 
-    # Healthy adapter — returns a message
+    # Healthy adapter — returns one message per poll
     healthy_adapter = MagicMock()
     healthy_adapter.poll = AsyncMock(
-        return_value=[_make_msg("whatsapp", message_id="healthy-001")]
+        return_value=[_make_msg("whatsapp")]
     )
     healthy_adapter.send = AsyncMock(return_value=True)
 
     daemon.register("imessage", broken_adapter)
     daemon.register("whatsapp", healthy_adapter)
-    bridge.router.register("imessage", broken_adapter)
-    bridge.router.register("whatsapp", healthy_adapter)
+    fresh_bridge.router.register("imessage", broken_adapter)
+    fresh_bridge.router.register("whatsapp", healthy_adapter)
 
     await daemon.start()
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     await daemon.stop()
 
-    # The healthy adapter's send should have been called
+    # Healthy platform's send was called despite the broken platform erroring
     healthy_adapter.send.assert_called()
-    # The broken adapter's poll was called but raised; daemon kept running
+    # Broken adapter's poll was attempted
     broken_adapter.poll.assert_called()
