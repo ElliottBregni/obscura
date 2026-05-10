@@ -28,6 +28,12 @@ scripts/test_private_key.pem
 scripts/test_jwks.json
 
 # Browser-extension signing keys — never commit
+
+# =============================================================================
+# Generated skills (moved to .obscura/skills/)
+# =============================================================================
+.agents/skills/
+.obscura/skills/*/
 packages/browser-extension/.keys/*.pem
 packages/browser-extension/.keys/*.key
 packages/browser-extension-keys/

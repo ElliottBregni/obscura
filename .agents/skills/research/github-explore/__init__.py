@@ -1,1 +1,0 @@
-"""github-explore skill module."""

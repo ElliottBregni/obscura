@@ -1,1 +1,0 @@
-"""etl-pipeline skill module."""

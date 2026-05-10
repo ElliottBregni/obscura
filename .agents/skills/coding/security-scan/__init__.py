@@ -1,1 +1,0 @@
-"""security-scan skill module."""

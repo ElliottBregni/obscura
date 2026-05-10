@@ -1,1 +1,0 @@
-"""status-update skill module."""

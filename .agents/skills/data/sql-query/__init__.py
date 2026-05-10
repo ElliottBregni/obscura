@@ -1,1 +1,0 @@
-"""sql-query skill module."""

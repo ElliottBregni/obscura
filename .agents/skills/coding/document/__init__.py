@@ -1,1 +1,0 @@
-"""document skill module."""

@@ -1,1 +1,0 @@
-"""git-history skill module."""

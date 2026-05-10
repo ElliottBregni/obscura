@@ -1,1 +1,0 @@
-"""slack-format skill module."""

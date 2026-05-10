@@ -1,1 +1,0 @@
-"""lint-fix skill module."""

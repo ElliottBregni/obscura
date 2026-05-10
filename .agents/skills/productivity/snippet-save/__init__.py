@@ -1,1 +1,0 @@
-"""snippet-save skill module."""

@@ -1,1 +1,0 @@
-"""code-metrics skill module."""

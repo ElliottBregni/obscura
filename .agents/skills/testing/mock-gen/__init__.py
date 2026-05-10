@@ -1,1 +1,0 @@
-"""mock-gen skill module."""

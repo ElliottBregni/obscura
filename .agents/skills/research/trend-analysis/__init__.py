@@ -1,1 +1,0 @@
-"""trend-analysis skill module."""

@@ -1,1 +1,0 @@
-"""onboarding skill module."""

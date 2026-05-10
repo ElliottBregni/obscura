@@ -1,1 +1,0 @@
-"""pr-description skill module."""

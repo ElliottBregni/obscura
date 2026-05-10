@@ -1,1 +1,0 @@
-"""template-gen skill module."""

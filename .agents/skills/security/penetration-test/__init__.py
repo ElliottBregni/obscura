@@ -1,1 +1,0 @@
-"""penetration-test skill module."""

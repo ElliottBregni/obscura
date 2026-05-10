@@ -1,1 +1,0 @@
-"""competitor-analysis skill module."""

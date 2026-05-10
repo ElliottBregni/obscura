@@ -1,1 +1,0 @@
-"""tech-eval skill module."""
