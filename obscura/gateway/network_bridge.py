@@ -38,6 +38,15 @@ from obscura.integrations.messaging.router import ChannelRouter, ChannelRouterCo
 if TYPE_CHECKING:
     pass
 
+__all__ = [
+    "GatewayAgentRunner",
+    "GatewayNetworkBridge",
+    "build_gateway_network_bridge",
+    "WhatsAppNetworkAdapter",
+    "DiscordNetworkAdapter",
+    "iMessageNetworkAdapter",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -255,6 +264,70 @@ class GatewayNetworkBridge:
         }
 
     # ------------------------------------------------------------------
+    # Session inspection / clearing
+    # ------------------------------------------------------------------
+
+    async def get_session_context(self, channel_key: str) -> list[dict[str, str]] | None:
+        """Return the stored conversation history for *channel_key*, or None.
+
+        Delegates to ``self.router._store.get()`` and returns the
+        ``ConversationState.history`` list (each entry has ``"role"`` and
+        ``"text"`` keys).  Returns ``None`` when the key is not found in the
+        store.
+
+        Args:
+            channel_key: Stable conversation key as produced by ChannelRouter
+                (typically ``"<platform>:<account_id>:<channel_id>"``).
+
+        Returns:
+            List of ``{"role": str, "text": str}`` dicts, or ``None``.
+        """
+        state = self.router._store.get(channel_key)
+        if state is None:
+            return None
+        return list(state.history)
+
+    async def clear_session(self, channel_key: str) -> bool:
+        """Clear the conversation history for *channel_key*.
+
+        Uses the ``set_last_activity`` / ``reset_if_stale`` trick to force a
+        history wipe without reaching into private store methods:
+
+        1. Check the key exists — return ``False`` if not.
+        2. Call ``set_last_activity(key, epoch_s=0.0)`` so the row looks
+           infinitely stale.
+        3. Call ``reset_if_stale(key, timeout_seconds=0.0)`` which clears
+           the history because ``last_activity_epoch_s <= 0`` is skipped by
+           the staleness guard.
+
+        Wait — ``reset_if_stale`` skips the reset when
+        ``last_activity_epoch_s <= 0``.  Instead set it to ``1.0``
+        (epoch second 1, i.e. effectively infinitely old) and pass
+        ``timeout_seconds=0.0`` so any non-zero timestamp is considered stale.
+
+        Args:
+            channel_key: Stable conversation key.
+
+        Returns:
+            ``True`` if the history was cleared, ``False`` if the key was not
+            found.
+        """
+        state = self.router._store.get(channel_key)
+        if state is None:
+            return False
+        # Mark as minimally active (epoch_s=1.0 > 0 so reset_if_stale won't
+        # skip the guard), then force a reset with timeout=0.
+        self.router._store.set_last_activity(channel_key, epoch_s=1.0)
+        cleared = self.router._store.reset_if_stale(channel_key, timeout_seconds=0.0)
+        if not cleared:
+            logger.warning(
+                "GatewayNetworkBridge.clear_session: reset_if_stale returned False "
+                "for key=%s — history may not have been cleared",
+                channel_key,
+            )
+        return cleared
+
+    # ------------------------------------------------------------------
     # Async context manager
     # ------------------------------------------------------------------
 
@@ -305,3 +378,137 @@ async def build_gateway_network_bridge(
     runner = GatewayAgentRunner(orchestrator)
     router = ChannelRouter(runner=runner, config=router_config)
     return GatewayNetworkBridge(orchestrator, router)
+
+
+# ---------------------------------------------------------------------------
+# Per-platform adapter shims
+# ---------------------------------------------------------------------------
+
+
+class WhatsAppNetworkAdapter:
+    """Bridges WhatsApp ``on_message()`` calls to ``GatewayNetworkBridge.dispatch()``.
+
+    The bridge's ChannelRouter handles routing the agent reply back to the
+    caller via the registered WhatsApp adapter, so ``on_message`` returns
+    ``None`` rather than a response string.
+
+    Example::
+
+        adapter = WhatsAppNetworkAdapter(bridge)
+        # Wire into your WhatsApp webhook handler:
+        await adapter.on_message(platform_message)
+    """
+
+    def __init__(self, bridge: GatewayNetworkBridge) -> None:
+        self.bridge = bridge
+
+    async def on_message(self, message: PlatformMessage) -> None:
+        """Dispatch a WhatsApp message through the gateway bridge.
+
+        Validates that *message.platform* is ``"whatsapp"`` and warns (without
+        raising) if a different platform is supplied.  All other exceptions are
+        caught and logged at WARNING level.
+
+        Args:
+            message: Normalised inbound platform message.
+        """
+        if message.platform.lower() != "whatsapp":
+            logger.warning(
+                "WhatsAppNetworkAdapter.on_message: expected platform='whatsapp', "
+                "got platform=%r — skipping",
+                message.platform,
+            )
+            return
+        try:
+            await self.bridge.dispatch(message)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "WhatsAppNetworkAdapter.on_message: dispatch raised an exception",
+                exc_info=True,
+            )
+
+
+class DiscordNetworkAdapter:
+    """Bridges Discord ``on_message()`` calls to ``GatewayNetworkBridge.dispatch()``.
+
+    The bridge's ChannelRouter handles routing the agent reply back to the
+    caller via the registered Discord adapter, so ``on_message`` returns
+    ``None`` rather than a response string.
+
+    Example::
+
+        adapter = DiscordNetworkAdapter(bridge)
+        # Wire into your Discord event handler:
+        await adapter.on_message(platform_message)
+    """
+
+    def __init__(self, bridge: GatewayNetworkBridge) -> None:
+        self.bridge = bridge
+
+    async def on_message(self, message: PlatformMessage) -> None:
+        """Dispatch a Discord message through the gateway bridge.
+
+        Validates that *message.platform* is ``"discord"`` and warns (without
+        raising) if a different platform is supplied.  All other exceptions are
+        caught and logged at WARNING level.
+
+        Args:
+            message: Normalised inbound platform message.
+        """
+        if message.platform.lower() != "discord":
+            logger.warning(
+                "DiscordNetworkAdapter.on_message: expected platform='discord', "
+                "got platform=%r — skipping",
+                message.platform,
+            )
+            return
+        try:
+            await self.bridge.dispatch(message)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "DiscordNetworkAdapter.on_message: dispatch raised an exception",
+                exc_info=True,
+            )
+
+
+class iMessageNetworkAdapter:
+    """Bridges iMessage ``on_message()`` calls to ``GatewayNetworkBridge.dispatch()``.
+
+    The bridge's ChannelRouter handles routing the agent reply back to the
+    caller via the registered iMessage adapter, so ``on_message`` returns
+    ``None`` rather than a response string.
+
+    Example::
+
+        adapter = iMessageNetworkAdapter(bridge)
+        # Wire into your iMessage event handler:
+        await adapter.on_message(platform_message)
+    """
+
+    def __init__(self, bridge: GatewayNetworkBridge) -> None:
+        self.bridge = bridge
+
+    async def on_message(self, message: PlatformMessage) -> None:
+        """Dispatch an iMessage message through the gateway bridge.
+
+        Validates that *message.platform* is ``"imessage"`` and warns (without
+        raising) if a different platform is supplied.  All other exceptions are
+        caught and logged at WARNING level.
+
+        Args:
+            message: Normalised inbound platform message.
+        """
+        if message.platform.lower() != "imessage":
+            logger.warning(
+                "iMessageNetworkAdapter.on_message: expected platform='imessage', "
+                "got platform=%r — skipping",
+                message.platform,
+            )
+            return
+        try:
+            await self.bridge.dispatch(message)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "iMessageNetworkAdapter.on_message: dispatch raised an exception",
+                exc_info=True,
+            )

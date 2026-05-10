@@ -15,6 +15,9 @@ from obscura.gateway.config import GatewayConfig
 from obscura.gateway.network_bridge import (
     GatewayAgentRunner,
     GatewayNetworkBridge,
+    WhatsAppNetworkAdapter,
+    DiscordNetworkAdapter,
+    iMessageNetworkAdapter,
     build_gateway_network_bridge,
 )
 
@@ -25,4 +28,7 @@ __all__ = [
     "GatewayAgentRunner",
     "GatewayNetworkBridge",
     "build_gateway_network_bridge",
+    "WhatsAppNetworkAdapter",
+    "DiscordNetworkAdapter",
+    "iMessageNetworkAdapter",
 ]
