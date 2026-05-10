@@ -703,22 +703,50 @@ class A2AService:
         async_task.add_done_callback(_cleanup)
 
     async def _fire_push_notification(self, task: Task, url: str) -> None:
-        """POST completed task to push notification URL (best-effort)."""
+        """POST completed task to push notification URL (best-effort).
+
+        Signs the request with ``X-Webhook-Signature: sha256=<hex>`` when
+        ``OBSCURA_WEBHOOK_SECRET`` env var or
+        ``~/.obscura/network-gateway-webhook.secret`` is configured.
+        """
+        import hmac as _hmac
         import json
+        import os
+        from pathlib import Path
 
         payload = task.model_dump(mode="json")
         try:
+            data = json.dumps(payload).encode()
+
+            # Resolve webhook secret (env var wins, then token file)
+            secret = os.environ.get("OBSCURA_WEBHOOK_SECRET", "").strip()
+            if not secret:
+                _secret_file = Path.home() / ".obscura" / "network-gateway-webhook.secret"
+                try:
+                    for _line in _secret_file.read_text(encoding="utf-8").splitlines():
+                        _line = _line.split("#", 1)[0].strip()
+                        if _line:
+                            secret = _line
+                            break
+                except OSError:
+                    pass
+
+            headers: dict[str, str] = {"Content-Type": "application/json"}
+            if secret:
+                sig = "sha256=" + _hmac.new(secret.encode(), data, "sha256").hexdigest()
+                headers["X-Webhook-Signature"] = sig
+
             try:
                 import httpx
 
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(url, json=payload)
+                    await client.post(url, content=data, headers=headers)
             except ImportError:
                 import urllib.request
 
-                data = json.dumps(payload).encode()
                 req = urllib.request.Request(url, data=data, method="POST")
-                req.add_header("Content-Type", "application/json")
+                for k, v in headers.items():
+                    req.add_header(k, v)
                 await asyncio.get_running_loop().run_in_executor(
                     None, lambda: urllib.request.urlopen(req, timeout=10)
                 )
