@@ -129,7 +129,7 @@ class GatewayConfig:
     max_request_bytes: int = 1 * 1024 * 1024  # 1 MB
     # Standalone agent — lightweight direct-chat server on a dedicated port.
     standalone_agent_enabled: bool = False
-    standalone_agent_port: int = 18791
+    standalone_agent_port: int = 18792
     standalone_agent_host: str = "0.0.0.0"
 
     @classmethod

@@ -311,7 +311,7 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
     -------
     FastAPI
         Fully configured application ready to be served with uvicorn on port
-        18791 (default).
+        18792 (default).
     """
     if config is None:
         config = GatewayConfig()

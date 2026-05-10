@@ -238,7 +238,7 @@ class ObscuraConfig(BaseModel):
 
     # Standalone agent — direct-chat server on port 18791 (LAN / Tailscale)
     standalone_agent_enabled: bool = False
-    standalone_agent_port: int = 18791
+    standalone_agent_port: int = 18792
     standalone_agent_host: str = "0.0.0.0"
 
     # ---------------------------------------------------------------------------

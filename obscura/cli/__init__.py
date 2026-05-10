@@ -753,12 +753,17 @@ def gateway(
         from obscura.integrations.network_gateway import create_gateway_app
         from obscura.integrations.network_gateway.config import GatewayConfig
 
+        # Start from full config (picks up standalone_agent_*, tailscale, etc.)
+        # then apply CLI flag overrides on top.
+        gw_cfg = GatewayConfig.from_obscura_config()
         gw_cfg = GatewayConfig(
-            host=_host,
-            port=_port,
-            agent_backend=_backend,
-            token=_token,
-            rate_limit=cfg.network_gateway_rate_limit,
+            **{
+                **gw_cfg.__dict__,
+                "host": _host,
+                "port": _port,
+                "agent_backend": _backend,
+                "token": _token,
+            }
         )
         app = create_gateway_app(gw_cfg)
     except ImportError:
