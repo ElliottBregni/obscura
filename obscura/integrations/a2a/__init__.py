@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from obscura.integrations.a2a.agent_card import AgentCardGenerator
     from obscura.integrations.a2a.client import A2AClient, A2ASessionManager
     from obscura.integrations.a2a.event_mapper import EventMapper
+    from obscura.integrations.a2a.openclaw_bridge import OpenClawBridge, OpenClawBridgeConfig
     from obscura.integrations.a2a.server import ObscuraA2AServer
     from obscura.integrations.a2a.service import A2AService
     from obscura.integrations.a2a.store import (
@@ -63,6 +64,9 @@ __all__ = [
     "FilePart",
     # Store
     "InMemoryTaskStore",
+    # OpenClaw bridge
+    "OpenClawBridge",
+    "OpenClawBridgeConfig",
     # Server
     "ObscuraA2AServer",
     "Part",
@@ -103,5 +107,9 @@ def __getattr__(name: str) -> object:
         from obscura.integrations.a2a.event_mapper import EventMapper
 
         return EventMapper
+    if name in ("OpenClawBridge", "OpenClawBridgeConfig"):
+        from obscura.integrations.a2a import openclaw_bridge
+
+        return getattr(openclaw_bridge, name)
     msg = f"module 'obscura.a2a' has no attribute {name!r}"
     raise AttributeError(msg)

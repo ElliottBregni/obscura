@@ -38,7 +38,7 @@ class WellKnownAgent:
     name:
         Stable short name used to look up the agent (e.g. ``"openclaw"``).
     url:
-        Base URL of the remote A2A server (e.g. ``"http://localhost:7477"``).
+        Base URL of the remote A2A server (e.g. ``"http://localhost:18789"``).
     description:
         Human-readable description.
     auth_token:
@@ -196,8 +196,12 @@ DEFAULT_REGISTRY: WellKnownAgentRegistry = WellKnownAgentRegistry()
 DEFAULT_REGISTRY.register(
     WellKnownAgent(
         name="openclaw",
-        url="http://localhost:7477",
-        description="OpenClaw agent runtime (Molty)",
+        # OpenClaw's actual HTTP/WebSocket gateway port is 18789.
+        # Port 7477 was a dead reference — OpenClaw does not expose A2A there.
+        # Obscura reaches OpenClaw via POST /v1/chat/completions on this port.
+        # See: obscura/integrations/a2a/openclaw_bridge.py
+        url="http://localhost:18789",
+        description="OpenClaw agent runtime (Molty) — chat completions gateway",
     )
 )
 
