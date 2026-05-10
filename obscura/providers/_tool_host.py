@@ -26,6 +26,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from obscura.core.config import ObscuraConfig
 from obscura.core.tools import ToolRegistry
 from obscura.integrations.a2a.token_manager import A2ATokenManager
 
@@ -107,9 +108,17 @@ class BackendToolHostMixin:
         ``~/.openclaw/openclaw.json``.  Non-fatal — if no token is found or the
         health check fails, the bridge is set to ``None`` and the tool is not
         registered.
+
+        Skipped entirely when ``OscuraConfig.load().a2a_bridge_enabled`` is
+        ``False`` (env ``OBSCURA_A2A_BRIDGE_ENABLED=false``).
         """
         from obscura.core.types import ToolSpec
         from obscura.integrations.a2a.openclaw_bridge import OpenClawBridge
+
+        _cfg = ObscuraConfig.load()
+        if not _cfg.a2a_bridge_enabled:
+            logger.debug("OpenClaw bridge disabled via config (a2a_bridge_enabled=false) — skipping")
+            return
 
         token = self._read_openclaw_token()
         if not token:
@@ -118,7 +127,7 @@ class BackendToolHostMixin:
 
         bridge = OpenClawBridge.from_config(
             token=token,
-            gateway_url="http://localhost:18789",
+            gateway_url=_cfg.a2a_bridge_gateway_url,
         )
         await bridge.connect()
         healthy = await bridge.health_check()

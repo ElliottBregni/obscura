@@ -43,6 +43,7 @@ from collections.abc import AsyncGenerator
 import httpx
 
 from obscura.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+from obscura.core.config import ObscuraConfig
 from obscura.core.enums.protocol import A2ARole, A2ATaskState
 from obscura.core.models.a2a import (
     A2AMessage,
@@ -77,6 +78,11 @@ _AUDIT_LOG_PATH = Path.home() / ".obscura" / "logs" / "a2a-bridge.jsonl"
 # ---------------------------------------------------------------------------
 
 
+def _cfg_max_retries() -> int:
+    """Return max_retries from OscuraConfig (env/settings aware)."""
+    return ObscuraConfig.load().max_retries
+
+
 @dataclass
 class OpenClawBridgeConfig:
     """Runtime configuration for :class:`OpenClawBridge`.
@@ -92,7 +98,8 @@ class OpenClawBridgeConfig:
     timeout:
         HTTP request timeout in seconds.
     max_retries:
-        Maximum number of retries on 5xx or network errors (default: 2).
+        Maximum number of retries on 5xx or network errors.  Defaults to
+        ``OscuraConfig.load().max_retries`` (env ``OBSCURA_MAX_RETRIES``).
 
     """
 
@@ -101,7 +108,7 @@ class OpenClawBridgeConfig:
     model: str = _DEFAULT_MODEL
     timeout: float = _DEFAULT_TIMEOUT
     extra_headers: dict[str, str] = field(default_factory=dict[str, str])
-    max_retries: int = 2
+    max_retries: int = field(default_factory=_cfg_max_retries)
 
 
 # ---------------------------------------------------------------------------
@@ -110,15 +117,20 @@ class OpenClawBridgeConfig:
 
 
 def _sanitize_text(text: str) -> str:
-    """Strip null bytes and control chars (except \\t and \\n); truncate to 32 000 chars."""
+    """Strip null bytes and control chars (except \\t and \\n); truncate to configured limit.
+
+    The truncation limit is read from ``OscuraConfig.load().a2a_bridge_max_text_len``
+    (env ``OBSCURA_A2A_BRIDGE_MAX_TEXT_LEN``, default 32 000).
+    """
+    max_len = ObscuraConfig.load().a2a_bridge_max_text_len
     cleaned = _CTRL_RE.sub("", text)
-    if len(cleaned) > _MAX_TEXT_LEN:
+    if len(cleaned) > max_len:
         logger.warning(
             "OpenClawBridge: input text truncated from %d to %d chars",
             len(cleaned),
-            _MAX_TEXT_LEN,
+            max_len,
         )
-        cleaned = cleaned[:_MAX_TEXT_LEN]
+        cleaned = cleaned[:max_len]
     return cleaned
 
 
@@ -175,10 +187,11 @@ class OpenClawBridge:
     def __init__(self, config: OpenClawBridgeConfig) -> None:
         self._config = config
         self._http: httpx.AsyncClient | None = None
+        _cfg = ObscuraConfig.load()
         self._circuit_breaker = CircuitBreaker(
             name="openclaw",
-            failure_threshold=5,
-            recovery_timeout=30.0,
+            failure_threshold=_cfg.circuit_breaker_threshold,
+            recovery_timeout=_cfg.circuit_breaker_recovery,
         )
 
     # ------------------------------------------------------------------

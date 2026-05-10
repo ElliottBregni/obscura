@@ -189,13 +189,23 @@ def _client_ip(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 _RATE_LIMIT_WINDOW_SECONDS = 60
-_RATE_LIMIT_MAX_REQUESTS = 60
+
+
+def _default_a2a_rate_limit() -> int:
+    """Return the configured A2A inbound rate limit (req/min per IP)."""
+    from obscura.core.config import ObscuraConfig
+
+    return ObscuraConfig.load().a2a_inbound_rate_limit
 
 
 class A2ARateLimitMiddleware(BaseHTTPMiddleware):
     """Sliding-window per-IP rate limiter for ``/a2a/*`` paths.
 
-    Allows up to 60 requests per 60-second window per client IP.
+    Allows up to ``max_requests`` requests per 60-second window per client IP.
+    Defaults to ``OscuraConfig.load().a2a_inbound_rate_limit`` (60) if not
+    specified.  Override via ``OBSCURA_A2A_INBOUND_RATE_LIMIT`` env var or
+    the ``runtime.a2a_inbound_rate_limit`` key in ``~/.obscura/settings.json``.
+
     Returns ``429 {"error": "rate_limit_exceeded"}`` with a
     ``Retry-After`` header when the limit is breached.
 
@@ -206,11 +216,11 @@ class A2ARateLimitMiddleware(BaseHTTPMiddleware):
         self,
         app: Any,
         *,
-        max_requests: int = _RATE_LIMIT_MAX_REQUESTS,
+        max_requests: int | None = None,
         window_seconds: int = _RATE_LIMIT_WINDOW_SECONDS,
     ) -> None:
         super().__init__(app)
-        self._max = max_requests
+        self._max = max_requests if max_requests is not None else _default_a2a_rate_limit()
         self._window = window_seconds
         # { ip: [timestamp, ...] }
         self._buckets: dict[str, list[float]] = {}

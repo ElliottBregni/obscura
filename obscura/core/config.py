@@ -58,6 +58,10 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "a2a_grpc_port",
         "a2a_agent_name",
         "a2a_agent_description",
+        "a2a_inbound_rate_limit",
+        "a2a_bridge_enabled",
+        "a2a_bridge_gateway_url",
+        "a2a_bridge_max_text_len",
         "kairos_enabled",
         "kairos_proactive",
         "kairos_dream",
@@ -168,6 +172,11 @@ class ObscuraConfig(BaseModel):
     a2a_agent_model: str = ""  # empty = backend's default
     a2a_agent_system_prompt: str = ""
     a2a_agent_max_turns: int = 10
+    # A2A hardening / bridge parameters
+    a2a_inbound_rate_limit: int = 60  # per-IP req/min for /a2a/* endpoints
+    a2a_bridge_enabled: bool = True  # auto-init OpenClawBridge on provider startup
+    a2a_bridge_gateway_url: str = "http://localhost:18789"  # OpenClaw gateway URL
+    a2a_bridge_max_text_len: int = 32000  # max input chars for bridge calls
 
     # Kairos background daemon (opt-out: set OBSCURA_KAIROS=false to disable)
     kairos_enabled: bool = True  # default on; OBSCURA_KAIROS=false to disable
@@ -361,6 +370,27 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_A2A_AGENT_DESCRIPTION",
                 "a2a_agent_description",
                 "",
+            ),
+            # A2A hardening / bridge
+            a2a_inbound_rate_limit=_int(
+                "OBSCURA_A2A_INBOUND_RATE_LIMIT",
+                "a2a_inbound_rate_limit",
+                60,
+            ),
+            a2a_bridge_enabled=_bool_optout(
+                "OBSCURA_A2A_BRIDGE_ENABLED",
+                "a2a_bridge_enabled",
+                default=True,
+            ),
+            a2a_bridge_gateway_url=_str(
+                "OBSCURA_A2A_BRIDGE_GATEWAY_URL",
+                "a2a_bridge_gateway_url",
+                "http://localhost:18789",
+            ),
+            a2a_bridge_max_text_len=_int(
+                "OBSCURA_A2A_BRIDGE_MAX_TEXT_LEN",
+                "a2a_bridge_max_text_len",
+                32000,
             ),
             # Kairos (opt-out)
             kairos_enabled=_bool_optout(
