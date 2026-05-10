@@ -33,9 +33,8 @@ Or programmatically::
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +50,9 @@ from obscura.integrations.network_gateway.chat_completions import (
 from obscura.integrations.network_gateway.config import GatewayConfig
 from obscura.integrations.network_gateway.models import router as models_router
 from obscura.integrations.network_gateway.ws import ws_router
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
