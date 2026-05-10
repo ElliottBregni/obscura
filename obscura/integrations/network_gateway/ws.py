@@ -48,9 +48,6 @@ _OBSCURA_BASE_URL = "http://localhost:8080"
 
 _HTTP_OK = 200
 
-# Server-side keepalive interval.
-_PING_INTERVAL: float = 30.0
-
 ws_router = APIRouter()
 
 
@@ -115,6 +112,8 @@ async def _read_sse_stream(
     session_id: str,
     payload: dict[str, Any],
     accumulated: list[str],
+    *,
+    timeout: float = 120.0,
 ) -> tuple[int, int]:
     """POST *payload* to the upstream server and stream SSE tokens to *websocket*.
 
@@ -125,7 +124,7 @@ async def _read_sse_stream(
     completion_tokens = 0
 
     async with (
-        httpx.AsyncClient(timeout=120.0) as client,
+        httpx.AsyncClient(timeout=timeout) as client,
         client.stream(
             "POST",
             f"{_OBSCURA_BASE_URL}/v1/chat/completions",
@@ -174,6 +173,8 @@ async def _stream_completion(
     content: str,
     backend: str,
     history: list[dict[str, Any]],
+    *,
+    request_timeout: float = 120.0,
 ) -> None:
     """Run one chat turn and stream tokens back over *websocket*.
 
@@ -196,6 +197,7 @@ async def _stream_completion(
             session_id,
             payload,
             accumulated,
+            timeout=request_timeout,
         )
     except httpx.ConnectError:
         await websocket.send_json(
@@ -242,6 +244,8 @@ async def _dispatch_message(
     raw: dict[str, Any],
     store: Any,
     active_session_ids: set[str],
+    *,
+    request_timeout: float = 120.0,
 ) -> bool:
     """Process one inbound WebSocket message.
 
@@ -281,7 +285,14 @@ async def _dispatch_message(
     active_session_ids.add(session_id)
     history = await store.get_history(session_id)
 
-    await _stream_completion(websocket, session_id, content, backend, history)
+    await _stream_completion(
+        websocket,
+        session_id,
+        content,
+        backend,
+        history,
+        request_timeout=request_timeout,
+    )
     return True
 
 
@@ -302,15 +313,20 @@ async def chat_websocket(websocket: WebSocket) -> None:
     if not await _authenticate(websocket):
         return  # socket already closed inside _authenticate
 
+    # Read timing config from GatewayConfig stashed on app.state.
+    gw_config = getattr(websocket.app.state, "gateway_config", None)
+    ping_interval: float = gw_config.ws_ping_interval if gw_config else 30.0
+    request_timeout: float = gw_config.request_timeout if gw_config else 120.0
+
     store = get_session_store()
 
     # Track per-connection sessions so we can clean up on disconnect.
     active_session_ids: set[str] = set()
 
     async def _keepalive() -> None:
-        """Send a server-side ping every _PING_INTERVAL seconds."""
+        """Send a server-side ping every ping_interval seconds."""
         while True:
-            await asyncio.sleep(_PING_INTERVAL)
+            await asyncio.sleep(ping_interval)
             with contextlib.suppress(Exception):
                 await websocket.send_json({"type": "ping"})
 
@@ -319,7 +335,13 @@ async def chat_websocket(websocket: WebSocket) -> None:
     try:
         while True:
             raw = await websocket.receive_json()
-            await _dispatch_message(websocket, raw, store, active_session_ids)
+            await _dispatch_message(
+                websocket,
+                raw,
+                store,
+                active_session_ids,
+                request_timeout=request_timeout,
+            )
 
     except WebSocketDisconnect:
         logger.debug("Gateway WS client disconnected ids=%s", active_session_ids)

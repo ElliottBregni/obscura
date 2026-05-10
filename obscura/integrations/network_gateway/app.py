@@ -49,6 +49,7 @@ from obscura.integrations.network_gateway.chat_completions import (
 )
 from obscura.integrations.network_gateway.config import GatewayConfig
 from obscura.integrations.network_gateway.models import router as models_router
+from obscura.integrations.network_gateway.sessions import init_session_store
 from obscura.integrations.network_gateway.ws import ws_router
 
 if TYPE_CHECKING:
@@ -71,6 +72,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     if a2a_server is not None:
         await a2a_server.startup()
+
+    # Initialise session store with configured TTL before any WS connections.
+    session_ttl = gateway_config.session_ttl if gateway_config is not None else 3600.0
+    init_session_store(session_ttl)
 
     # Tailscale serve — expose gateway to tailnet peers
     _tailscale_active = False

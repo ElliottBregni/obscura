@@ -74,6 +74,9 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "network_gateway_rate_limit",
         "network_gateway_tailscale_enabled",
         "network_gateway_tailscale_url",
+        "network_gateway_request_timeout",
+        "network_gateway_ws_ping_interval",
+        "network_gateway_session_ttl",
     },
 )
 
@@ -211,6 +214,9 @@ class ObscuraConfig(BaseModel):
     network_gateway_rate_limit: int = 60
     network_gateway_tailscale_enabled: bool = False
     network_gateway_tailscale_url: str = ""  # e.g. https://modernizedai.tail91e620.ts.net
+    network_gateway_request_timeout: float = 120.0  # OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT
+    network_gateway_ws_ping_interval: float = 30.0  # OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL
+    network_gateway_session_ttl: float = 3600.0  # OBSCURA_NETWORK_GATEWAY_SESSION_TTL
 
     def validate_deployment_safety(self) -> None:
         """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
@@ -478,5 +484,20 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_NETWORK_TAILSCALE_URL",
                 "network_gateway_tailscale_url",
                 "",
+            ),
+            network_gateway_request_timeout=_float(
+                "OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT",
+                "network_gateway_request_timeout",
+                120.0,
+            ),
+            network_gateway_ws_ping_interval=_float(
+                "OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL",
+                "network_gateway_ws_ping_interval",
+                30.0,
+            ),
+            network_gateway_session_ttl=_float(
+                "OBSCURA_NETWORK_GATEWAY_SESSION_TTL",
+                "network_gateway_session_ttl",
+                3600.0,
             ),
         )

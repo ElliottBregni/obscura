@@ -73,6 +73,15 @@ class GatewayConfig:
         CORS ``allow_origins`` list. Defaults to ``["*"]``.
     rate_limit:
         Max requests per 60-second window per client IP. Defaults to 60.
+    request_timeout:
+        Timeout in seconds for chat completion requests and WebSocket proxy
+        calls. Defaults to 120.0.
+    ws_ping_interval:
+        Interval in seconds between server-side WebSocket keepalive pings.
+        Defaults to 30.0.
+    session_ttl:
+        Idle session expiry in seconds for the WebSocket session store.
+        Defaults to 3600.0 (1 hour).
     """
 
     host: str = "0.0.0.0"
@@ -84,6 +93,9 @@ class GatewayConfig:
     rate_limit: int = 60
     tailscale_enabled: bool = False
     tailscale_url: str = ""  # e.g. https://modernizedai.tail91e620.ts.net
+    request_timeout: float = 120.0
+    ws_ping_interval: float = 30.0
+    session_ttl: float = 3600.0
 
     @classmethod
     def from_obscura_config(cls) -> "GatewayConfig":
@@ -101,6 +113,9 @@ class GatewayConfig:
             rate_limit=cfg.a2a_inbound_rate_limit,
             tailscale_enabled=cfg.network_gateway_tailscale_enabled,
             tailscale_url=cfg.network_gateway_tailscale_url,
+            request_timeout=cfg.network_gateway_request_timeout,
+            ws_ping_interval=cfg.network_gateway_ws_ping_interval,
+            session_ttl=cfg.network_gateway_session_ttl,
         )
 
 

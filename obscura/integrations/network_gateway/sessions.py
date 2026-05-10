@@ -13,18 +13,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_SESSION_TTL_SECONDS: float = 3600.0  # 1 hour
+_DEFAULT_SESSION_TTL: float = 3600.0  # 1 hour
 
 
 class GatewaySessionStore:
     """In-memory session store for the network gateway.
 
-    Thread-safe via ``asyncio.Lock``. Sessions older than
-    ``_SESSION_TTL_SECONDS`` of inactivity are reaped lazily on each write.
+    Thread-safe via ``asyncio.Lock``. Sessions older than *ttl* seconds of
+    inactivity are reaped lazily on each write.
     """
 
-    def __init__(self) -> None:
-        """Initialise an empty session store."""
+    def __init__(self, ttl: float = _DEFAULT_SESSION_TTL) -> None:
+        """Initialise an empty session store with the given *ttl* in seconds."""
+        self._ttl = ttl
         self._lock = asyncio.Lock()
         # session_id -> list of {"role": str, "content": str}
         self._history: dict[str, list[dict[str, str]]] = {}
@@ -82,7 +83,7 @@ class GatewaySessionStore:
         expired = [
             sid
             for sid, ts in self._last_access.items()
-            if now - ts > _SESSION_TTL_SECONDS
+            if now - ts > self._ttl
         ]
         for sid in expired:
             self._history.pop(sid, None)
@@ -96,11 +97,31 @@ class _SingletonStore:
     _instance: GatewaySessionStore | None = None
 
     @classmethod
+    def init(cls, ttl: float) -> GatewaySessionStore:
+        """Initialise (or replace) the singleton with the given *ttl*.
+
+        Called once from the gateway app lifespan so the TTL is set from
+        :class:`~obscura.integrations.network_gateway.config.GatewayConfig`
+        before any WebSocket connections arrive.
+        """
+        cls._instance = GatewaySessionStore(ttl=ttl)
+        return cls._instance
+
+    @classmethod
     def get(cls) -> GatewaySessionStore:
         """Return (or create) the singleton :class:`GatewaySessionStore`."""
         if cls._instance is None:
             cls._instance = GatewaySessionStore()
         return cls._instance
+
+
+def init_session_store(ttl: float) -> GatewaySessionStore:
+    """Initialise the process-wide session store with a custom *ttl* (seconds).
+
+    Must be called before any WebSocket connections are accepted.  Subsequent
+    calls to :func:`get_session_store` will return the initialised instance.
+    """
+    return _SingletonStore.init(ttl)
 
 
 def get_session_store() -> GatewaySessionStore:

@@ -264,6 +264,7 @@ async def chat_completions(
     config = getattr(request.app.state, "gateway_config", None)
     default_backend: str = config.agent_backend if config else "claude"
     default_model: str = config.agent_model if config else ""
+    request_timeout: float = config.request_timeout if config else 120.0
 
     backend = _resolve_backend(body.model, default_backend)
     # Use gateway default model only when the caller didn't pick a specific
@@ -310,7 +311,7 @@ async def chat_completions(
     try:
         text = await asyncio.wait_for(
             _run_agent(backend, effective_model, system_prompt, user_prompt),
-            timeout=120.0,
+            timeout=request_timeout,
         )
     except TimeoutError:
         text = ""
