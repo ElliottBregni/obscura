@@ -20,6 +20,7 @@ from obscura.gateway.network_bridge import (
     iMessageNetworkAdapter,
     build_gateway_network_bridge,
 )
+from obscura.gateway.poll_daemon import GatewayPollDaemon, build_poll_daemon
 
 __all__ = [
     "GatewayMode",
@@ -31,4 +32,6 @@ __all__ = [
     "WhatsAppNetworkAdapter",
     "DiscordNetworkAdapter",
     "iMessageNetworkAdapter",
+    "GatewayPollDaemon",
+    "build_poll_daemon",
 ]

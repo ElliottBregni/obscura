@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Test iMessage integration through the GatewayNetworkBridge.
+"""Test iMessage (and optionally WhatsApp/Discord) integration through GatewayNetworkBridge.
 
 Flow:
-    IMessageAdapter.poll()
+    GatewayPollDaemon
+        -> adapter.poll()
         -> bridge.dispatch(PlatformMessage)
         -> ChannelRouter -> GatewayAgentRunner -> GatewayOrchestrator
         -> active gateway mode (HYBRID: OPENCLAW -> NATIVE -> MCP)
         -> response string
-        -> IMessageAdapter.send()   <- called automatically by ChannelRouter
+        -> adapter.send()   <- called automatically by ChannelRouter
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from obscura.gateway.config import GatewayConfig, GatewayMode
 from obscura.gateway.network_bridge import build_gateway_network_bridge
-from obscura.integrations.imessage.adapter import IMessageAdapter
+from obscura.gateway.poll_daemon import build_poll_daemon
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -80,16 +81,19 @@ async def main() -> None:
         gateway_config=GatewayConfig(mode=mode),
     )
 
-    # 2. Build iMessage adapter and register it with the router manually so
-    #    we keep a reference for the poll loop.
-    imessage = IMessageAdapter(contacts=[contact])
-    await imessage.start()
-    bridge.router.register("imessage", imessage)
-
-    # 3. Start bridge (starts orchestrator)
+    # 2. Start bridge (starts orchestrator)
     await bridge.start()
 
-    # Print full status at startup
+    # 3. Build daemon — registers iMessage adapter with both bridge.router
+    #    (so the router can send replies back) and the daemon (for polling).
+    #    daemon.start() is called inside build_poll_daemon before returning.
+    daemon = await build_poll_daemon(
+        bridge,
+        poll_interval=poll_interval,
+        imessage_contacts=[contact],
+    )
+
+    # Print full gateway status at startup
     status = await bridge.get_status()
     print("Gateway status:")
     print(json.dumps(status, indent=2, default=str))
@@ -103,30 +107,31 @@ async def main() -> None:
     print("(Press Ctrl+C to stop)")
     print()
 
-    received: int = 0
-    dispatched: int = 0
-
     try:
+        tick = 0
         while True:
-            messages = await imessage.poll()
-            for msg in messages:
-                received += 1
-                preview = msg.text[:80] if msg.text else ""
-                print(f"[{received}] {msg.sender_id}: {preview}")
-                # Dispatch -> ChannelRouter handles agent run + reply automatically
-                await bridge.dispatch(msg)
-                dispatched += 1
-                print(f"    dispatched through gateway ({dispatched} total)")
-            await asyncio.sleep(poll_interval)
+            await asyncio.sleep(10)
+            tick += 1
+            daemon_status = await daemon.get_status()
+            for platform, info in daemon_status["platforms"].items():
+                print(
+                    f"[tick {tick}] {platform}: "
+                    f"{info['messages_dispatched']} dispatched, "
+                    f"task_alive={info['task_alive']}, "
+                    f"last_error={info['last_error']}"
+                )
     except KeyboardInterrupt:
         print()
         print("Stopping...")
     finally:
+        await daemon.stop()
         await bridge.stop()
+
+        daemon_status = await daemon.get_status()
         print()
         print("--- Summary ---")
-        print(f"  Messages received:   {received}")
-        print(f"  Messages dispatched: {dispatched}")
+        for platform, info in daemon_status["platforms"].items():
+            print(f"  {platform}: {info['messages_dispatched']} messages dispatched")
         print("Done")
 
 
