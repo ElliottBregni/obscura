@@ -79,7 +79,7 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "network_gateway_session_ttl",
         "moltbook_url",
         "moltbook_agent_username",
-        "moltbook_agent_token",
+        "moltbook_api_key",
         "moltbook_auto_post_enabled",
         "moltbook_auto_post_interval_hours",
         "moltbook_monitor_enabled",
@@ -237,7 +237,7 @@ class ObscuraConfig(BaseModel):
     # ---------------------------------------------------------------------------
     moltbook_url: str = "https://moltbook.com"
     moltbook_agent_username: str = ""
-    moltbook_agent_token: str = ""
+    moltbook_api_key: str = ""
     moltbook_auto_post_enabled: bool = False
     moltbook_auto_post_interval_hours: int = 6
     moltbook_monitor_enabled: bool = True
@@ -541,7 +541,7 @@ class ObscuraConfig(BaseModel):
             # Moltbook — AI agent social network platform
             moltbook_url=_str("MOLTBOOK_URL", "moltbook_url", "https://moltbook.com"),
             moltbook_agent_username=_str("MOLTBOOK_AGENT_USERNAME", "moltbook_agent_username", ""),
-            moltbook_agent_token=_str("MOLTBOOK_AGENT_TOKEN", "moltbook_agent_token", ""),
+            moltbook_api_key=_str("MOLTBOOK_API_KEY", "moltbook_api_key", ""),
             moltbook_auto_post_enabled=_bool_optin(
                 "MOLTBOOK_AUTO_POST_ENABLED",
                 "moltbook_auto_post_enabled",
