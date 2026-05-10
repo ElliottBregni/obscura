@@ -36,8 +36,12 @@ from obscura.integrations.a2a.types import AgentSkill, AuthScheme
 from obscura.integrations.a2a.well_known import WellKnownAgentRegistry
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from obscura.integrations.a2a.definition import AgentDefinition
     from obscura.integrations.a2a.server import ObscuraA2AServer
     from obscura.integrations.a2a.service import A2AService
+    from obscura.integrations.a2a.store import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -162,3 +166,349 @@ def load_peers_from_file(path: Path) -> list[PeerAgent]:
         )
         for entry in data.get("peers", [])
     ]
+
+
+# ---------------------------------------------------------------------------
+# New programmatic server-config API
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ServerConfig:
+    """Full programmatic configuration for a standalone Obscura A2A server.
+
+    Parameters
+    ----------
+    name:
+        Agent display name (appears in ``/.well-known/agent.json``).
+    description:
+        Human-readable description of the agent.
+    host:
+        Interface to bind (``"0.0.0.0"`` for all interfaces).
+    port:
+        TCP port to listen on. ``0`` lets the OS pick a free port (useful for tests).
+    version:
+        Agent version string.
+    protocol_version:
+        A2A protocol version to advertise.
+    bearer_tokens:
+        List of accepted bearer tokens.  Requests without a matching token
+        receive a ``401`` response.  An empty list disables token validation.
+    skills:
+        Skills to advertise in the agent card.  Each entry is a dict with
+        keys: ``id``, ``name``, ``description``, ``tags`` (list),
+        ``examples`` (list).
+    well_known_agents:
+        Peers to pre-register in the
+        :class:`~obscura.integrations.a2a.well_known.WellKnownAgentRegistry`.
+        Each entry is a dict with keys: ``name``, ``url``, ``description``,
+        ``auth_token`` (optional).
+    streaming:
+        Whether the agent supports streaming (SSE).
+    push_notifications:
+        Whether the agent supports push notifications.
+    openclaw_compat:
+        When ``True``:
+
+        * Adds a ``"bearer"`` HTTP security scheme named ``"openclaw"``
+          to the agent card.
+        * Injects the ``"openclaw"`` tag into every skill.
+        * Sets ``protocolVersion`` to ``"0.3"`` (OpenClaw's expected version).
+
+    """
+
+    name: str = "Obscura"
+    description: str = "Obscura AI agent runtime"
+    host: str = "0.0.0.0"
+    port: int = 8080
+    version: str = "1.0"
+    protocol_version: str = "0.3"
+    # Auth
+    bearer_tokens: list[str] = field(default_factory=list)
+    # Skills exposed
+    skills: list[dict[str, Any]] = field(default_factory=list)
+    # Well-known peers to register
+    well_known_agents: list[dict[str, Any]] = field(default_factory=list)
+    # Capabilities
+    streaming: bool = True
+    push_notifications: bool = False
+    # OpenClaw compatibility
+    openclaw_compat: bool = True
+
+
+def _make_token_validator(tokens: list[str]) -> Callable[[str], bool] | None:
+    """Return a validator callable, or ``None`` if *tokens* is empty."""
+    if not tokens:
+        return None
+    token_set: frozenset[str] = frozenset(tokens)
+
+    def _validate(token: str) -> bool:
+        return token in token_set
+
+    return _validate
+
+
+def _build_skills(
+    raw: list[dict[str, Any]],
+    *,
+    inject_openclaw_tag: bool,
+) -> list[AgentSkill]:
+    """Convert raw skill dicts to :class:`AgentSkill` objects."""
+    skills: list[AgentSkill] = []
+    for entry in raw:
+        tags: list[str] = list(entry.get("tags") or [])
+        if inject_openclaw_tag and "openclaw" not in tags:
+            tags.append("openclaw")
+        skills.append(
+            AgentSkill(
+                id=str(entry.get("id", entry.get("name", ""))),
+                name=str(entry.get("name", "")),
+                description=str(entry.get("description", "")),
+                tags=tags,
+                examples=list(entry.get("examples") or []),
+            )
+        )
+    return skills
+
+
+async def build_standalone_server(
+    config: ServerConfig,
+    service: A2AService,
+) -> ObscuraA2AServer:
+    """Build and return a configured :class:`~obscura.integrations.a2a.server.ObscuraA2AServer`.
+
+    Steps
+    -----
+    1. Build an :class:`~obscura.integrations.a2a.agent_card.AgentCardGenerator`
+       from *config*.
+    2. If ``openclaw_compat=True``, add the ``"openclaw"`` bearer auth scheme
+       and inject ``"openclaw"`` into all skill tags.
+    3. Construct a token-validator callable from ``config.bearer_tokens``.
+    4. Build a :class:`~obscura.integrations.a2a.well_known.WellKnownAgentRegistry`
+       from ``config.well_known_agents`` and attach it as
+       ``server.peer_registry``.
+    5. Return the configured server.
+
+    Parameters
+    ----------
+    config:
+        Standalone server configuration.
+    service:
+        Pre-constructed :class:`~obscura.integrations.a2a.service.A2AService`
+        instance that handles task execution.
+
+    """
+    from obscura.integrations.a2a.server import ObscuraA2AServer
+
+    base_url = f"http://{config.host}:{config.port}"
+
+    # ----- Agent card -----
+    gen = AgentCardGenerator(
+        name=config.name,
+        url=base_url,
+        description=config.description,
+        version=config.version,
+    )
+
+    skills = _build_skills(config.skills, inject_openclaw_tag=config.openclaw_compat)
+    if skills:
+        gen.with_skills(skills)
+
+    gen.with_capabilities(
+        streaming=config.streaming,
+        push_notifications=config.push_notifications,
+    )
+
+    if config.openclaw_compat:
+        gen.with_auth_scheme("openclaw", AuthScheme(type="http", scheme="bearer"))
+        logger.debug("OpenClaw compat: added 'openclaw' bearer auth scheme")
+    elif config.bearer_tokens:
+        gen.with_bearer_auth()
+
+    gen.with_provider("Obscura", "https://obscura.dev")
+    agent_card = gen.build()
+
+    # ----- Token validator -----
+    token_validator = _make_token_validator(config.bearer_tokens)
+
+    # ----- Peer registry -----
+    peer_registry = WellKnownAgentRegistry.from_config(
+        {"well_known_agents": config.well_known_agents}
+    )
+    logger.debug(
+        "Well-known peer registry: %d agents loaded",
+        len(peer_registry.list()),
+    )
+
+    # ----- Build server -----
+    server = ObscuraA2AServer(
+        store=service.store,
+        agent_card=agent_card,
+    )
+
+    # Attach token validator for use by auth middleware if needed.
+    # ObscuraA2AServer does not wire auth internally; callers should install
+    # APIKeyAuthMiddleware or a custom middleware that calls this validator.
+    server._token_validator = token_validator  # type: ignore[attr-defined]
+
+    # Attach peer registry as a convenience attribute
+    server.peer_registry = peer_registry  # type: ignore[attr-defined]
+
+    logger.info(
+        "Standalone A2A server configured: name=%r port=%d openclaw_compat=%s tokens=%d",
+        config.name,
+        config.port,
+        config.openclaw_compat,
+        len(config.bearer_tokens),
+    )
+    return server
+
+
+# ---------------------------------------------------------------------------
+# FastAPI app factory  (uvicorn-compatible entry point)
+# ---------------------------------------------------------------------------
+
+
+def _make_lifespan(a2a_server: ObscuraA2AServer) -> Callable:  # type: ignore[type-arg]
+    """Return an asynccontextmanager lifespan that manages *a2a_server*."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager  # type: ignore[arg-type]
+    async def lifespan(app: Any) -> Any:  # noqa: ARG001
+        await a2a_server.startup()
+        try:
+            yield
+        finally:
+            await a2a_server.shutdown()
+
+    return lifespan
+
+
+def create_standalone_app(
+    definition: "AgentDefinition | None" = None,
+    *,
+    base_url: str = "http://localhost:8080",
+    store: "TaskStore | None" = None,
+    agent_backend: str = "copilot",
+    agent_model: str = "",
+    agent_system_prompt: str = "",
+    unix_socket_path: str | None = None,
+    enable_auth: bool = False,
+) -> "FastAPI":
+    """Create a standalone FastAPI application exposing the A2A protocol.
+
+    All four A2A transport routers (JSON-RPC, REST, SSE, well-known) are
+    mounted on the returned application. The app's ``state.a2a_server``
+    attribute holds the underlying :class:`ObscuraA2AServer` instance so
+    callers can access it after startup.
+
+    Parameters
+    ----------
+    definition:
+        Agent definition that controls the well-known card. Defaults to
+        :data:`~obscura.integrations.a2a.definition.DEFAULT_AGENT_DEFINITION`
+        when not provided.
+    base_url:
+        Public base URL for the agent (embedded in the agent card ``url``
+        field and returned to callers).
+    store:
+        Task persistence backend. Defaults to :class:`InMemoryTaskStore`.
+    agent_backend:
+        LLM provider identifier (e.g. ``"copilot"``, ``"claude"``).
+    agent_model:
+        Default model override for spawned agent sessions.
+    agent_system_prompt:
+        Default system prompt for spawned agent sessions.
+    unix_socket_path:
+        Optional Unix domain socket path. When set, a socket transport is
+        started alongside the HTTP server during lifespan startup.
+    enable_auth:
+        If ``True``, installs :class:`~obscura.auth.middleware.APIKeyAuthMiddleware`
+        to require a bearer API key on all requests.
+
+    Returns
+    -------
+    FastAPI
+        Fully configured FastAPI application.
+    """
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    from obscura.integrations.a2a.definition import (
+        DEFAULT_AGENT_DEFINITION,
+    )
+    from obscura.integrations.a2a.server import ObscuraA2AServer as _ObscuraA2AServer
+    from obscura.integrations.a2a.transports import (
+        create_jsonrpc_router,
+        create_rest_router,
+        create_sse_router,
+        create_wellknown_router,
+    )
+
+    effective_definition: AgentDefinition = (
+        DEFAULT_AGENT_DEFINITION if definition is None else definition
+    )
+
+    card = effective_definition.to_agent_card(base_url)
+
+    a2a_server = _ObscuraA2AServer(
+        store=store,
+        agent_card=card,
+        agent_backend=agent_backend,
+        agent_model=agent_model,
+        agent_system_prompt=agent_system_prompt,
+        unix_socket_path=unix_socket_path,
+    )
+
+    fastapi_app = FastAPI(
+        title=effective_definition.name,
+        description=effective_definition.description,
+        version=effective_definition.version,
+        lifespan=_make_lifespan(a2a_server),
+    )
+
+    # CORS — open by default for A2A interop; restrict in production via a
+    # reverse-proxy or by passing a tighter allow_origins list.
+    fastapi_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    if enable_auth:
+        from obscura.auth.middleware import APIKeyAuthMiddleware
+
+        fastapi_app.add_middleware(APIKeyAuthMiddleware)
+
+    service = a2a_server.service
+
+    fastapi_app.include_router(create_jsonrpc_router(service))
+    fastapi_app.include_router(create_rest_router(service))
+    fastapi_app.include_router(create_sse_router(service))
+    fastapi_app.include_router(create_wellknown_router(service))
+
+    fastapi_app.state.a2a_server = a2a_server
+
+    return fastapi_app
+
+
+# Module-level app — enables ``uvicorn obscura.integrations.a2a.standalone:app``
+app: "FastAPI" = create_standalone_app()
+
+__all__ = [
+    # Original API
+    "PeerAgent",
+    "StandaloneA2AConfig",
+    "apply_peers",
+    "apply_server_url",
+    "build_runtime_card",
+    "load_peers_from_file",
+    "load_static_card",
+    # New programmatic server config API
+    "ServerConfig",
+    "build_standalone_server",
+    # FastAPI app factory
+    "app",
+    "create_standalone_app",
+]

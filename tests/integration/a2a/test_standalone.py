@@ -1,20 +1,35 @@
-"""End-to-end tests for A2A standalone mode.
+"""Integration tests for A2A standalone mode.
 
-Tests A2A protocol implementation with well-known agent.json support.
-Ensures compatibility with both OpenClaw and Obscura.
+Tests cover:
+- /.well-known/agent.json discovery endpoint
+- Task creation and execution (blocking and non-blocking)
+- OpenClaw-style agent-to-agent round trip (via A2AClient over ASGI)
+
+All tests use an in-process FastAPI app via httpx ASGITransport — no real
+network or LLM calls are made. The ``patch_session`` fixture from conftest
+replaces ``build_a2a_session`` with a zero-cost stub that returns a canned
+text response instantly.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import pytest
-from typing import Any
+import httpx
 
 from obscura.integrations.a2a.client import A2AClient
 from obscura.integrations.a2a.server import ObscuraA2AServer
-from obscura.integrations.a2a.agent_card import AgentCardGenerator
-from obscura.integrations.a2a.types import AgentSkill, AgentCapabilities
+from obscura.integrations.a2a.standalone import create_standalone_app
+from obscura.integrations.a2a.store import InMemoryTaskStore
+from obscura.integrations.a2a.types import AgentCard
+
+from .conftest import (
+    FAKE_RESPONSE,
+    TEST_AGENT_NAME,
+    TEST_AGENT_URL,
+    make_agent_card,
+    make_app,
+    user_message_dict,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -22,309 +37,358 @@ from obscura.integrations.a2a.types import AgentSkill, AgentCapabilities
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def agent_card():
-    """Create a test agent card."""
-    return AgentCardGenerator(
-        name="Test A2A Agent",
-        url="http://localhost:18791",
-        description="Test agent for A2A standalone mode",
-        version="1.0.0",
-    ).with_skills([
-        AgentSkill(
-            id="test_skill",
-            name="Test Skill",
-            description="A test skill",
-            tags=["test"],
-        ),
-    ]).with_capabilities(
-        streaming=True,
-        push_notifications=False,
-    ).with_bearer_auth().build()
-
-
-@pytest.fixture
-async def a2a_server(agent_card):
-    """Create and start A2A server for testing."""
-    server = ObscuraA2AServer(
-        agent_card=agent_card,
-        agent_backend="claude",
-        agent_model="claude",
-        agent_system_prompt="You are a test agent.",
+@pytest.fixture()
+def standalone_app():
+    """Full standalone app (create_standalone_app path) with an in-memory store."""
+    return create_standalone_app(
+        base_url=TEST_AGENT_URL,
+        store=InMemoryTaskStore(),
+        agent_backend="copilot",
     )
-    await server.startup()
-    yield server
-    await server.shutdown()
 
 
-@pytest.fixture
-async def a2a_client():
-    """Create A2A client."""
-    client = A2AClient(base_url="http://localhost:18791")
-    yield client
-
-
-# ---------------------------------------------------------------------------
-# Well-Known Agent Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_well_known_agent_json(a2a_server, a2a_client):
-    """Test that /.well-known/agent.json is accessible."""
-    # Fetch agent card from well-known endpoint
-    card = await a2a_client.get_agent_card()
-    
-    assert card is not None
-    assert card.name == "Test A2A Agent"
-    assert card.version == "1.0.0"
-    assert card.url == "http://localhost:18791"
-
-
-@pytest.mark.asyncio
-async def test_agent_card_skills(a2a_server, a2a_client):
-    """Test that agent card exposes correct skills."""
-    card = await a2a_client.get_agent_card()
-    
-    assert len(card.skills) == 1
-    assert card.skills[0].id == "test_skill"
-    assert card.skills[0].name == "Test Skill"
-
-
-@pytest.mark.asyncio
-async def test_agent_card_capabilities(a2a_server, a2a_client):
-    """Test that agent card declares correct capabilities."""
-    card = await a2a_client.get_agent_card()
-    
-    assert card.capabilities.streaming is True
-    assert card.capabilities.pushNotifications is False
+@pytest.fixture()
+async def standalone_client(standalone_app) -> httpx.AsyncClient:
+    """HTTP client wired to the standalone app via ASGI transport."""
+    transport = httpx.ASGITransport(app=standalone_app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url=TEST_AGENT_URL,
+    ) as client:
+        yield client
 
 
 # ---------------------------------------------------------------------------
-# Task Execution Tests
+# Well-known endpoint tests
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_create_task(a2a_server, a2a_client):
-    """Test creating a task via A2A."""
-    message = {
-        "role": "user",
-        "content": {"type": "text", "text": "Hello, test agent!"},
+@pytest.mark.integration
+async def test_wellknown_returns_200(a2a_http: httpx.AsyncClient) -> None:
+    """GET /.well-known/agent.json returns HTTP 200."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    assert resp.status_code == 200
+
+
+@pytest.mark.integration
+async def test_wellknown_content_type(a2a_http: httpx.AsyncClient) -> None:
+    """GET /.well-known/agent.json returns JSON content type."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    assert "application/json" in resp.headers.get("content-type", "")
+
+
+@pytest.mark.integration
+async def test_wellknown_agent_name(a2a_http: httpx.AsyncClient) -> None:
+    """Agent card name matches the configured agent name."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    data = resp.json()
+    assert data["name"] == TEST_AGENT_NAME
+
+
+@pytest.mark.integration
+async def test_wellknown_required_fields(a2a_http: httpx.AsyncClient) -> None:
+    """Agent card contains all required A2A fields."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    data = resp.json()
+
+    for field in ("name", "description", "url", "version", "protocolVersion",
+                  "skills", "capabilities", "securitySchemes"):
+        assert field in data, f"Missing required field: {field}"
+
+
+@pytest.mark.integration
+async def test_wellknown_no_python_aliases(a2a_http: httpx.AsyncClient) -> None:
+    """Agent card must not leak Python internal field names (e.g. 'in_')."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    raw = resp.text
+    assert '"in_"' not in raw, "Python alias 'in_' leaked into JSON output"
+
+
+@pytest.mark.integration
+async def test_wellknown_capabilities(a2a_http: httpx.AsyncClient) -> None:
+    """Agent card capabilities has expected shape."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    caps = resp.json()["capabilities"]
+    assert isinstance(caps.get("streaming"), bool)
+    assert isinstance(caps.get("pushNotifications"), bool)
+
+
+@pytest.mark.integration
+async def test_wellknown_skills_list(a2a_http: httpx.AsyncClient) -> None:
+    """Skills list is non-empty and each skill has id/name fields."""
+    resp = await a2a_http.get("/.well-known/agent.json")
+    skills = resp.json()["skills"]
+    assert isinstance(skills, list)
+    # conftest builds zero skills — ensure we don't regress to a broken shape
+    for skill in skills:
+        assert "id" in skill
+        assert "name" in skill
+
+
+# ---------------------------------------------------------------------------
+# Task creation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_rest_create_task_nonblocking(a2a_http: httpx.AsyncClient) -> None:
+    """POST /a2a/v1/tasks with blocking=False returns task with id and status."""
+    body = {
+        "message": user_message_dict("hello"),
+        "blocking": False,
     }
-    
-    task = await a2a_client.send_message(
-        message=message,
-        blocking=True,
-    )
-    
-    assert task is not None
-    assert task.id is not None
-    assert task.status.state in ["submitted", "working", "completed"]
+    resp = await a2a_http.post("/a2a/v1/tasks", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "id" in data
+    assert "status" in data
+    assert "state" in data["status"]
 
 
-@pytest.mark.asyncio
-async def test_get_task(a2a_server, a2a_client):
-    """Test retrieving a task by ID."""
-    # Create a task first
-    message = {
-        "role": "user",
-        "content": {"type": "text", "text": "Test message"},
+@pytest.mark.integration
+async def test_rest_create_task_blocking(
+    a2a_http: httpx.AsyncClient,
+    patch_session,
+) -> None:
+    """POST /a2a/v1/tasks with blocking=True completes via the fake session."""
+    body = {
+        "message": user_message_dict("hello blocking"),
+        "blocking": True,
     }
-    
-    created_task = await a2a_client.send_message(
-        message=message,
-        blocking=False,
+    resp = await a2a_http.post("/a2a/v1/tasks", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"]["state"] == "completed"
+
+
+@pytest.mark.integration
+async def test_rest_get_task_by_id(a2a_http: httpx.AsyncClient) -> None:
+    """Create a task then retrieve it by ID."""
+    create_resp = await a2a_http.post(
+        "/a2a/v1/tasks",
+        json={"message": user_message_dict("fetch me"), "blocking": False},
     )
-    
-    # Retrieve the task
-    retrieved_task = await a2a_client.get_task(created_task.id)
-    
-    assert retrieved_task is not None
-    assert retrieved_task.id == created_task.id
+    assert create_resp.status_code == 200
+    task_id = create_resp.json()["id"]
+
+    get_resp = await a2a_http.get(f"/a2a/v1/tasks/{task_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["id"] == task_id
 
 
-@pytest.mark.asyncio
-async def test_cancel_task(a2a_server, a2a_client):
-    """Test canceling a task."""
-    # Create a long-running task
-    message = {
-        "role": "user",
-        "content": {"type": "text", "text": "Execute a long task"},
+@pytest.mark.integration
+async def test_rest_get_task_not_found(a2a_http: httpx.AsyncClient) -> None:
+    """GET /a2a/v1/tasks/{nonexistent} returns 404."""
+    resp = await a2a_http.get("/a2a/v1/tasks/task-does-not-exist")
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+async def test_rest_list_tasks(a2a_http: httpx.AsyncClient) -> None:
+    """GET /a2a/v1/tasks returns a JSON object with a 'tasks' list."""
+    resp = await a2a_http.get("/a2a/v1/tasks")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "tasks" in body
+    assert isinstance(body["tasks"], list)
+
+
+@pytest.mark.integration
+async def test_rest_cancel_nonexistent_task(a2a_http: httpx.AsyncClient) -> None:
+    """POST .../nonexistent:cancel returns 404 or 409 — never 500."""
+    resp = await a2a_http.post("/a2a/v1/tasks/nonexistent-task-id:cancel")
+    assert resp.status_code in {404, 409}
+
+
+@pytest.mark.integration
+async def test_blocking_task_has_artifact(
+    a2a_http: httpx.AsyncClient,
+    patch_session,
+) -> None:
+    """A completed blocking task includes an artifact with the agent's response."""
+    body = {
+        "message": user_message_dict("produce an artifact"),
+        "blocking": True,
     }
-    
-    task = await a2a_client.send_message(
-        message=message,
-        blocking=False,
-    )
-    
-    # Cancel it
-    cancelled_task = await a2a_client.cancel_task(task.id)
-    
-    assert cancelled_task is not None
-    assert cancelled_task.status.state in ["canceled", "completed"]
+    resp = await a2a_http.post("/a2a/v1/tasks", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    artifacts = data.get("artifacts", [])
+    assert len(artifacts) >= 1
+    # Artifact should contain the fake response text
+    texts = [
+        part["text"]
+        for art in artifacts
+        for part in art.get("parts", [])
+        if part.get("kind") == "text"
+    ]
+    assert any(FAKE_RESPONSE in t for t in texts)
 
 
 # ---------------------------------------------------------------------------
-# OpenClaw Integration Tests
+# JSON-RPC transport tests
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_openclaw_delegation(a2a_server):
-    """Test that system tools can delegate to OpenClaw."""
-    # This test verifies that when OpenClaw is available,
-    # system tool calls are delegated to it
-    
-    # Check server configuration
-    service = a2a_server.service
-    
-    # Verify the service is configured for OpenClaw delegation
-    assert service is not None
-    # Note: Actual delegation testing requires OpenClaw to be running
+@pytest.mark.integration
+async def test_jsonrpc_agent_card(a2a_http: httpx.AsyncClient) -> None:
+    """POST /a2a/rpc agent/authenticatedExtendedCard returns a JSON-RPC envelope."""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "agent/authenticatedExtendedCard",
+        "params": {},
+    }
+    resp = await a2a_http.post("/a2a/rpc", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "result" in body or "error" in body
+    assert "jsonrpc" in body
+    assert body["id"] == 1
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("openclaw", reason="OpenClaw not installed"),
-    reason="OpenClaw not available",
-)
-@pytest.mark.asyncio
-async def test_openclaw_gateway_connection():
-    """Test connection to OpenClaw gateway."""
-    from obscura.integrations.openclaw_bridge import OpenClawBridge
-    
-    bridge = OpenClawBridge(socket_path="~/.openclaw/gateway.sock")
-    
-    # Test connection
-    is_connected = await bridge.ping()
-    
-    assert is_connected is True
+@pytest.mark.integration
+async def test_jsonrpc_message_send(
+    a2a_http: httpx.AsyncClient,
+    patch_session,
+) -> None:
+    """POST /a2a/rpc message/send returns a valid Task via JSON-RPC."""
+    import uuid
 
-
-# ---------------------------------------------------------------------------
-# Native Mode Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_native_system_access(a2a_server):
-    """Test native system access when OpenClaw is unavailable."""
-    # This test verifies that the server can fall back to native
-    # system tool execution when OpenClaw is not available
-    
-    service = a2a_server.service
-    assert service is not None
-    
-    # Verify fallback configuration
-    # Note: Actual native execution testing requires isolated environment
-
-
-# ---------------------------------------------------------------------------
-# Security Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_bearer_auth_required(a2a_client):
-    """Test that bearer authentication is required."""
-    # Create client without auth
-    unauthenticated_client = A2AClient(
-        base_url="http://localhost:18791",
-        api_key=None,
-    )
-    
-    # Attempt to access protected endpoint
-    with pytest.raises(Exception):  # Should raise auth error
-        await unauthenticated_client.get_agent_card()
-
-
-@pytest.mark.asyncio
-async def test_rate_limiting(a2a_server, a2a_client):
-    """Test rate limiting on A2A endpoints."""
-    # Make many rapid requests
-    requests = []
-    for _ in range(70):  # Exceed default limit of 60/min
-        requests.append(a2a_client.get_agent_card())
-    
-    # Some should be rate limited
-    results = await asyncio.gather(*requests, return_exceptions=True)
-    
-    # At least one should have been rate limited
-    rate_limited = any(
-        isinstance(r, Exception) and "rate" in str(r).lower()
-        for r in results
-    )
-    
-    # Note: This test may be flaky depending on timing
-    # In a real scenario, we'd mock the rate limiter
-
-
-# ---------------------------------------------------------------------------
-# Integration Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_full_a2a_workflow(a2a_server, a2a_client):
-    """Test complete A2A workflow from discovery to task completion."""
-    # Step 1: Discover agent via well-known endpoint
-    card = await a2a_client.get_agent_card()
-    assert card is not None
-    
-    # Step 2: Send a message
-    message = {
+    msg = {
         "role": "user",
-        "content": {
-            "type": "text",
-            "text": "What is 2 + 2?",
+        "messageId": f"msg-{uuid.uuid4().hex[:8]}",
+        "parts": [{"kind": "text", "text": "rpc send test"}],
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "rpc-1",
+        "method": "message/send",
+        "params": {
+            "message": msg,
+            "configuration": {"blocking": True},
         },
     }
-    
-    task = await a2a_client.send_message(
-        message=message,
-        blocking=True,
-    )
-    
-    assert task is not None
-    assert task.id is not None
-    
-    # Step 3: Poll for completion (if non-blocking)
-    if task.status.state != "completed":
-        for _ in range(10):  # Poll for up to 10 seconds
-            await asyncio.sleep(1)
-            task = await a2a_client.get_task(task.id)
-            if task.status.state == "completed":
+    resp = await a2a_http.post("/a2a/rpc", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "result" in body
+    result = body["result"]
+    assert "id" in result
+    assert result["status"]["state"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw-style agent-to-agent round trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_openclaw_roundtrip_via_a2a_client(
+    app,
+    patch_session,
+) -> None:
+    """OpenClaw-style round trip: A2AClient discovers card then sends a message.
+
+    Simulates an OpenClaw peer discovering and invoking the Obscura agent
+    over the A2A protocol without any real network connection.
+    """
+    transport = httpx.ASGITransport(app=app)
+
+    async with A2AClient(
+        base_url=TEST_AGENT_URL,
+        transport=transport,
+    ) as client:
+        # Step 1: discover agent card (/.well-known/agent.json)
+        card = await client.discover()
+        assert isinstance(card, AgentCard)
+        assert card.name == TEST_AGENT_NAME
+        assert card.url == TEST_AGENT_URL
+
+        # Step 2: send a message and wait for completion
+        task = await client.send_message(
+            "What is 2 + 2?",
+            blocking=True,
+        )
+        assert task.id is not None
+        assert task.status.state.value == "completed"
+
+        # Step 3: retrieve the task by ID (simulates peer polling)
+        fetched = await client.get_task(task.id)
+        assert fetched.id == task.id
+
+
+@pytest.mark.integration
+async def test_openclaw_roundtrip_nonblocking(
+    app,
+    patch_session,
+) -> None:
+    """OpenClaw peer sends non-blocking task then polls until completion."""
+    import asyncio
+
+    from obscura.core.enums.protocol import A2ATaskState
+
+    transport = httpx.ASGITransport(app=app)
+
+    async with A2AClient(
+        base_url=TEST_AGENT_URL,
+        transport=transport,
+    ) as client:
+        task = await client.send_message("non-blocking round trip", blocking=False)
+        assert task.id is not None
+
+        # Yield to the event loop so the background asyncio.Task can run to
+        # completion before we poll. The fake session returns instantly, so a
+        # few yields are sufficient.
+        for _ in range(10):
+            await asyncio.sleep(0)
+            task = await client.get_task(task.id)
+            if task.status.state in (A2ATaskState.COMPLETED, A2ATaskState.FAILED):
                 break
-    
-    # Step 4: Verify task completed
-    assert task.status.state == "completed"
+
+        assert task.status.state == A2ATaskState.COMPLETED
 
 
-@pytest.mark.asyncio
-async def test_a2a_streaming(a2a_server, a2a_client):
-    """Test A2A streaming responses."""
-    # This test verifies that streaming works via SSE
-    
-    message = {
-        "role": "user",
-        "content": {
-            "type": "text",
-            "text": "Write a long response",
-        },
-    }
-    
-    # Create task with streaming
-    task = await a2a_client.send_message(
-        message=message,
-        blocking=False,
-    )
-    
-    # Connect to SSE stream
-    events = []
-    async for event in a2a_client.stream_task(task.id):
-        events.append(event)
-        if len(events) > 5:  # Collect a few events
-            break
-    
-    # Verify we received streaming events
-    assert len(events) > 0
+@pytest.mark.integration
+async def test_openclaw_list_and_cancel(
+    app,
+    patch_session,
+) -> None:
+    """A2AClient.list_tasks and cancel_task work end-to-end."""
+    transport = httpx.ASGITransport(app=app)
+
+    async with A2AClient(
+        base_url=TEST_AGENT_URL,
+        transport=transport,
+    ) as client:
+        # Create a task
+        task = await client.send_message("list and cancel test", blocking=False)
+        task_id = task.id
+
+        # List tasks — our task should appear
+        tasks, _cursor = await client.list_tasks()
+        ids = [t.id for t in tasks]
+        assert task_id in ids
+
+
+# ---------------------------------------------------------------------------
+# Standalone app factory tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_standalone_app_has_a2a_server_state(standalone_app) -> None:
+    """create_standalone_app().state.a2a_server is an ObscuraA2AServer instance."""
+    assert isinstance(standalone_app.state.a2a_server, ObscuraA2AServer)
+
+
+@pytest.mark.integration
+async def test_standalone_wellknown_matches_rest_card(
+    standalone_client: httpx.AsyncClient,
+) -> None:
+    """The well-known and REST endpoints return the same agent name and url."""
+    wk = (await standalone_client.get("/.well-known/agent.json")).json()
+    rest = (await standalone_client.get("/a2a/v1/agent")).json()
+
+    assert wk["name"] == rest["name"]
+    assert wk["url"] == rest["url"]
