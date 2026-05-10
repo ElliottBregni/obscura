@@ -293,7 +293,7 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
             logger.debug("webhook_a2a: channel inject failed", exc_info=True)
 
         logger.info("webhook/a2a: received task=%s type=%s from=%s", task_id, task_type, sender)
-        return _JSONResponse({"ok": True, "task_id": task_id})
+        return JSONResponse({"ok": True, "task_id": task_id})
 
     logger.info(
         "Network gateway configured: host=%s port=%d backend=%s auth=%s",
