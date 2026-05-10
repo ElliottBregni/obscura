@@ -20,9 +20,6 @@ from typing import Any, override
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 
-if __name__ != "__main__":
-    from starlette.requests import Request  # noqa: F401 (imported for type hints)
-
 logger = logging.getLogger(__name__)
 
 # Paths that never require auth or rate limiting

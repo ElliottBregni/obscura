@@ -98,7 +98,7 @@ class ChatCompletionChunk(BaseModel):
 # ---------------------------------------------------------------------------
 
 _MODEL_TO_BACKEND: dict[str, str] = {
-    "obscura": "",           # use gateway default
+    "obscura": "",  # use gateway default
     "obscura/claude": "claude",
     "obscura/copilot": "copilot",
     "obscura/codex": "codex",
@@ -210,19 +210,27 @@ async def _sse_generator(
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+        "choices": [
+            {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
+        ],
     }
     yield f"data: {json.dumps(opening)}\n\n"
 
     try:
-        async for delta_text in _stream_agent(backend, model, system_prompt, user_prompt):
+        async for delta_text in _stream_agent(
+            backend, model, system_prompt, user_prompt
+        ):
             chunk: dict[str, Any] = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": model,
                 "choices": [
-                    {"index": 0, "delta": {"content": delta_text}, "finish_reason": None}
+                    {
+                        "index": 0,
+                        "delta": {"content": delta_text},
+                        "finish_reason": None,
+                    }
                 ],
             }
             yield f"data: {json.dumps(chunk)}\n\n"
