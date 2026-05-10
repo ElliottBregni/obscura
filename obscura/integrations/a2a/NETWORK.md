@@ -1,5 +1,45 @@
 # A2A Network Topology — Obscura ↔ OpenClaw
 
+## Status
+
+| Component | State | Notes |
+|-----------|-------|-------|
+| Obscura→OpenClaw | ✅ Implemented | `OpenClawBridge` via chat completions |
+| OpenClaw→Obscura | ✅ Implemented | `a2aPeers` config patched in `~/.openclaw/openclaw.json` |
+| Streaming | ✅ Implemented | `stream_send()` SSE |
+| Multi-turn | ✅ Implemented | `OpenClawContext` |
+| Auto-init | ✅ Implemented | `ask_openclaw` tool registered on provider startup |
+| Auth inbound | ⚠️ Partial | Obscura A2A server bearer token not yet set — OpenClaw→Obscura calls are unauthenticated |
+
+---
+
+## Quick Start
+
+```python
+import asyncio
+from obscura.integrations.a2a.openclaw_bridge import OpenClawBridge, OpenClawBridgeConfig
+
+async def main():
+    config = OpenClawBridgeConfig(
+        base_url="http://localhost:18789",
+        token="<openclaw-bearer-token>",
+        model="openclaw/main",
+    )
+    bridge = OpenClawBridge(config)
+
+    # Single-turn
+    task = await bridge.send("Summarise the last git commit in this repo")
+    print(task.artifacts[0].parts[0].text)
+
+    # Streaming
+    async for chunk in bridge.stream_send("Explain the A2A protocol"):
+        print(chunk, end="", flush=True)
+
+asyncio.run(main())
+```
+
+---
+
 ## Current topology
 
 ```
