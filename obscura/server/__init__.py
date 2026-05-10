@@ -11,6 +11,7 @@ Start the server via::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -150,6 +151,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             exc_info=True,
         )
 
+    # Start network gateway as a background task when enabled
+    app.state.network_gateway_task = None
+    if config.network_gateway_enabled:
+        try:
+            import uvicorn
+
+            from obscura.integrations.network_gateway.app import create_gateway_app
+            from obscura.integrations.network_gateway.config import GatewayConfig
+
+            gw_config = GatewayConfig.from_obscura_config()
+            gw_app = create_gateway_app(gw_config)
+            uv_config = uvicorn.Config(
+                gw_app,
+                host=gw_config.host,
+                port=gw_config.port,
+                log_level="warning",
+            )
+            uv_server = uvicorn.Server(uv_config)
+
+            async def _run_gateway() -> None:
+                await uv_server.serve()
+
+            app.state.network_gateway_task = asyncio.create_task(_run_gateway())
+            logger.info(
+                "Network gateway started on %s:%d",
+                gw_config.host,
+                gw_config.port,
+            )
+        except Exception:
+            logger.warning(
+                "Could not start network gateway; continuing without it",
+                exc_info=True,
+            )
+
     # Apply any spec-driven channel configs persisted in the DB.
     # This runs regardless of whether env-var credentials were found — DB configs
     # can register additional channels (or override env-var channels) at startup.
@@ -188,6 +223,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
 
     yield
+
+    # Cleanup network gateway
+    gw_task: asyncio.Task[None] | None = getattr(
+        app.state, "network_gateway_task", None
+    )
+    if gw_task is not None and not gw_task.done():
+        try:
+            gw_task.cancel()
+            await asyncio.shield(asyncio.gather(gw_task, return_exceptions=True))
+            logger.info("Network gateway stopped")
+        except Exception:
+            logger.debug("suppressed exception in lifespan", exc_info=True)
 
     # Cleanup A2A server
     if hasattr(app.state, "a2a_server"):

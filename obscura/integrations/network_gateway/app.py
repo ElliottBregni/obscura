@@ -197,4 +197,22 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
 #   uvicorn obscura.integrations.network_gateway.app:app --port 18790
 app: FastAPI = create_gateway_app()
 
-__all__ = ["app", "create_gateway_app"]
+
+def main() -> None:
+    """Standalone entry point for the network gateway.
+
+    Reads configuration from ObscuraConfig + env overrides and starts
+    a blocking uvicorn server.  Equivalent to::
+
+        uvicorn obscura.integrations.network_gateway.app:app --port 18790
+    """
+    import uvicorn
+
+    cfg = GatewayConfig.from_obscura_config()
+    uvicorn.run(create_gateway_app(cfg), host=cfg.host, port=cfg.port)
+
+
+if __name__ == "__main__":
+    main()
+
+__all__ = ["app", "create_gateway_app", "main"]
