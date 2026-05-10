@@ -149,6 +149,20 @@ class A2AService:
         task = await self._store.create_task(ctx_id, message)
         logger.info("Created task %s in context %s", task.id, ctx_id)
 
+        # --- Channel inject: if a REPL is running, route through the REPL
+        # queue so the user sees and responds to the message directly rather
+        # than spawning an autonomous agent.  Works for both blocking and
+        # non-blocking callers.
+        channel_result = await self._try_channel_inject(
+            task,
+            message,
+            blocking=blocking,
+            push_notification_url=push_notification_url,
+        )
+        if channel_result is not None:
+            return channel_result
+
+        # Fallback: no REPL present — run autonomous agent
         if blocking:
             await self._run_agent_blocking(task)
             refreshed = await self._store.get_task(task.id)
@@ -160,6 +174,126 @@ class A2AService:
         else:
             self._run_agent_background(task)
         return task
+
+    async def _try_channel_inject(
+        self,
+        task: Task,
+        message: A2AMessage,
+        *,
+        blocking: bool,
+        push_notification_url: str | None,
+        inject_timeout: float = 300.0,
+    ) -> Task | None:
+        """Attempt to inject the A2A message into the REPL channel queue.
+
+        Returns the completed/submitted Task if injection succeeded,
+        or ``None`` if no REPL is listening (caller falls back to autonomous agent).
+
+        Blocking callers wait up to ``inject_timeout`` seconds for the REPL
+        to reply.  Non-blocking callers return immediately with state SUBMITTED
+        and the reply_fn updates the task + fires the push notification.
+        """
+        try:
+            from obscura.integrations.messaging.channel_inject import (
+                ChannelMessage,
+                get_channel_queue,
+                push_channel_message,
+            )
+        except ImportError:
+            return None
+
+        queue = get_channel_queue()
+        # If the queue maxsize is 0 or empty listeners — best we can do is
+        # check if it's been initialised (it always is now).  We proceed
+        # optimistically; if the REPL isn't running the message will sit
+        # in the queue until the process exits.
+
+        text = self._extract_text(message)
+        if not text:
+            return None
+
+        # Determine display name: prefer contextId metadata, fall back to task id
+        sender_label = message.metadata.get("from", "") if message.metadata else ""
+        sender_id = sender_label or f"a2a:{task.id[:8]}"
+        display_name = sender_label or "A2A peer"
+
+        if blocking:
+            # Blocking path: create a Future the reply_fn resolves.
+            loop = asyncio.get_running_loop()
+            _reply_future: asyncio.Future[str] = loop.create_future()
+
+            async def _reply_blocking(response_text: str) -> bool:
+                if not _reply_future.done():
+                    _reply_future.set_result(response_text)
+                return True
+
+            channel_msg = ChannelMessage(
+                platform="a2a",
+                sender_id=sender_id,
+                text=text,
+                reply_fn=_reply_blocking,
+                display_name=display_name,
+            )
+            pushed = push_channel_message(channel_msg)
+            if not pushed:
+                logger.warning("A2A channel inject: queue full for task %s", task.id)
+                return None
+
+            logger.info("A2A task %s injected into REPL channel (blocking)", task.id)
+            await self._store.transition(task.id, A2ATaskState.WORKING)
+
+            try:
+                response_text = await asyncio.wait_for(_reply_future, timeout=inject_timeout)
+            except TimeoutError:
+                logger.warning(
+                    "A2A channel inject: REPL did not reply within %ss for task %s",
+                    inject_timeout, task.id,
+                )
+                # Fall back: run agent autonomously on timeout
+                await self._run_agent_blocking(task)
+                return await self._store.get_task(task.id) or task
+
+            # Store response as artifact
+            await self._store.add_artifact(
+                task.id,
+                Artifact(parts=[TextPart(text=response_text)]),
+            )
+            await self._store.transition(task.id, A2ATaskState.COMPLETED)
+            return await self._store.get_task(task.id) or task
+
+        else:
+            # Non-blocking path: reply_fn updates task + fires push notification.
+            async def _reply_nonblocking(response_text: str) -> bool:
+                try:
+                    await self._store.add_artifact(
+                        task.id,
+                        Artifact(parts=[TextPart(text=response_text)]),
+                    )
+                    await self._store.transition(task.id, A2ATaskState.COMPLETED)
+                    if push_notification_url:
+                        completed = await self._store.get_task(task.id)
+                        if completed:
+                            asyncio.create_task(
+                                self._fire_push_notification(completed, push_notification_url)
+                            )
+                except Exception:
+                    logger.debug("A2A channel inject: reply_fn error", exc_info=True)
+                return True
+
+            channel_msg = ChannelMessage(
+                platform="a2a",
+                sender_id=sender_id,
+                text=text,
+                reply_fn=_reply_nonblocking,
+                display_name=display_name,
+            )
+            pushed = push_channel_message(channel_msg)
+            if not pushed:
+                return None
+
+            logger.info("A2A task %s injected into REPL channel (non-blocking)", task.id)
+            await self._store.transition(task.id, A2ATaskState.SUBMITTED)
+            return task
 
     # ------------------------------------------------------------------
     # message/stream — streaming request
