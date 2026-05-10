@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse
 
-from obscura.gateway.messaging_bridge import MessagingSessionBridge
+from obscura.gateway.network_bridge import GatewayNetworkBridge
 from obscura.integrations.messaging.models import PlatformMessage
 from datetime import datetime, UTC
 
@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class TwilioWebhookHandler:
-    """Handle Twilio incoming SMS/MMS webhooks."""
-    
-    def __init__(self, messaging_bridge: MessagingSessionBridge) -> None:
-        self.bridge = messaging_bridge
+    """Handle Twilio incoming SMS/WhatsApp webhooks via GatewayNetworkBridge."""
+
+    def __init__(self, bridge: GatewayNetworkBridge) -> None:
+        self.bridge = bridge
         self.auth_token = os.environ.get("TWILIO_AUTH_TOKEN", "")
         
     async def handle_incoming_sms(self, request: Request) -> Response:
@@ -49,7 +49,7 @@ class TwilioWebhookHandler:
             
             # Create platform message
             message = PlatformMessage(
-                platform="twilio",
+                platform="whatsapp",
                 account_id="default",
                 channel_id=from_number,
                 sender_id=from_number,
@@ -62,9 +62,9 @@ class TwilioWebhookHandler:
                     "num_media": num_media,
                 }
             )
-            
-            # Process through bridge
-            response_text = await self.bridge.handle_message(message)
+
+            # Process through bridge (synchronous webhook path — response returned in reply)
+            response_text = await self.bridge.dispatch_await(message)
             
             # Return TwiML response
             twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -96,10 +96,10 @@ class TwilioWebhookHandler:
         return PlainTextResponse("OK")
 
 
-def create_twilio_router(messaging_bridge: MessagingSessionBridge) -> APIRouter:
+def create_twilio_router(bridge: GatewayNetworkBridge) -> APIRouter:
     """Create FastAPI router for Twilio webhooks."""
     router = APIRouter(prefix="/twilio", tags=["Twilio"])
-    handler = TwilioWebhookHandler(messaging_bridge)
+    handler = TwilioWebhookHandler(bridge)
     
     @router.post("/sms")
     async def incoming_sms(request: Request) -> Response:

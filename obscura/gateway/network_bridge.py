@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from obscura.gateway.config import GatewayConfig, GatewayMode
 from obscura.gateway.orchestrator import GatewayOrchestrator, GatewayState
+from obscura.integrations.messaging.identity import build_conversation_key
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.messaging.router import ChannelRouter, ChannelRouterConfig
 
@@ -208,6 +209,83 @@ class GatewayNetworkBridge:
         ``bridge.router.dispatch(...)`` directly.
         """
         await self.router.dispatch_message(msg)
+
+    async def dispatch_await(self, msg: PlatformMessage) -> str:
+        """Dispatch a message and return the agent response string.
+
+        Use for synchronous webhook patterns (e.g. Twilio TwiML) where the
+        response must be returned in the HTTP reply body. Unlike dispatch(),
+        this does NOT call adapter.send() — the caller delivers the response.
+
+        Performs the same session management as ChannelRouter._handle:
+        dedup is skipped (webhook guarantees exactly-once delivery),
+        but conversation history is persisted in ConversationStore.
+
+        Args:
+            msg: Normalised inbound platform message.
+
+        Returns:
+            Agent response string. Never raises — errors return a user-facing
+            message.
+        """
+        platform = msg.platform.lower()
+
+        conv_key = build_conversation_key(
+            platform=platform,
+            account_id=msg.account_id,
+            channel_id=msg.channel_id,
+            participants=[msg.sender_id],
+        )
+
+        logger.info(
+            "GatewayNetworkBridge.dispatch_await: platform=%s conv_key=%s",
+            platform,
+            conv_key,
+        )
+
+        store = self.router._store
+        store.ensure(
+            conversation_key=conv_key,
+            platform=platform,
+            account_id=msg.account_id,
+            channel_id=msg.channel_id,
+            participants=[msg.sender_id],
+        )
+
+        if self.router._config.session_timeout_seconds > 0:
+            store.reset_if_stale(conv_key, self.router._config.session_timeout_seconds)
+
+        state = store.append_user_message(
+            conv_key,
+            msg.text,
+            max_history_entries=self.router._config.max_history_entries,
+        )
+
+        runner = self.router._get_runner_for(platform)
+        try:
+            response = await runner.run_turn(
+                msg.text,
+                session_id=conv_key,
+                history=list(state.history[:-1]),
+                system_prompt=self.router._config.system_prompt,
+                max_turns=self.router._config.max_turns,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "GatewayNetworkBridge.dispatch_await: agent run failed "
+                "conv_key=%s platform=%s",
+                conv_key,
+                platform,
+            )
+            return "Sorry, I encountered an error processing your message."
+
+        store.append_assistant_message(
+            conv_key,
+            response,
+            max_history_entries=self.router._config.max_history_entries,
+        )
+
+        return response
 
     # ------------------------------------------------------------------
     # Mode management
