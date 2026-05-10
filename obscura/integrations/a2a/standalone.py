@@ -393,7 +393,7 @@ def create_standalone_app(
     agent_model: str = "",
     agent_system_prompt: str = "",
     unix_socket_path: str | None = None,
-    enable_auth: bool = False,
+    enable_auth: bool = True,
 ) -> "FastAPI":
     """Create a standalone FastAPI application exposing the A2A protocol.
 
@@ -423,17 +423,31 @@ def create_standalone_app(
         Optional Unix domain socket path. When set, a socket transport is
         started alongside the HTTP server during lifespan startup.
     enable_auth:
-        If ``True``, installs :class:`~obscura.auth.middleware.APIKeyAuthMiddleware`
-        to require a bearer API key on all requests.
+        If ``True`` (the default), installs
+        :class:`~obscura.integrations.a2a.auth.A2ABearerAuthMiddleware` to
+        require a valid ``Authorization: Bearer`` token on all ``/a2a/*``
+        paths.  ``/.well-known/agent.json`` remains publicly accessible.
+        Tokens are read from ``OBSCURA_A2A_TOKEN`` env var or
+        ``~/.obscura/a2a-gateway.token``.  Pass ``False`` only in trusted
+        local / test environments.
 
     Returns
     -------
     FastAPI
         Fully configured FastAPI application.
+
+    Security middleware stack (outermost → innermost):
+        1. :class:`~obscura.auth.security_headers.SecurityHeadersMiddleware`
+        2. :class:`~obscura.integrations.a2a.auth.A2ARateLimitMiddleware`
+           (60 req/min per IP)
+        3. :class:`~obscura.integrations.a2a.auth.A2ABearerAuthMiddleware`
+           (when ``enable_auth=True``)
+        4. CORS
     """
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
 
+    from obscura.auth.security_headers import SecurityHeadersMiddleware
     from obscura.integrations.a2a.definition import (
         DEFAULT_AGENT_DEFINITION,
     )
@@ -467,6 +481,14 @@ def create_standalone_app(
         lifespan=_make_lifespan(a2a_server),
     )
 
+    # ------------------------------------------------------------------ #
+    # Middleware stack — add_middleware() wraps in LIFO order, so the last
+    # .add_middleware() call becomes the outermost layer.
+    # Desired request flow:
+    #   SecurityHeaders → RateLimit → BearerAuth → CORS → routes
+    # Therefore registration order is CORS first, then each layer in reverse.
+    # ------------------------------------------------------------------ #
+
     # CORS — open by default for A2A interop; restrict in production via a
     # reverse-proxy or by passing a tighter allow_origins list.
     fastapi_app.add_middleware(
@@ -476,10 +498,19 @@ def create_standalone_app(
         allow_headers=["*"],
     )
 
+    # Bearer auth — guards /a2a/* (/.well-known/ is always public).
     if enable_auth:
-        from obscura.auth.middleware import APIKeyAuthMiddleware
+        from obscura.integrations.a2a.auth import A2ABearerAuthMiddleware
 
-        fastapi_app.add_middleware(APIKeyAuthMiddleware)
+        fastapi_app.add_middleware(A2ABearerAuthMiddleware)
+
+    # Per-IP rate limit — 60 requests/minute on /a2a/* paths.
+    from obscura.integrations.a2a.auth import A2ARateLimitMiddleware
+
+    fastapi_app.add_middleware(A2ARateLimitMiddleware)
+
+    # Security headers — applied to every response (outermost layer).
+    fastapi_app.add_middleware(SecurityHeadersMiddleware)
 
     service = a2a_server.service
 
