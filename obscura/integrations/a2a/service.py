@@ -175,6 +175,42 @@ class A2AService:
             self._run_agent_background(task)
         return task
 
+    # Per-sender rate limit: max N injects per sliding window
+    _INJECT_RATE_LIMIT: int = 10           # max messages
+    _INJECT_RATE_WINDOW: float = 60.0      # per this many seconds
+    _INJECT_TIMEOUT_MAX: float = 600.0     # hard cap on inject_timeout
+    _INJECT_TIMEOUT_DEFAULT: float = 300.0
+
+    # sender_id → deque of timestamps
+    _inject_rate_buckets: dict[str, list[float]] = {}
+
+    def _inject_rate_check(self, sender_id: str) -> bool:
+        """Return True if the sender is within rate limit, False if throttled."""
+        import time
+        now = time.monotonic()
+        window = self._INJECT_RATE_WINDOW
+        bucket = self._inject_rate_buckets.setdefault(sender_id, [])
+        # Prune old entries
+        cutoff = now - window
+        while bucket and bucket[0] < cutoff:
+            bucket.pop(0)
+        if len(bucket) >= self._INJECT_RATE_LIMIT:
+            return False
+        bucket.append(now)
+        return True
+
+    @staticmethod
+    def _sanitize_inject_label(value: str) -> str:
+        """Strip characters that could escape the '[Platform from X]: ' REPL prefix."""
+        return (
+            value.replace("[", "")
+                 .replace("]", "")
+                 .replace("\n", " ")
+                 .replace("\r", "")
+                 .replace("\x00", "")
+            [:128]
+        )
+
     async def _try_channel_inject(
         self,
         task: Task,
@@ -182,7 +218,7 @@ class A2AService:
         *,
         blocking: bool,
         push_notification_url: str | None,
-        inject_timeout: float = 300.0,
+        inject_timeout: float | None = None,
     ) -> Task | None:
         """Attempt to inject the A2A message into the REPL channel queue.
 
@@ -192,6 +228,14 @@ class A2AService:
         Blocking callers wait up to ``inject_timeout`` seconds for the REPL
         to reply.  Non-blocking callers return immediately with state SUBMITTED
         and the reply_fn updates the task + fires the push notification.
+
+        Hardening:
+        - Liveness check: skips inject if no REPL coroutine is waiting on the queue.
+        - Rate limit: max 10 messages per sender per 60s.
+        - Label sanitization: strips bracket/control chars from sender metadata.
+        - Timeout cap: inject_timeout is clamped to [1, 600] seconds.
+        - CancelledError: transitions task to FAILED on server shutdown.
+        - asyncio best practice: uses get_running_loop().create_task().
         """
         try:
             from obscura.integrations.messaging.channel_inject import (
@@ -203,19 +247,35 @@ class A2AService:
             return None
 
         queue = get_channel_queue()
-        # If the queue maxsize is 0 or empty listeners — best we can do is
-        # check if it's been initialised (it always is now).  We proceed
-        # optimistically; if the REPL isn't running the message will sit
-        # in the queue until the process exits.
+
+        # Liveness check: only inject if the REPL is actively waiting for messages.
+        # asyncio.Queue stores pending getters in _getters (internal, stable since 3.4).
+        if not getattr(queue, "_getters", None):
+            logger.debug("A2A channel inject: no REPL waiter, skipping inject for task %s", task.id)
+            return None
 
         text = self._extract_text(message)
         if not text:
+            logger.debug("A2A channel inject: no text in message for task %s", task.id)
             return None
 
-        # Determine display name: prefer contextId metadata, fall back to task id
-        sender_label = message.metadata.get("from", "") if message.metadata else ""
+        # Sanitize sender metadata — untrusted input from the peer
+        raw_label = (message.metadata.get("from", "") if message.metadata else "") or ""
+        sender_label = self._sanitize_inject_label(raw_label)
         sender_id = sender_label or f"a2a:{task.id[:8]}"
         display_name = sender_label or "A2A peer"
+
+        # Per-sender rate limit
+        if not self._inject_rate_check(sender_id):
+            logger.warning(
+                "A2A channel inject: rate limit hit for sender=%s task=%s — falling back to agent",
+                sender_id, task.id,
+            )
+            return None
+
+        # Resolve and clamp inject_timeout
+        _timeout = inject_timeout if inject_timeout is not None else self._INJECT_TIMEOUT_DEFAULT
+        _timeout = max(1.0, min(_timeout, self._INJECT_TIMEOUT_MAX))
 
         if blocking:
             # Blocking path: create a Future the reply_fn resolves.
@@ -236,22 +296,38 @@ class A2AService:
             )
             pushed = push_channel_message(channel_msg)
             if not pushed:
-                logger.warning("A2A channel inject: queue full for task %s", task.id)
+                logger.warning(
+                    "A2A channel inject: queue full, falling back to agent for task %s sender=%s",
+                    task.id, sender_id,
+                )
                 return None
 
-            logger.info("A2A task %s injected into REPL channel (blocking)", task.id)
+            logger.info(
+                "A2A task %s injected into REPL channel (blocking, timeout=%ss) sender=%s",
+                task.id, _timeout, sender_id,
+            )
             await self._store.transition(task.id, A2ATaskState.WORKING)
 
             try:
-                response_text = await asyncio.wait_for(_reply_future, timeout=inject_timeout)
-            except TimeoutError:
+                response_text = await asyncio.wait_for(_reply_future, timeout=_timeout)
+            except asyncio.TimeoutError:
                 logger.warning(
-                    "A2A channel inject: REPL did not reply within %ss for task %s",
-                    inject_timeout, task.id,
+                    "A2A channel inject: REPL did not reply within %ss for task %s — "
+                    "falling back to autonomous agent",
+                    _timeout, task.id,
                 )
-                # Fall back: run agent autonomously on timeout
+                if not _reply_future.done():
+                    _reply_future.cancel()
                 await self._run_agent_blocking(task)
                 return await self._store.get_task(task.id) or task
+            except asyncio.CancelledError:
+                logger.warning(
+                    "A2A channel inject: server cancelled while waiting for reply on task %s",
+                    task.id,
+                )
+                with contextlib.suppress(Exception):
+                    await self._store.transition(task.id, A2ATaskState.FAILED)
+                raise
 
             # Store response as artifact
             await self._store.add_artifact(
@@ -263,6 +339,8 @@ class A2AService:
 
         else:
             # Non-blocking path: reply_fn updates task + fires push notification.
+            _push_url = push_notification_url  # capture for closure
+
             async def _reply_nonblocking(response_text: str) -> bool:
                 try:
                     await self._store.add_artifact(
@@ -270,11 +348,11 @@ class A2AService:
                         Artifact(parts=[TextPart(text=response_text)]),
                     )
                     await self._store.transition(task.id, A2ATaskState.COMPLETED)
-                    if push_notification_url:
+                    if _push_url:
                         completed = await self._store.get_task(task.id)
                         if completed:
-                            asyncio.create_task(
-                                self._fire_push_notification(completed, push_notification_url)
+                            asyncio.get_running_loop().create_task(
+                                self._fire_push_notification(completed, _push_url)
                             )
                 except Exception:
                     logger.debug("A2A channel inject: reply_fn error", exc_info=True)
@@ -289,9 +367,16 @@ class A2AService:
             )
             pushed = push_channel_message(channel_msg)
             if not pushed:
+                logger.warning(
+                    "A2A channel inject: queue full, falling back to agent for task %s sender=%s",
+                    task.id, sender_id,
+                )
                 return None
 
-            logger.info("A2A task %s injected into REPL channel (non-blocking)", task.id)
+            logger.info(
+                "A2A task %s injected into REPL channel (non-blocking) sender=%s",
+                task.id, sender_id,
+            )
             await self._store.transition(task.id, A2ATaskState.SUBMITTED)
             return task
 
