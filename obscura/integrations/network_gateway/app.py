@@ -36,8 +36,9 @@ import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from obscura.auth.security_headers import SecurityHeadersMiddleware
 from obscura.integrations.network_gateway.auth import (
@@ -238,11 +239,8 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     # -- Push-notification webhook (public, no auth) -----------------------
     # OpenClaw POSTs completed task results here when pushNotificationUrl is set.
 
-    from fastapi import Request as _Request
-    from fastapi.responses import JSONResponse as _JSONResponse
-
     @app.post("/webhook/a2a", tags=["webhook"])
-    async def webhook_a2a(request: _Request) -> _JSONResponse:
+    async def webhook_a2a(request: Request) -> JSONResponse:
         """Receive A2A push-notification callbacks from peer agents (e.g. OpenClaw).
 
         Extracts the task result text and injects it into the REPL channel
@@ -251,7 +249,7 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         try:
             body: dict = await request.json()
         except Exception:
-            return _JSONResponse({"error": "invalid_json"}, status_code=400)
+            return JSONResponse({"error": "invalid_json"}, status_code=400)
 
         task_id = body.get("task_id") or body.get("id", "?")
         task_type = body.get("type", "push_notification")
