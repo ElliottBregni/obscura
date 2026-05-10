@@ -13,6 +13,16 @@ Usage::
     # Or build from config
     registry = WellKnownAgentRegistry.from_config(config)
     agent = registry.get("openclaw")
+
+``WellKnownAgent`` fields:
+    name:        Stable short name (e.g. ``"openclaw"``).
+    url:         Base URL of the remote agent.
+    description: Human-readable description.
+    auth_token:  Optional bearer token.
+    bridge_only: When ``True`` the agent does not implement A2A natively.
+                 ``discover_all()`` will skip it (logs at DEBUG instead of
+                 attempting the fetch).  Use for OpenAI-compat-only peers
+                 such as OpenClaw that are bridged by Obscura.
 """
 
 from __future__ import annotations
@@ -43,6 +53,12 @@ class WellKnownAgent:
         Human-readable description.
     auth_token:
         Optional bearer token used when connecting to this agent.
+    bridge_only:
+        When ``True`` the agent does not implement A2A natively and
+        ``discover_all()`` will skip the A2A card fetch for it (logging at
+        DEBUG level instead).  Intended for OpenAI-compat-only peers (e.g.
+        OpenClaw) that are bridged into the A2A network by Obscura via a
+        synthetic card.
 
     """
 
@@ -50,6 +66,7 @@ class WellKnownAgent:
     url: str
     description: str = ""
     auth_token: str | None = None
+    bridge_only: bool = False
 
 
 class WellKnownAgentRegistry:
@@ -113,6 +130,15 @@ class WellKnownAgentRegistry:
         from obscura.integrations.a2a.client import A2AClient as _A2AClient
 
         async def _fetch(agent: WellKnownAgent) -> tuple[str, AgentCard | None]:
+            if agent.bridge_only:
+                logger.debug(
+                    "Skipping A2A discovery for bridge-only agent %r at %s "
+                    "(no A2A card — use synthetic card instead)",
+                    agent.name,
+                    agent.url,
+                )
+                return agent.name, None
+
             peer: _A2AClient = _A2AClient(
                 agent.url,
                 auth_token=agent.auth_token,
@@ -196,12 +222,13 @@ DEFAULT_REGISTRY: WellKnownAgentRegistry = WellKnownAgentRegistry()
 DEFAULT_REGISTRY.register(
     WellKnownAgent(
         name="openclaw",
-        # OpenClaw's actual HTTP/WebSocket gateway port is 18789.
-        # Port 7477 was a dead reference — OpenClaw does not expose A2A there.
-        # Obscura reaches OpenClaw via POST /v1/chat/completions on this port.
-        # See: obscura/integrations/a2a/openclaw_bridge.py
+        # OpenClaw speaks OpenAI-compat only (POST /v1/chat/completions).
+        # It has NO A2A server — /.well-known/agent.json always 404s.
+        # Obscura bridges it via OpenClawBridge and advertises a synthetic card.
+        # See: obscura/integrations/a2a/openclaw_bridge.py::openclaw_synthetic_card
         url="http://localhost:18789",
         description="OpenClaw agent runtime (Molty) — chat completions gateway",
+        bridge_only=True,
     )
 )
 

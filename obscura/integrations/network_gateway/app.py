@@ -199,6 +199,25 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
             "port": resolved_config.port,
         }
 
+    # -- Synthetic peer cards (unauthenticated) ----------------------------
+
+    @app.get(
+        "/peers/openclaw/.well-known/agent.json",
+        tags=["peers"],
+        include_in_schema=False,
+    )
+    async def openclaw_peer_card() -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+        """Synthetic A2A agent card for OpenClaw (bridge peer).
+
+        OpenClaw speaks OpenAI-compat only and has no A2A server.  This
+        endpoint lets any A2A client on the network discover OpenClaw's
+        capabilities via Obscura without OpenClaw needing to implement A2A.
+        """
+        from obscura.integrations.a2a.openclaw_bridge import openclaw_synthetic_card
+
+        card = openclaw_synthetic_card()
+        return card.model_dump(mode="json")
+
     # -- OpenAI-compatible /v1 routes --------------------------------------
 
     app.include_router(chat_router)

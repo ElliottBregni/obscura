@@ -902,8 +902,49 @@ class OpenClawContext:
         return len(self.history) // 2
 
 
+# ---------------------------------------------------------------------------
+# Synthetic A2A card for OpenClaw
+# ---------------------------------------------------------------------------
+
+
+def openclaw_synthetic_card(base_url: str = "http://localhost:18789") -> "AgentCard":
+    """Return a synthetic AgentCard for OpenClaw.
+
+    OpenClaw speaks OpenAI-compat only (POST /v1/chat/completions) and does
+    not implement the A2A protocol.  This card lets Obscura advertise OpenClaw
+    to the wider A2A network without OpenClaw needing to implement A2A itself.
+
+    Parameters
+    ----------
+    base_url:
+        Base URL of the OpenClaw gateway (default: ``http://localhost:18789``).
+
+    Returns
+    -------
+    AgentCard
+        A well-formed A2A agent card representing OpenClaw as a bridged peer.
+
+    """
+    from obscura.integrations.a2a.agent_card import AgentCardGenerator
+
+    return (
+        AgentCardGenerator(
+            name="OpenClaw (Molty)",
+            url=base_url,
+            description=(
+                "OpenClaw agent runtime — Kimi K2.5/Moonshot, chat completions gateway. "
+                "Bridged by Obscura."
+            ),
+        )
+        .with_bearer_auth()
+        .with_provider("OpenClaw", "https://openclaw.dev")
+        .build()
+    )
+
+
 __all__ = [
     "OpenClawBridge",
     "OpenClawBridgeConfig",
     "OpenClawContext",
+    "openclaw_synthetic_card",
 ]
