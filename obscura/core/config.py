@@ -89,6 +89,11 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "moltbook_scraper_interval_hours",
         "moltbook_scraper_alert_threshold_pct",
         "moltbook_competitors",
+        # agent_monitor
+        "agent_monitor_enabled",
+        "agent_monitor_interval_seconds",
+        "agent_monitor_message",
+        "agent_monitor_log_path",
     },
 )
 
@@ -245,6 +250,17 @@ class ObscuraConfig(BaseModel):
     moltbook_scraper_interval_hours: int = 24
     moltbook_scraper_alert_threshold_pct: float = 5.0
     moltbook_competitors: list = []
+
+    # Agent monitor — peer-session assistance broadcaster
+    agent_monitor_enabled: bool = True
+    agent_monitor_interval_seconds: int = 15
+    agent_monitor_message: str = (
+        "Hi — I am the Claude Code assistant monitoring this workspace. "
+        "Elliott has asked me to stay available to all running agents. "
+        "If you need help with any task — code, planning, debugging, research, tool calls — "
+        "reach me via the Obscura gateway at http://localhost:18790 or send a UDS peer message."
+    )
+    agent_monitor_log_path: str = ""  # empty = ~/.obscura/logs/agent-monitor.log
 
     def validate_deployment_safety(self) -> None:
         """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
@@ -584,4 +600,29 @@ class ObscuraConfig(BaseModel):
                 5.0,
             ),
             moltbook_competitors=d.get("moltbook_competitors", []),
+            agent_monitor_enabled=_bool_optin(
+                "OBSCURA_AGENT_MONITOR_ENABLED",
+                "agent_monitor_enabled",
+                True,
+            ),
+            agent_monitor_interval_seconds=_int(
+                "OBSCURA_AGENT_MONITOR_INTERVAL",
+                "agent_monitor_interval_seconds",
+                15,
+            ),
+            agent_monitor_message=_str(
+                "OBSCURA_AGENT_MONITOR_MESSAGE",
+                "agent_monitor_message",
+                "",
+            ) or (
+                "Hi — I am the Claude Code assistant monitoring this workspace. "
+                "Elliott has asked me to stay available to all running agents. "
+                "If you need help with any task — code, planning, debugging, research, tool calls — "
+                "reach me via the Obscura gateway at http://localhost:18790 or send a UDS peer message."
+            ),
+            agent_monitor_log_path=_str(
+                "OBSCURA_AGENT_MONITOR_LOG_PATH",
+                "agent_monitor_log_path",
+                "",
+            ),
         )
