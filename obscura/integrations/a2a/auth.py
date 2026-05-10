@@ -37,8 +37,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Public paths that require NO auth (A2A discovery endpoint).
-_PUBLIC_PATHS: tuple[str, ...] = ("/.well-known/",)
+# Public paths that require NO auth (A2A discovery endpoint + webhook receiver).
+# /webhook/a2a is public because peer agents calling back have no Obscura token.
+_PUBLIC_PATHS: tuple[str, ...] = ("/.well-known/", "/webhook/")
 
 # Default token-file location.
 _DEFAULT_TOKEN_FILE = Path.home() / ".obscura" / "a2a-gateway.token"

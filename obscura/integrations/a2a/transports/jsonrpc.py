@@ -11,6 +11,7 @@ Mirrors the pattern in ``sdk/mcp/server.py:1083-1149``.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
@@ -98,13 +99,22 @@ async def _dispatch(
         message = _parse_message(message_payload)
         raw_config: Any = params.get("configuration")
         blocking: bool = True
+        push_url: str | None = None
         if isinstance(raw_config, Mapping):
-            blocking = bool(cast("Mapping[str, Any]", raw_config).get("blocking", True))
+            cfg = cast("Mapping[str, Any]", raw_config)
+            blocking = bool(cfg.get("blocking", True))
+            push_url = _optional_str(cfg, "pushNotificationUrl") or _optional_str(
+                cfg, "x-push-url"
+            )
+        # Also accept pushNotificationUrl at the top-level params
+        if push_url is None:
+            push_url = _optional_str(params, "pushNotificationUrl")
         task = await service.message_send(
             message,
             context_id=_optional_str(params, "contextId"),
             task_id=_optional_str(params, "taskId"),
             blocking=blocking,
+            push_notification_url=push_url,
         )
         return task.model_dump(mode="json")
 
@@ -161,7 +171,7 @@ def _parse_message(data: Mapping[str, Any]) -> A2AMessage:
     if not data:
         return A2AMessage(
             role=A2ARole.USER,
-            messageId="auto",
+            messageId=str(uuid.uuid4()),
             parts=[TextPart(text="[empty]")],
         )
     return A2AMessage.model_validate(data)

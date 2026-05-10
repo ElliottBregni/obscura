@@ -43,6 +43,7 @@ class SendMessageRequest(BaseModel):
     contextId: str | None = None
     taskId: str | None = None
     blocking: bool = True
+    pushNotificationUrl: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +72,7 @@ def create_rest_router(service: A2AService) -> APIRouter:
                 context_id=body.contextId,
                 task_id=body.taskId,
                 blocking=body.blocking,
+                push_notification_url=body.pushNotificationUrl,
             )
             return task.model_dump(mode="json")
         except A2AError as e:

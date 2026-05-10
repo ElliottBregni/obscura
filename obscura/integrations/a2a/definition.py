@@ -154,6 +154,7 @@ DEFAULT_AGENT_DEFINITION = AgentDefinition(
         "for code execution, file management, web search, data analysis, and more."
     ),
     version="1.0",
+    push_notifications=True,
     skills=[
         SkillDefinition(
             id="code-execution",

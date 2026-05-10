@@ -125,12 +125,19 @@ class A2AService:
         context_id: str | None = None,
         task_id: str | None = None,
         blocking: bool = True,
+        push_notification_url: str | None = None,
     ) -> Task:
         """Handle a ``message/send`` request.
 
         If ``task_id`` is provided and the task is in INPUT_REQUIRED,
         this delivers the user's response and resumes the agent.
         Otherwise, creates a new task and runs the agent.
+
+        Parameters
+        ----------
+        push_notification_url:
+            When ``blocking=False``, POST the completed task JSON to this URL
+            after agent execution finishes (best-effort, fire-and-forget).
         """
         ctx_id = context_id or message.contextId or f"ctx-{uuid.uuid4().hex[:12]}"
 
@@ -146,7 +153,12 @@ class A2AService:
             await self._run_agent_blocking(task)
             refreshed = await self._store.get_task(task.id)
             return refreshed or task
-        self._run_agent_background(task)
+
+        # Non-blocking: run in background, fire push notification when done
+        if push_notification_url:
+            self._run_agent_background_with_push(task, push_notification_url)
+        else:
+            self._run_agent_background(task)
         return task
 
     # ------------------------------------------------------------------
@@ -453,6 +465,52 @@ class A2AService:
             self._running.pop(task.id, None)
 
         async_task.add_done_callback(_cleanup)
+
+    def _run_agent_background_with_push(self, task: Task, push_url: str) -> None:
+        """Start agent execution in background and fire a push notification when done."""
+
+        async def _run_and_push() -> None:
+            await self._run_agent_blocking(task)
+            refreshed = await self._store.get_task(task.id)
+            final_task = refreshed or task
+            await self._fire_push_notification(final_task, push_url)
+
+        async_task = asyncio.create_task(_run_and_push())
+        self._running[task.id] = async_task
+
+        def _cleanup(t: asyncio.Task[Any]) -> None:
+            self._running.pop(task.id, None)
+
+        async_task.add_done_callback(_cleanup)
+
+    async def _fire_push_notification(self, task: Task, url: str) -> None:
+        """POST completed task to push notification URL (best-effort)."""
+        import json
+
+        payload = task.model_dump(mode="json")
+        try:
+            try:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(url, json=payload)
+            except ImportError:
+                import urllib.request
+
+                data = json.dumps(payload).encode()
+                req = urllib.request.Request(url, data=data, method="POST")
+                req.add_header("Content-Type", "application/json")
+                await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: urllib.request.urlopen(req, timeout=10)
+                )
+            logger.info("Push notification sent to %s for task %s", url, task.id)
+        except Exception:
+            logger.warning(
+                "Push notification failed to %s for task %s",
+                url,
+                task.id,
+                exc_info=True,
+            )
 
     async def _execute_agent(self, task: Task, prompt: str) -> str:
         """Execute the agent and return the final text result.

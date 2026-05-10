@@ -519,9 +519,80 @@ def create_standalone_app(
     fastapi_app.include_router(create_sse_router(service))
     fastapi_app.include_router(create_wellknown_router(service))
 
+    # ------------------------------------------------------------------ #
+    # Webhook receiver — peer agents (e.g. OpenClaw) POST async results here
+    # ------------------------------------------------------------------ #
+    _register_webhook_endpoints(fastapi_app)
+
     fastapi_app.state.a2a_server = a2a_server
 
     return fastapi_app
+
+
+def _register_webhook_endpoints(app: "FastAPI") -> None:
+    """Register the ``POST /webhook/a2a`` endpoint on *app*.
+
+    This endpoint receives async A2A task results pushed by peer agents
+    (e.g. OpenClaw).  It is public — peer agents on loopback have no
+    Obscura bearer token in the webhook callback context.
+    """
+    import logging as _logging
+
+    from fastapi import Request
+
+    _wh_logger = _logging.getLogger(__name__ + ".webhook")
+
+    @app.post("/webhook/a2a", tags=["webhooks"], include_in_schema=False)
+    async def receive_a2a_webhook(request: Request) -> dict[str, Any]:
+        """Receive async A2A task results pushed from peer agents (e.g. OpenClaw)."""
+        try:
+            body = await request.json()
+            task_id: str = body.get("id", "unknown")
+            state: str = body.get("status", {}).get("state", "unknown")
+            _wh_logger.info(
+                "A2A webhook received: task_id=%s state=%s", task_id, state
+            )
+
+            # Extract text from artifacts and push into channel inject queue
+            artifacts: list[Any] = body.get("artifacts", [])
+            text_parts: list[str] = []
+            for art in artifacts:
+                for part in art.get("parts", []):
+                    if part.get("type") == "text" and part.get("text"):
+                        text_parts.append(part["text"])
+            text = "\n".join(text_parts)
+
+            if text:
+                try:
+                    from obscura.integrations.messaging.channel_inject import (
+                        ChannelMessage,
+                        push_channel_message,
+                    )
+
+                    async def _noop(t: str) -> bool:  # noqa: ARG001
+                        return True
+
+                    push_channel_message(
+                        ChannelMessage(
+                            platform="a2a-webhook",
+                            sender_id=body.get("metadata", {}).get(
+                                "from", "peer-agent"
+                            ),
+                            text=(
+                                f"[A2A result task={task_id[:8]} state={state}]: {text}"
+                            ),
+                            reply_fn=_noop,
+                        )
+                    )
+                except Exception:
+                    _wh_logger.debug(
+                        "webhook: channel inject unavailable", exc_info=True
+                    )
+
+            return {"ok": True, "task_id": task_id}
+        except Exception:
+            _wh_logger.exception("A2A webhook parse error")
+            return {"ok": False}
 
 
 # Module-level app — enables ``uvicorn obscura.integrations.a2a.standalone:app``

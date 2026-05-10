@@ -22,11 +22,12 @@ keep resolving.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from obscura.core.enums.protocol import (
     A2APartKind,
@@ -120,6 +121,15 @@ class A2AMessage(BoundaryModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: Mapping[str, Any] | None = None
     referenceTaskIds: list[str] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _auto_message_id(cls, data: Any) -> Any:
+        """Auto-generate a UUID4 messageId if absent or empty."""
+        if isinstance(data, dict) and not data.get("messageId"):
+            data = dict(data)
+            data["messageId"] = str(uuid.uuid4())
+        return data
 
 
 class Artifact(BoundaryModel):
