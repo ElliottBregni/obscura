@@ -249,8 +249,13 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     async def webhook_a2a(request: Request) -> JSONResponse:
         """Receive A2A push-notification callbacks from peer agents (e.g. OpenClaw).
 
-        Extracts the task result text and injects it into the REPL channel
-        so it appears as a peer message in the active session.
+        Extracts the task result text and broadcasts it to all active REPL
+        sessions via UDS so it appears as a peer message in the running
+        interactive session(s).
+
+        The gateway runs in a separate process from the REPL; the in-process
+        ``channel_inject`` queue is not shared across processes.  UDS
+        (``obscura.kairos.uds_messaging``) is the cross-process channel.
 
         Security: when ``app.state.webhook_secret`` is set, the request must
         carry ``X-Webhook-Signature: sha256=<hex>`` computed over the raw body
@@ -325,26 +330,35 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         # Allow alphanumeric + safe punctuation only; fall back to generic label
         sender = raw_sender if _re.fullmatch(r"[\w.\-]+", raw_sender) else "webhook-peer"
 
-        # -- Inject into REPL channel ----------------------------------------
-        # Best-effort — silently skips if no REPL active
+        # -- Inject into REPL channel via UDS --------------------------------
+        # The gateway runs in a separate process from the REPL; the in-process
+        # channel queue is unreachable from here.  Use UDS broadcast instead:
+        # discover_peers() finds all live REPL sockets, send_message() delivers
+        # the payload to each one, and UDSInbox._on_peer_message (in the REPL
+        # process) calls push_channel_message() into the REPL's own queue.
         try:
-            from obscura.integrations.messaging.channel_inject import (
-                ChannelMessage,
-                push_channel_message,
-            )
+            from obscura.kairos.uds_messaging import discover_peers, send_message
 
-            async def _noop(r: str) -> bool:  # noqa: ARG001
-                return True
-
-            push_channel_message(ChannelMessage(
-                platform="webhook",
-                sender_id=sender,
-                display_name=sender,
-                text=text,
-                reply_fn=_noop,
-            ))
+            peers = discover_peers()
+            if peers:
+                uds_payload = {
+                    "from": sender,
+                    "from_session": "webhook",
+                    "text": text,
+                    "backend": "a2a-webhook",
+                }
+                delivered = 0
+                for _sid in peers:
+                    if await send_message(_sid, uds_payload):
+                        delivered += 1
+                logger.info(
+                    "webhook_a2a: injected into %d/%d REPL session(s)",
+                    delivered, len(peers),
+                )
+            else:
+                logger.debug("webhook_a2a: no active REPL sessions to inject into")
         except Exception:
-            logger.debug("webhook_a2a: channel inject failed", exc_info=True)
+            logger.debug("webhook_a2a: UDS inject failed", exc_info=True)
 
         logger.info(
             "webhook/a2a: received task=%s type=%s from=%s",
