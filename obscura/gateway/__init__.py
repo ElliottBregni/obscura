@@ -12,9 +12,17 @@ from __future__ import annotations
 
 from obscura.gateway.orchestrator import GatewayMode, GatewayOrchestrator
 from obscura.gateway.config import GatewayConfig
+from obscura.gateway.network_bridge import (
+    GatewayAgentRunner,
+    GatewayNetworkBridge,
+    build_gateway_network_bridge,
+)
 
 __all__ = [
     "GatewayMode",
     "GatewayOrchestrator",
     "GatewayConfig",
+    "GatewayAgentRunner",
+    "GatewayNetworkBridge",
+    "build_gateway_network_bridge",
 ]

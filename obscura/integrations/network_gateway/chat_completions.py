@@ -263,6 +263,13 @@ async def chat_completions(
     request: Request,
 ) -> Any:
     """OpenAI-compatible chat completions backed by Obscura agents."""
+    # Validate model against allowlist before any processing.
+    if body.model not in _ALLOWED_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "unknown_model", "allowed": sorted(_ALLOWED_MODELS)},
+        )
+
     # GatewayConfig is stashed on app.state by create_gateway_app
     config = getattr(request.app.state, "gateway_config", None)
     default_backend: str = config.agent_backend if config else "claude"
@@ -275,6 +282,14 @@ async def chat_completions(
     effective_model = default_model if body.model in ("obscura", "") else ""
 
     system_prompt, user_prompt = _extract_prompt(body.messages)
+
+    # Enforce prompt size cap.
+    total_len = len(system_prompt.encode()) + len(user_prompt.encode())
+    if total_len > _MAX_PROMPT_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "prompt_too_large", "max_bytes": _MAX_PROMPT_BYTES},
+        )
 
     if not user_prompt:
         # Nothing to do — return empty completion

@@ -1,3 +1,6 @@
+# DEPRECATED: Use GatewayNetworkBridge from obscura.gateway.network_bridge instead.
+# This module is kept for backward compatibility only.
+
 """Messaging bridge - injects WhatsApp/Discord/iMessage into session context.
 
 This module bridges external messaging platforms (WhatsApp, Discord, iMessage)
