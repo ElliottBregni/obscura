@@ -235,6 +235,68 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     app.include_router(create_sse_router(service))
     app.include_router(create_wellknown_router(service))
 
+    # -- Push-notification webhook (public, no auth) -----------------------
+    # OpenClaw POSTs completed task results here when pushNotificationUrl is set.
+
+    from fastapi import Request as _Request
+    from fastapi.responses import JSONResponse as _JSONResponse
+
+    @app.post("/webhook/a2a", tags=["webhook"])
+    async def webhook_a2a(request: _Request) -> _JSONResponse:
+        """Receive A2A push-notification callbacks from peer agents (e.g. OpenClaw).
+
+        Extracts the task result text and injects it into the REPL channel
+        so it appears as a peer message in the active session.
+        """
+        try:
+            body: dict = await request.json()
+        except Exception:
+            return _JSONResponse({"error": "invalid_json"}, status_code=400)
+
+        task_id = body.get("task_id") or body.get("id", "?")
+        task_type = body.get("type", "push_notification")
+
+        # Extract result text from various payload shapes
+        text: str = ""
+        if "result" in body:
+            text = str(body["result"])
+        elif "artifacts" in body:
+            for art in body.get("artifacts", []):
+                for part in art.get("parts", []):
+                    if isinstance(part, dict) and part.get("kind") == "text":
+                        text += part.get("text", "")
+        elif "message" in body:
+            for part in body.get("message", {}).get("parts", []):
+                if isinstance(part, dict) and part.get("kind") == "text":
+                    text += part.get("text", "")
+        if not text:
+            text = f"[{task_type}] task={task_id}"
+
+        sender = body.get("from") or body.get("agent", "openclaw")
+
+        # Inject into REPL channel (best-effort — silently skips if no REPL active)
+        try:
+            from obscura.integrations.messaging.channel_inject import (
+                ChannelMessage,
+                push_channel_message,
+            )
+
+            async def _noop(r: str) -> bool:  # noqa: ARG001
+                return True
+
+            push_channel_message(ChannelMessage(
+                platform="webhook",
+                sender_id=sender,
+                display_name=sender,
+                text=text,
+                reply_fn=_noop,
+            ))
+        except Exception:
+            logger.debug("webhook_a2a: channel inject failed", exc_info=True)
+
+        logger.info("webhook/a2a: received task=%s type=%s from=%s", task_id, task_type, sender)
+        return _JSONResponse({"ok": True, "task_id": task_id})
+
     logger.info(
         "Network gateway configured: host=%s port=%d backend=%s auth=%s",
         config.host,
