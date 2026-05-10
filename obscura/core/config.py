@@ -91,6 +91,10 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "agent_monitor_interval_seconds",
         "agent_monitor_message",
         "agent_monitor_log_path",
+        # standalone agent
+        "standalone_agent_enabled",
+        "standalone_agent_port",
+        "standalone_agent_host",
     },
 )
 
@@ -231,6 +235,11 @@ class ObscuraConfig(BaseModel):
     network_gateway_request_timeout: float = 120.0  # OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT
     network_gateway_ws_ping_interval: float = 30.0  # OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL
     network_gateway_session_ttl: float = 3600.0  # OBSCURA_NETWORK_GATEWAY_SESSION_TTL
+
+    # Standalone agent — direct-chat server on port 18791 (LAN / Tailscale)
+    standalone_agent_enabled: bool = False
+    standalone_agent_port: int = 18791
+    standalone_agent_host: str = "0.0.0.0"
 
     # ---------------------------------------------------------------------------
     # Moltbook — AI agent social network platform
@@ -537,6 +546,22 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_NETWORK_GATEWAY_SESSION_TTL",
                 "network_gateway_session_ttl",
                 3600.0,
+            ),
+            # Standalone agent
+            standalone_agent_enabled=_bool_optin(
+                "OBSCURA_STANDALONE_AGENT_ENABLED",
+                "standalone_agent_enabled",
+                default=False,
+            ),
+            standalone_agent_port=_int(
+                "OBSCURA_STANDALONE_AGENT_PORT",
+                "standalone_agent_port",
+                18791,
+            ),
+            standalone_agent_host=_str(
+                "OBSCURA_STANDALONE_AGENT_HOST",
+                "standalone_agent_host",
+                "0.0.0.0",
             ),
             # Moltbook — AI agent social network platform
             moltbook_url=_str("MOLTBOOK_URL", "moltbook_url", "https://moltbook.com"),

@@ -30,23 +30,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json as _json
 import logging
 import uuid
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from obscura.auth.rbac import user_from_api_key
+from obscura.integrations.network_gateway.chat_completions import _stream_agent
 from obscura.integrations.network_gateway.sessions import get_session_store
 
 logger = logging.getLogger(__name__)
-
-# Gateway proxies streamed completions to the local Obscura REST server.
-_OBSCURA_BASE_URL = "http://localhost:8080"
-
-_HTTP_OK = 200
 
 ws_router = APIRouter()
 
@@ -80,91 +74,8 @@ async def _authenticate(websocket: WebSocket) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# SSE parsing helper
+# Direct agent streaming
 # ---------------------------------------------------------------------------
-
-
-def _parse_sse_chunk(data: str) -> tuple[str, int, int]:
-    """Parse one SSE data payload.
-
-    Returns ``(delta_text, prompt_tokens, completion_tokens)`` from the chunk.
-    ``delta_text`` is empty when the chunk carries no content delta.
-    """
-    with contextlib.suppress(Exception):
-        chunk = _json.loads(data)
-        delta: str = (
-            chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
-        )
-        usage: dict[str, Any] = chunk.get("usage") or {}
-        pt = int(usage.get("prompt_tokens") or 0)
-        ct = int(usage.get("completion_tokens") or 0)
-        return delta, pt, ct
-    return "", 0, 0
-
-
-# ---------------------------------------------------------------------------
-# Proxy streaming call
-# ---------------------------------------------------------------------------
-
-
-async def _read_sse_stream(
-    websocket: WebSocket,
-    session_id: str,
-    payload: dict[str, Any],
-    accumulated: list[str],
-    *,
-    timeout: float = 120.0,
-) -> tuple[int, int]:
-    """POST *payload* to the upstream server and stream SSE tokens to *websocket*.
-
-    Returns ``(prompt_tokens, completion_tokens)`` harvested from the stream.
-    Raises :exc:`httpx.ConnectError` when the upstream is unreachable.
-    """
-    prompt_tokens = 0
-    completion_tokens = 0
-
-    async with (
-        httpx.AsyncClient(timeout=timeout) as client,
-        client.stream(
-            "POST",
-            f"{_OBSCURA_BASE_URL}/v1/chat/completions",
-            json=payload,
-            headers={"Content-Type": "application/json"},
-        ) as response,
-    ):
-        if response.status_code != _HTTP_OK:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": f"Upstream error {response.status_code}",
-                    "code": "upstream_error",
-                },
-            )
-            return prompt_tokens, completion_tokens
-
-        async for raw_line in response.aiter_lines():
-            stripped = raw_line.strip()
-            if not stripped or not stripped.startswith("data: "):
-                continue
-            data = stripped[6:]
-            if data == "[DONE]":
-                break
-            delta, pt, ct = _parse_sse_chunk(data)
-            if delta:
-                accumulated.append(delta)
-                await websocket.send_json(
-                    {
-                        "type": "token",
-                        "content": delta,
-                        "session_id": session_id,
-                    },
-                )
-            if pt:
-                prompt_tokens = pt
-            if ct:
-                completion_tokens = ct
-
-    return prompt_tokens, completion_tokens
 
 
 async def _stream_completion(
@@ -178,36 +89,18 @@ async def _stream_completion(
 ) -> None:
     """Run one chat turn and stream tokens back over *websocket*.
 
-    Proxies to the upstream ``/v1/chat/completions`` endpoint with
-    ``stream=True``.  Sends an error frame when the server is unreachable.
+    Executes the agent directly via :func:`_stream_agent` — no proxy to a
+    local REST server.  Sends an error frame on failure.
     """
     store = get_session_store()
-
-    messages: list[dict[str, str]] = [
-        {"role": str(m["role"]), "content": str(m["content"])} for m in history
-    ]
-    messages.append({"role": "user", "content": content})
-
-    payload: dict[str, Any] = {"model": backend, "messages": messages, "stream": True}
     accumulated: list[str] = []
 
     try:
-        prompt_tokens, completion_tokens = await _read_sse_stream(
-            websocket,
-            session_id,
-            payload,
-            accumulated,
-            timeout=request_timeout,
-        )
-    except httpx.ConnectError:
-        await websocket.send_json(
-            {
-                "type": "error",
-                "message": "Local Obscura server not reachable at localhost:8080",
-                "code": "upstream_unavailable",
-            },
-        )
-        return
+        async for delta in _stream_agent(backend, backend, "", content):
+            accumulated.append(delta)
+            await websocket.send_json(
+                {"type": "token", "content": delta, "session_id": session_id},
+            )
     except Exception as exc:
         logger.exception("Unexpected error in _stream_completion")
         await websocket.send_json(
@@ -226,10 +119,7 @@ async def _stream_completion(
         {
             "type": "done",
             "session_id": session_id,
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-            },
+            "usage": {},
         },
     )
 

@@ -127,6 +127,10 @@ class GatewayConfig:
     session_ttl: float = 3600.0
     debug: bool = False
     max_request_bytes: int = 1 * 1024 * 1024  # 1 MB
+    # Standalone agent — lightweight direct-chat server on a dedicated port.
+    standalone_agent_enabled: bool = False
+    standalone_agent_port: int = 18791
+    standalone_agent_host: str = "0.0.0.0"
 
     @classmethod
     def from_obscura_config(cls) -> "GatewayConfig":
@@ -162,6 +166,17 @@ class GatewayConfig:
             ws_ping_interval=cfg.network_gateway_ws_ping_interval,
             session_ttl=cfg.network_gateway_session_ttl,
             debug=os.environ.get("OBSCURA_GATEWAY_DEBUG", "").lower() in ("1", "true"),
+            standalone_agent_enabled=cfg.standalone_agent_enabled,
+            standalone_agent_port=int(
+                os.environ.get(
+                    "OBSCURA_STANDALONE_AGENT_PORT",
+                    str(cfg.standalone_agent_port),
+                )
+            ),
+            standalone_agent_host=os.environ.get(
+                "OBSCURA_STANDALONE_AGENT_HOST",
+                cfg.standalone_agent_host,
+            ),
         )
 
 

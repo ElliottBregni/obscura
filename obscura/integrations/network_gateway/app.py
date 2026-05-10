@@ -32,6 +32,8 @@ Or programmatically::
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hmac as _hmac
 import json as _json
 import logging
@@ -95,9 +97,39 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
             logger.info("Gateway also reachable at %s", ts_url)
 
+    # Standalone agent — spin up on a dedicated port if enabled.
+    _sa_task: asyncio.Task[None] | None = None
+    if gateway_config is not None and gateway_config.standalone_agent_enabled:
+        import asyncio as _asyncio
+
+        import uvicorn as _uvicorn
+
+        from obscura.integrations.network_gateway.standalone_agent import (
+            create_standalone_agent_app,
+        )
+
+        standalone_app = create_standalone_agent_app(gateway_config)
+        _sa_config = _uvicorn.Config(
+            standalone_app,
+            host=gateway_config.standalone_agent_host,
+            port=gateway_config.standalone_agent_port,
+            log_level="warning",
+        )
+        _sa_server = _uvicorn.Server(_sa_config)
+        _sa_task = _asyncio.create_task(_sa_server.serve())
+        logger.info(
+            "Standalone agent listening on %s:%d",
+            gateway_config.standalone_agent_host,
+            gateway_config.standalone_agent_port,
+        )
+
     try:
         yield
     finally:
+        if _sa_task is not None:
+            _sa_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _sa_task
         if _tailscale_active and gateway_config is not None:
             await remove_tailscale_serve(gateway_config.port)
         if a2a_server is not None:
