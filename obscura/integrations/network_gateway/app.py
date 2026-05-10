@@ -144,7 +144,7 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     a2a_server = ObscuraA2AServer(
         agent_card=card,
         agent_backend=config.agent_backend,
-        agent_model=config.agent_model or config.agent_backend,
+        agent_model=config.agent_model,
     )
 
     app = FastAPI(
