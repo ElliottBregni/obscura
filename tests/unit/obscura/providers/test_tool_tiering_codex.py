@@ -6,9 +6,7 @@ Change 2: is_shadow specs are excluded from the listing entirely.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
-import pytest
 
 from obscura.core.tool_tiering import CORE_TOOL_NAMES
 from obscura.core.types import ToolSpec

@@ -110,6 +110,27 @@ class TestPrefixExtensionGuard:
         texts = [c.text for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
         assert texts == ["hello ", "world"]
 
+    def test_rolling_overlap_delta_is_normalized(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Trim suffix/prefix overlap when a provider emits rolling windows.
+
+        This matches the Copilot symptom where chunks can look like:
+        ``ob`` -> ``obsc`` -> ``scura`` -> ``ura``.
+        """
+        bridge = EventToIteratorBridge()
+        with caplog.at_level(logging.WARNING):
+            bridge.on_text_delta(_delta_event(delta_content="ob"))
+            bridge.on_text_delta(_delta_event(delta_content="obsc"))
+            bridge.on_text_delta(_delta_event(delta_content="scura"))
+            bridge.on_text_delta(_delta_event(delta_content="ura"))
+        bridge.finish()
+        chunks = asyncio.run(_drain(bridge))
+        texts = [c.text for c in chunks if c.kind == ChunkKind.TEXT_DELTA]
+        assert "".join(texts) == "obscura"
+        assert any("rolling overlap" in rec.message for rec in caplog.records)
+
     def test_finish_resets_state_for_next_turn(self) -> None:
         """The bridge can be reused across turns — emitted-state must
         reset on finish so a new turn starting with the same prefix as

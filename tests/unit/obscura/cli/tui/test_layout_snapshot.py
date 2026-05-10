@@ -188,7 +188,7 @@ async def test_toolbar_sits_above_footer() -> None:
     rows = await _render(state, h=20)
     # Footer chain (bottom-up): header, separator, toolbar. Toolbar
     # ends up two rows above the last line.
-    assert "quit" in rows[-3] and "palette" in rows[-3], (
+    assert "quit" in rows[-3] and "commands" in rows[-3], (
         f"Toolbar should be the third-to-last row (toolbar / separator / "
         f"footer); rows[-3]={rows[-3]!r}"
     )
@@ -217,7 +217,7 @@ async def test_input_grows_when_buffer_has_newlines() -> None:
     # The prompt glyph still appears on one row, but the *visible* span
     # of the input should now be 3 — meaning the toolbar moved 2 rows
     # further down.
-    toolbar_idx = next(i for i, r in enumerate(rows) if "quit" in r and "palette" in r)
+    toolbar_idx = next(i for i, r in enumerate(rows) if "quit" in r and "commands" in r)
     input_idx = input_rows[0]
     assert toolbar_idx - input_idx >= 3, (
         f"3-line buffer should produce >= 3 rows of input space; "
@@ -271,7 +271,7 @@ async def test_long_live_region_label_does_not_push_toolbar_off_screen() -> None
     rows = await _render(state, w=80, h=15)
 
     # All four bottom rows of the layout must still be present.
-    assert "quit" in rows[-3] and "palette" in rows[-3], (
+    assert "quit" in rows[-3] and "commands" in rows[-3], (
         f"Toolbar pushed off-screen by long live-region preview; "
         f"rows[-3]={rows[-3]!r}"
     )
@@ -304,7 +304,7 @@ async def test_long_transcript_does_not_overflow_fixed_widgets() -> None:
         f"Footer separator missing under heavy transcript; rows[-2]={rows[-2]!r}"
     )
     # Toolbar two rows above the footer.
-    assert "quit" in rows[-3] and "palette" in rows[-3], (
+    assert "quit" in rows[-3] and "commands" in rows[-3], (
         f"Toolbar pushed off-screen by long transcript; rows[-3]={rows[-3]!r}"
     )
     # Input prompt still visible.

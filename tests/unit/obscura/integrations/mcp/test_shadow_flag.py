@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -52,7 +52,11 @@ async def test_register_external_mcp_tools_registers_shadow_specs() -> None:
     registered: list[Any] = []
 
     backend = MagicMock()
-    backend.register_tool = lambda spec: registered.append(spec)
+
+    def _register_tool(spec: Any) -> None:
+        registered.append(spec)
+
+    backend.register_tool = _register_tool
 
     fake_tools = [_mock_tool("alpha"), _mock_tool("beta")]
 

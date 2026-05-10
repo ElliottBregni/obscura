@@ -64,6 +64,18 @@ def test_renderer_full_turn_yields_four_transcript_entries() -> None:
     assert len(invalidations) == len(events)
 
 
+def test_push_slash_command_records_user_entry_with_metadata() -> None:
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    renderer.push_slash_command("/help")
+
+    assert len(state.transcript) == 1
+    entry = state.transcript[0]
+    assert entry.kind == TranscriptKind.USER
+    assert "".join(r.text for r in entry.runs) == "/help"
+    assert entry.metadata["is_slash_command"] is True
+
+
 def test_renderer_get_accumulated_text_concatenates_text_deltas() -> None:
     state = _make_state()
     renderer = TUIRenderer(state)
@@ -213,8 +225,8 @@ def test_tool_result_json_dict_extracts_stdout() -> None:
     # Body should surface the readable stdout, not the JSON envelope.
     assert "hello" in body
     assert "{\"ok\":" not in body
-    # Success glyph leads the body.
-    assert body.lstrip().startswith("✓")
+    assert "run_command" in body
+    assert "✓" in body
 
 
 def test_tool_result_json_failure_marks_error() -> None:
@@ -231,7 +243,8 @@ def test_tool_result_json_failure_marks_error() -> None:
     )
     body = "".join(r.text for r in state.transcript[-1].runs)
     assert "command not found" in body
-    assert body.lstrip().startswith("✗")
+    assert "run_command" in body
+    assert "✗" in body
 
 
 def test_tool_result_multiline_splits_into_indented_lines() -> None:
@@ -271,6 +284,26 @@ def test_tool_result_strips_ansi_escapes() -> None:
     body = "".join(r.text for r in state.transcript[-1].runs)
     assert "\x1b[" not in body
     assert "red error" in body
+
+
+def test_tool_result_strips_carriage_returns() -> None:
+    """Progress-style \\r updates must not survive into transcript rendering."""
+    state = _make_state()
+    renderer = TUIRenderer(state)
+    raw = "step 1\rstep 2\rfinal line"
+    renderer.handle(
+        AgentEvent(
+            kind=AgentEventKind.TOOL_RESULT,
+            tool_name="run_command",
+            tool_use_id="tu_cr",
+            tool_result=raw,
+        ),
+    )
+    body = "".join(r.text for r in state.transcript[-1].runs)
+    assert "\r" not in body
+    assert "step 1" in body
+    assert "step 2" in body
+    assert "final line" in body
 
 
 def test_tool_result_long_output_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:

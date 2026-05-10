@@ -42,7 +42,7 @@ CONTEXT_WINDOW_WARN_BELOW_TOKENS = 32_000  # Warn if available tokens < this
 # Lowered from 10_000 to 3_000 to keep tool results from consuming the
 # context window. Override via OBSCURA_SNIP_THRESHOLD env var or by
 # passing threshold_tokens explicitly to snip_tool_outputs().
-import os as _os
+import os as _os  # noqa: E402
 SNIP_TOOL_OUTPUT_THRESHOLD: int = int(
     _os.environ.get("OBSCURA_SNIP_THRESHOLD", "3000")
 )

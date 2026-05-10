@@ -106,3 +106,11 @@ def test_alias_bash_resolves_to_run_shell() -> None:
     result = reg.get("bash")
     assert result is not None
     assert result.name == "run_shell"
+
+
+def test_alias_clock_resolves_to_current_time() -> None:
+    reg = ToolRegistry()
+    reg.register(_spec("current_time"))
+    result = reg.get("clock")
+    assert result is not None
+    assert result.name == "current_time"

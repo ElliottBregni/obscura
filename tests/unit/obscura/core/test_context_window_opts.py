@@ -78,7 +78,7 @@ def test_snip_tool_outputs_keeps_small_result_intact() -> None:
     small_text = "word " * 100
     messages = [_make_tool_result_message(small_text)]
 
-    result, snipped_count, tokens_freed = snip_tool_outputs(messages, threshold_tokens=3_000)
+    _result, snipped_count, tokens_freed = snip_tool_outputs(messages, threshold_tokens=3_000)
     assert snipped_count == 0
     assert tokens_freed == 0
 

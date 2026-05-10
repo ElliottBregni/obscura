@@ -144,20 +144,30 @@ def test_is_cwd_allowed_outside_base_false(
 
 
 def test_resolve_path_absolute_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OBSCURA_TOOLS_RELATIVE_TO_CWD", raising=False)
+    monkeypatch.delenv("OBSCURA_TOOLS_RELATIVE_TO_OUTPUT", raising=False)
     result = Policy.resolve_path("/tmp/foo.txt")
     # /tmp may be a symlink on macOS (/private/tmp); compare resolved paths
     assert result == Path("/tmp/foo.txt").resolve()
 
 
-def test_resolve_path_relative_to_cwd(
+def test_resolve_path_relative_defaults_to_cwd(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("OBSCURA_TOOLS_RELATIVE_TO_CWD", "1")
+    monkeypatch.delenv("OBSCURA_TOOLS_RELATIVE_TO_OUTPUT", raising=False)
     monkeypatch.chdir(tmp_path)
     result = Policy.resolve_path("foo.txt")
     assert result == (tmp_path / "foo.txt").resolve()
+
+
+def test_resolve_path_relative_to_output_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSCURA_TOOLS_RELATIVE_TO_OUTPUT", "1")
+    monkeypatch.setenv("OBSCURA_HOME", str(tmp_path / ".obscura"))
+    result = Policy.resolve_path("foo.txt")
+    assert result == (tmp_path / ".obscura" / "output" / "foo.txt").resolve()
 
 
 # ---------------------------------------------------------------------------
