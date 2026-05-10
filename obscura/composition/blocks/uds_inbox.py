@@ -57,9 +57,33 @@ async def install_uds_inbox(
 
     def _on_peer_message(payload: dict[str, Any]) -> None:
         try:
-            sender = payload.get("from", "?")
-            msg = payload.get("message", "")
-            logger.info("[peer:%s] %s", sender[:12], msg)
+            sender = payload.get("from_session") or payload.get("from") or "peer"
+            text   = payload.get("text") or payload.get("message") or ""
+            backend = payload.get("backend", "")
+            label  = f"{sender}({backend})" if backend else sender
+            logger.info("[peer:%s] %s", sender[:16], text[:120])
+
+            if not text:
+                return
+
+            # Inject into the REPL channel so it races with keyboard input.
+            from obscura.integrations.messaging.channel_inject import (
+                ChannelMessage,
+                push_channel_message,
+            )
+
+            async def _noop_reply(response: str) -> bool:  # noqa: ARG001
+                return True
+
+            pushed = push_channel_message(ChannelMessage(
+                platform="peer",
+                sender_id=sender,
+                display_name=label,
+                text=text,
+                reply_fn=_noop_reply,
+            ))
+            if not pushed:
+                logger.warning("install_uds_inbox: channel queue full, peer message dropped")
         except Exception:
             logger.debug("install_uds_inbox: on_peer_message failed", exc_info=True)
 
