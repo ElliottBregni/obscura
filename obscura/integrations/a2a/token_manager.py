@@ -39,9 +39,11 @@ logger = logging.getLogger(__name__)
 
 _OPENCLAW_TOKEN_ENV = "OPENCLAW_TOKEN"
 _A2A_TOKEN_ENV = "OBSCURA_A2A_TOKEN"
+_NETWORK_GATEWAY_TOKEN_ENV = "OBSCURA_NETWORK_TOKEN"
 
 _OPENCLAW_CONFIG_PATH = Path.home() / ".openclaw" / "openclaw.json"
 _A2A_TOKEN_PATH = Path.home() / ".obscura" / "a2a-gateway.token"
+_NETWORK_GATEWAY_TOKEN_PATH = Path.home() / ".obscura" / "network-gateway.token"
 
 _ENV_TEMPLATE = """\
 # A2A bridge tokens — copy to ~/.obscura/.env and fill in values
@@ -150,6 +152,43 @@ class A2ATokenManager:
         _A2A_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         _A2A_TOKEN_PATH.write_text(new_token + "\n")
         logger.info("Rotated A2A token → %s", _A2A_TOKEN_PATH)
+        return new_token
+
+    # -- Network gateway token ------------------------------------------------
+
+    def load_network_gateway_token(self) -> str:
+        """Return the network gateway bearer token, generating one if needed.
+
+        Resolution order:
+
+        1. ``OBSCURA_NETWORK_TOKEN`` environment variable.
+        2. ``~/.obscura/network-gateway.token`` file (first non-empty line).
+        3. Auto-generate a new token, persist it to the token file, and log it.
+        """
+        env_token = os.environ.get(_NETWORK_GATEWAY_TOKEN_ENV, "").strip()
+        if env_token:
+            return env_token
+
+        if _NETWORK_GATEWAY_TOKEN_PATH.exists():
+            try:
+                token = _NETWORK_GATEWAY_TOKEN_PATH.read_text().strip()
+                if token:
+                    return token
+            except Exception:
+                logger.debug(
+                    "Failed to read %s",
+                    _NETWORK_GATEWAY_TOKEN_PATH,
+                    exc_info=True,
+                )
+
+        # Auto-generate, persist, and log so the user knows how to connect.
+        new_token = secrets.token_hex(32)
+        _NETWORK_GATEWAY_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _NETWORK_GATEWAY_TOKEN_PATH.write_text(new_token + "\n")
+        logger.info(
+            "Generated new network gateway token → %s",
+            _NETWORK_GATEWAY_TOKEN_PATH,
+        )
         return new_token
 
     # -- Template generation --------------------------------------------------

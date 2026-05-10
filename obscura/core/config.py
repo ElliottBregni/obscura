@@ -67,6 +67,11 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "kairos_dream",
         "undercover_enabled",
         "allow_unauthenticated",
+        "network_gateway_enabled",
+        "network_gateway_port",
+        "network_gateway_host",
+        "network_gateway_backend",
+        "network_gateway_rate_limit",
     },
 )
 
@@ -190,6 +195,18 @@ class ObscuraConfig(BaseModel):
     # address with auth disabled, startup aborts unless this is explicitly
     # set to true. Intended only for isolated/air-gapped environments.
     allow_unauthenticated: bool = False
+
+    # Network gateway — standalone agent gateway for remote connections
+    # (analogous to OpenClaw's gateway on port 18789, but for Obscura).
+    # Start with: obscura gateway
+    # Token is loaded from OBSCURA_NETWORK_TOKEN env var or
+    # ~/.obscura/network-gateway.token (auto-generated on first run).
+    network_gateway_enabled: bool = False
+    network_gateway_port: int = 18790
+    network_gateway_host: str = "0.0.0.0"
+    network_gateway_backend: str = "claude"
+    network_gateway_token: str = ""  # loaded from env/file only — never settings.json
+    network_gateway_rate_limit: int = 60
 
     def validate_deployment_safety(self) -> None:
         """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
@@ -419,5 +436,33 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_ALLOW_UNAUTHENTICATED",
                 "allow_unauthenticated",
                 default=False,
+            ),
+            # Network gateway
+            network_gateway_enabled=_bool_optin(
+                "OBSCURA_NETWORK_GATEWAY_ENABLED",
+                "network_gateway_enabled",
+                default=False,
+            ),
+            network_gateway_port=_int(
+                "OBSCURA_NETWORK_GATEWAY_PORT",
+                "network_gateway_port",
+                18790,
+            ),
+            network_gateway_host=_str(
+                "OBSCURA_NETWORK_GATEWAY_HOST",
+                "network_gateway_host",
+                "0.0.0.0",
+            ),
+            network_gateway_backend=_str(
+                "OBSCURA_NETWORK_GATEWAY_BACKEND",
+                "network_gateway_backend",
+                "claude",
+            ),
+            # Token is a secret — env only, never loaded from settings.json.
+            network_gateway_token=os.environ.get("OBSCURA_NETWORK_TOKEN", ""),
+            network_gateway_rate_limit=_int(
+                "OBSCURA_NETWORK_GATEWAY_RATE_LIMIT",
+                "network_gateway_rate_limit",
+                60,
             ),
         )

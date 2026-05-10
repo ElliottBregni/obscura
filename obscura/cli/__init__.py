@@ -684,6 +684,99 @@ def tui(  # noqa: PLR0913 — Click options are individual params on purpose.
     raise SystemExit(exit_code)
 
 
+# ---------------------------------------------------------------------------
+# Network gateway subcommand — `obscura gateway`
+# ---------------------------------------------------------------------------
+
+
+@main.command(name="gateway")
+@click.option("--host", default=None, help="Bind address (default from config).")
+@click.option("--port", default=None, type=int, help="Listen port (default from config).")
+@click.option(
+    "--backend",
+    default=None,
+    help="LLM backend to use for gateway sessions (default from config).",
+)
+@click.option("--token", default=None, help="Bearer token override (default: auto-loaded).")
+@click.option(
+    "--reload",
+    is_flag=True,
+    default=False,
+    help="Enable uvicorn auto-reload (development mode).",
+)
+def gateway(
+    host: str | None,
+    port: int | None,
+    backend: str | None,
+    token: str | None,
+    reload: bool,
+) -> None:
+    """Start the Obscura network gateway.
+
+    Exposes an HTTP agent endpoint on the network so remote clients can
+    connect to Obscura over the wire.  Token auth is required; the token
+    is printed at startup (masked) so you can hand it to callers.
+
+    Analogous to OpenClaw's gateway on port 18789, but for Obscura.
+    """
+    import uvicorn
+
+    from obscura.core.config import ObscuraConfig
+    from obscura.integrations.a2a.token_manager import A2ATokenManager
+
+    cfg = ObscuraConfig.load()
+
+    _host = host or cfg.network_gateway_host
+    _port = port or cfg.network_gateway_port
+    _backend = backend or cfg.network_gateway_backend
+
+    # Resolve token: CLI flag > env/file auto-load
+    if token:
+        _token = token
+    elif cfg.network_gateway_token:
+        _token = cfg.network_gateway_token
+    else:
+        _token = A2ATokenManager().load_network_gateway_token()
+
+    # Masked token display: first 8 chars + ***
+    masked = _token[:8] + "***" if len(_token) >= 8 else "***"
+
+    click.echo(f"Obscura Network Gateway listening on http://{_host}:{_port}")
+    click.echo(f"  Backend : {_backend}")
+    click.echo(f"  Token   : {masked}")
+    click.echo(
+        "  Connect : Authorization: Bearer <token>  "
+        "(set OBSCURA_NETWORK_TOKEN or use ~/.obscura/network-gateway.token)"
+    )
+
+    try:
+        from obscura.integrations.network_gateway import create_gateway_app
+        from obscura.integrations.network_gateway.config import GatewayConfig
+
+        gw_cfg = GatewayConfig(
+            host=_host,
+            port=_port,
+            agent_backend=_backend,
+            token=_token,
+            rate_limit=cfg.network_gateway_rate_limit,
+        )
+        app = create_gateway_app(gw_cfg)
+    except ImportError:
+        click.echo(
+            "network_gateway module not yet available — "
+            "run with --reload once the module is installed.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    uvicorn.run(
+        app,
+        host=_host,
+        port=_port,
+        reload=reload,
+    )
+
+
 # Backwards-compat aliases added by test harness
 def _emit_context_warnings(*args: Any, **kwargs: Any) -> Any:  # pyright: ignore[reportUnusedFunction]
     from .warnings import emit_context_warnings as _impl
