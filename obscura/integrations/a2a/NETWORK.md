@@ -1,5 +1,8 @@
 # A2A Network Topology — Obscura ↔ OpenClaw
 
+> **Full two-node topology (ASCII diagram, port map, auth map, message flows, shared state, third-node guide, troubleshooting):**
+> [`obscura/integrations/network_gateway/TOPOLOGY.md`](../network_gateway/TOPOLOGY.md)
+
 ## Status
 
 | Component | State | Notes |
