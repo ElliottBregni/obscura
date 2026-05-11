@@ -31,9 +31,41 @@ def _build_imessage_adapter(*, contacts: list[str], account_id: str = "default")
     return IMessageAdapter(contacts, account_id=account_id)
 
 
-def _build_whatsapp_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
-    from obscura.integrations.whatsapp import WhatsAppAdapter
+def _read_whatsapp_transport() -> str:
+    """Look up ``[messaging.whatsapp] transport`` in ``~/.obscura/config.toml``.
 
+    Returns ``"twilio"`` (the default) when the file or section is missing.
+    Supported values: ``"twilio"`` (Twilio Business API, paid; the default
+    for backwards-compat) or ``"wuzapi"`` (free, personal WhatsApp Web via
+    the wuzapi sidecar; opt-in).
+    """
+    import tomllib
+
+    cfg_path = resolve_obscura_home() / "config.toml"
+    if not cfg_path.is_file():
+        return "twilio"
+    try:
+        with cfg_path.open("rb") as fh:
+            raw = tomllib.load(fh)
+    except Exception:
+        return "twilio"
+    messaging = raw.get("messaging", {})
+    whatsapp = messaging.get("whatsapp", {}) if isinstance(messaging, dict) else {}
+    value = str(whatsapp.get("transport", "twilio")).strip().lower() if isinstance(whatsapp, dict) else "twilio"
+    return value if value in ("twilio", "wuzapi") else "twilio"
+
+
+def _build_whatsapp_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    transport = _read_whatsapp_transport()
+    if transport == "wuzapi":
+        from obscura.integrations.whatsapp.wuzapi.adapter import WuzapiAdapter
+        from obscura.integrations.whatsapp.wuzapi.client import WuzapiClient
+        from obscura.integrations.whatsapp.wuzapi.setup import load_user_token
+
+        client = WuzapiClient(token=load_user_token())
+        return WuzapiAdapter(client, account_id=account_id)
+
+    from obscura.integrations.whatsapp import WhatsAppAdapter
     return WhatsAppAdapter(contacts, account_id=account_id)
 
 

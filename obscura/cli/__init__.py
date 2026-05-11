@@ -573,6 +573,15 @@ main.add_command(_kairos_group)
 
 
 # ---------------------------------------------------------------------------
+# WhatsApp (wuzapi) CLI -- registered as `obscura whatsapp <subcommand>`
+# ---------------------------------------------------------------------------
+
+from obscura.cli.whatsapp_commands import whatsapp_group as _whatsapp_group  # noqa: E402
+
+main.add_command(_whatsapp_group)
+
+
+# ---------------------------------------------------------------------------
 # Full-screen TUI subcommand — `obscura tui`
 # ---------------------------------------------------------------------------
 
