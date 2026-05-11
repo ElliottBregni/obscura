@@ -13,9 +13,14 @@ Endpoints
 
 Auth
 ----
-Bearer token from ``GatewayConfig.token``.  Empty token = open (warning
-logged).  WebSocket auth falls back to ``?api_key=`` query param because
-browsers cannot set WebSocket headers.  ``/health`` is always public.
+Challenge-response handshake on every new WS connection:
+  1. Server sends ``{"type":"connect.challenge","nonce":"<hex>"}``
+  2. Client replies ``{"type":"connect","token":"<raw>"}`` within 10 s
+  3. Server validates; closes 4001 on failure
+  4. Server sends ``{"type":"connect.ok","conn_id":"<id>"}`` on success
+
+API clients may skip the challenge by setting ``Authorization: Bearer <token>``
+on the upgrade request.  ``/health`` is always public.
 
 Usage::
 
@@ -41,7 +46,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from obscura.auth.security_headers import SecurityHeadersMiddleware
-from obscura.integrations.messaging.channel_inject import subscribe, unsubscribe
 from obscura.integrations.network_gateway.auth import (
     GatewayBearerAuthMiddleware,
     GatewayRateLimitMiddleware,
@@ -51,6 +55,11 @@ from obscura.integrations.network_gateway.chat_completions import (
     router as chat_router,
 )
 from obscura.integrations.network_gateway.config import GatewayConfig
+from obscura.integrations.network_gateway.connections import (
+    PROTOCOL_MIN_SUPPORTED,
+    PROTOCOL_VERSION,
+    get_registry,
+)
 from obscura.integrations.network_gateway.models import router as models_router
 from obscura.integrations.network_gateway.sessions import get_session_store
 from obscura.routes.channels import router as channels_router
@@ -159,7 +168,7 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
     const url = proto + '//' + location.host + '/ws';
     ws = new WebSocket(url);
 
-    ws.onopen = () => { statusEl.textContent = 'connected'; };
+    ws.onopen = () => { statusEl.textContent = 'authenticating...'; };
     ws.onclose = () => {
       statusEl.textContent = 'disconnected — reconnecting...';
       setTimeout(connect, 2000);
@@ -169,6 +178,17 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
     ws.onmessage = (e) => {
       let frame;
       try { frame = JSON.parse(e.data); } catch { return; }
+
+      if (frame.type === 'connect.challenge') {
+        const params = new URLSearchParams(location.search);
+        const tok = params.get('token') || params.get('api_key') || '';
+        ws.send(JSON.stringify({type: 'connect', token: tok}));
+        return;
+      }
+      if (frame.type === 'connect.ok') {
+        statusEl.textContent = 'ready';
+        return;
+      }
 
       if (frame.type === 'pong') return;
 
@@ -210,6 +230,18 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
         messages.appendChild(div);
         messages.scrollTop = messages.scrollHeight;
         document.title = `(${++unreadCount}) Obscura Agent`;
+      } else if (frame.type === 'agent') {
+        if (frame.state === 'running') {
+          statusEl.textContent = 'agent running…';
+          statusEl.style.color = '#f0a500';
+        } else {
+          statusEl.textContent = 'ready';
+          statusEl.style.color = '';
+        }
+      } else if (frame.type === 'presence') {
+        statusEl.textContent = frame.count === 1 ? '1 client connected' : frame.count + ' clients connected';
+      } else if (frame.type === 'health') {
+        sessionLabel.textContent = 'v' + frame.version + ' · ' + frame.connections + ' connected';
       }
     };
   }
@@ -257,36 +289,65 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
 
 
 # ---------------------------------------------------------------------------
-# WebSocket auth helper
+# WebSocket auth helper — challenge-response
 # ---------------------------------------------------------------------------
 
 
-def _sa_extract_bearer(websocket: WebSocket) -> str | None:
-    """Extract raw token from ``Authorization`` header or ``api_key`` query param."""
-    auth_header = websocket.headers.get("authorization", "")
-    if auth_header.lower().startswith("bearer "):
-        return auth_header[7:].strip() or None
-    return websocket.query_params.get("api_key") or None
+async def _sa_challenge_auth(websocket: WebSocket, token: str) -> tuple[bool, str | None]:
+    """Challenge-response auth for standalone agent WS. Returns ``(True, resume_sid)`` on success.
 
+    Flow:
+      1. Send ``{"type":"connect.challenge","nonce":"<uuid>"}``
+      2. Receive ``{"type":"connect","token":"<raw>"}`` (10 s timeout)
+      3. If token configured: validate with ``hmac.compare_digest``
+      4. Return ``(True, resume_sid)`` (success) or close 4001 and return ``(False, None)``
 
-async def _sa_authenticate(websocket: WebSocket, token: str) -> bool:
-    """Validate credentials against *token*.
-
-    Returns ``True`` on success (socket stays open).  Closes with code 4001
-    and returns ``False`` on failure.
-
-    When *token* is empty (open mode) always returns ``True``.
+    When *token* is empty (open mode) skip validation and return ``(True, resume_sid)``.
+    API clients that set ``Authorization: Bearer`` on the upgrade request skip
+    the challenge entirely (legacy / non-browser path).
     """
-    if not token:
-        return True
+    import uuid as _uuid
 
-    raw = _sa_extract_bearer(websocket)
-    if raw and _hmac.compare_digest(raw, token):
-        return True
+    # Legacy: honour Authorization header for API clients that set WS headers.
+    if token:
+        auth_header = websocket.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            raw = auth_header[7:].strip()
+            if raw and _hmac.compare_digest(raw, token):
+                return (True, None)
 
-    logger.warning("Standalone agent WS auth failed — closing 4001")
-    await websocket.close(code=4001, reason="Unauthorized")
-    return False
+    nonce = _uuid.uuid4().hex
+    try:
+        await websocket.send_json({"type": "connect.challenge", "nonce": nonce})
+        raw_frame = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except Exception:
+        await websocket.close(code=4001, reason="Handshake timeout")
+        return (False, None)
+
+    if not isinstance(raw_frame, dict) or raw_frame.get("type") != "connect":
+        await websocket.close(code=4001, reason="Expected connect frame")
+        return (False, None)
+
+    # Protocol version negotiation
+    min_proto = int(raw_frame.get("minProtocol", 1))
+    max_proto = int(raw_frame.get("maxProtocol", 1))
+    if max_proto < PROTOCOL_MIN_SUPPORTED or min_proto > PROTOCOL_VERSION:
+        logger.warning(
+            "Standalone agent WS protocol mismatch: client=[%d,%d] server=%d",
+            min_proto, max_proto, PROTOCOL_VERSION,
+        )
+        await websocket.close(code=4002, reason=f"Protocol mismatch: server={PROTOCOL_VERSION}")
+        return (False, None)
+
+    if token:
+        provided = str(raw_frame.get("token", ""))
+        if not provided or not _hmac.compare_digest(provided, token):
+            logger.warning("Standalone agent WS challenge-response auth failed")
+            await websocket.close(code=4001, reason="Unauthorized")
+            return (False, None)
+
+    resume_session_id: str | None = raw_frame.get("resume_session_id") or None
+    return (True, resume_session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +517,7 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
     # -- Middleware (LIFO registration — innermost first) --------------------
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=config.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
@@ -479,12 +540,36 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
             "port": resolved_port,
         }
 
+    # -- Peers endpoint (connected WS clients + REPL sessions) -------------
+
+    @app.get("/v1/peers", tags=["peers"])
+    async def list_peers() -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+        """List connected WS clients and active REPL sessions."""
+        reg = get_registry()
+        ws_clients = reg.snapshot()
+        repl_sessions: list[dict[str, str]] = []
+        try:
+            from obscura.kairos.uds_messaging import discover_peers
+            repl_sessions = [{"session_id": sid, "type": "repl"} for sid in discover_peers()]
+        except Exception:
+            pass
+        return {"ws_clients": ws_clients, "repl_sessions": repl_sessions, "total": len(ws_clients) + len(repl_sessions)}
+
     # -- Embedded chat UI --------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def chat_ui() -> HTMLResponse:  # pyright: ignore[reportUnusedFunction]
         """Minimal embedded chat UI for direct browser use."""
-        return HTMLResponse(_CHAT_UI_HTML)
+        resp = HTMLResponse(_CHAT_UI_HTML)
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self' wss: ws:; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'"
+        )
+        return resp
 
     # -- OpenAI-compatible /v1 routes --------------------------------------
 
@@ -515,17 +600,37 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
         """
         await websocket.accept()
 
-        if not await _sa_authenticate(websocket, _sa_token):
+        _auth_ok, _resume_sid = await _sa_challenge_auth(websocket, _sa_token)
+        if not _auth_ok:
             return
 
         store = get_session_store()
+
+        # Register with the process-level ConnectionRegistry and announce presence.
+        registry = get_registry()
+        conn_id = await registry.register(
+            websocket,
+            endpoint="/ws",
+            remote=websocket.client.host if websocket.client else "",
+        )
+
+        # Build connect.ok — optionally resume a previous session.
         active_session_ids: set[str] = set()
+        connect_ok: dict[str, Any] = {
+            "type": "connect.ok",
+            "conn_id": conn_id,
+            "protocol": PROTOCOL_VERSION,
+        }
+        if _resume_sid:
+            _history = await store.get_history(_resume_sid)
+            if _history:
+                connect_ok["resumed_session_id"] = _resume_sid
+                connect_ok["history"] = _history
+                active_session_ids.add(_resume_sid)
+        await websocket.send_json(connect_ok)
 
-        # Mutable cell to hold the reply_fn of the most-recently received platform message.
-        _active_reply: list[Any] = [None]  # [reply_fn | None]
-
-        # Subscribe to incoming platform messages (WhatsApp / iMessage / Telegram …)
-        sub_queue = subscribe()
+        await registry.broadcast_presence("connected", conn_id, endpoint="/ws", exclude=conn_id)
+        await registry.send_health(websocket)
 
         async def _keepalive() -> None:
             while True:
@@ -533,23 +638,7 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                 with contextlib.suppress(Exception):
                     await websocket.send_json({"type": "ping"})
 
-        async def _drain_incoming() -> None:
-            """Forward platform messages from the channel bus to the browser."""
-            while True:
-                msg = await sub_queue.get()
-                label = msg.display_name or msg.sender_id
-                _active_reply[0] = msg.reply_fn
-                with contextlib.suppress(Exception):
-                    await websocket.send_json({
-                        "type": "incoming",
-                        "platform": msg.platform,
-                        "sender": label,
-                        "sender_id": msg.sender_id,
-                        "text": msg.text,
-                    })
-
         keepalive_task = asyncio.create_task(_keepalive())
-        drain_task = asyncio.create_task(_drain_incoming())
 
         try:
             while True:
@@ -594,6 +683,7 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                 session_id: str = str(frame.get("session_id") or uuid.uuid4())
                 active_session_ids.add(session_id)
 
+                await registry.broadcast_agent_state("running", conn_id=conn_id)
                 assistant_text = await _sa_stream_completion(
                     websocket,
                     session_id,
@@ -601,11 +691,11 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                     _sa_backend,
                     _sa_model,
                 )
+                await registry.broadcast_agent_state("idle", conn_id=conn_id)
 
                 # If a platform message was pending, route the reply back to its origin.
-                reply_fn = _active_reply[0]
+                reply_fn = registry.pop_active_reply()
                 if reply_fn is not None and assistant_text:
-                    _active_reply[0] = None
                     try:
                         await reply_fn(assistant_text)
                     except Exception:
@@ -617,12 +707,10 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
             logger.exception("Unhandled error in standalone_ws")
         finally:
             keepalive_task.cancel()
-            drain_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await keepalive_task
-            with contextlib.suppress(asyncio.CancelledError):
-                await drain_task
-            unsubscribe(sub_queue)
+            await registry.unregister(conn_id)
+            await registry.broadcast_presence("disconnected", conn_id)
             for sid in active_session_ids:
                 await store.clear(sid)
 

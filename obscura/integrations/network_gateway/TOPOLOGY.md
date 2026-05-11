@@ -64,26 +64,46 @@ procedures.
 
 ## 2. Port Map
 
-| Port  | Bound on       | Node         | Protocol(s)                        | Purpose                                         |
-|-------|----------------|--------------|------------------------------------|-------------------------------------------------|
-| 18789 | 127.0.0.1      | OpenClaw     | HTTP + WebSocket                   | OpenClaw gateway (loopback only)               |
-| 18790 | 0.0.0.0        | Obscura      | HTTP (OpenAI-compat, A2A, WS)      | Obscura network gateway — primary inter-node port |
-| 8080  | 127.0.0.1      | Obscura      | HTTP (REST, SSE, JSON-RPC)         | Obscura A2A SDK server (original)              |
-| 443   | Tailscale VIP  | OpenClaw     | WSS (HTTPS tunnel)                 | `modernizedai.tail91e620.ts.net` remote WS     |
-| 443   | Tailscale VIP  | Obscura      | HTTPS (tunnel → 18790)             | `elliotts-macbook-pro-1.tail91e620.ts.net`     |
+| Port  | Bound on       | Node         | Protocol(s)                        | Purpose                                              |
+|-------|----------------|--------------|------------------------------------|----------------------------------------------------- |
+| 18789 | 127.0.0.1      | OpenClaw     | HTTP + WebSocket                   | OpenClaw gateway (loopback only)                    |
+| 18790 | 0.0.0.0        | Obscura      | HTTP (OpenAI-compat, A2A, WS)      | Obscura network gateway — primary inter-node port    |
+| 18792 | 0.0.0.0        | Obscura      | HTTP + WebSocket + HTML chat UI    | Standalone agent — direct browser/Tailscale chat     |
+| 443   | Tailscale VIP  | OpenClaw     | WSS (HTTPS tunnel)                 | `modernizedai.tail91e620.ts.net` remote WS          |
+| 443   | Tailscale VIP  | Obscura GW   | HTTPS (tunnel → 18790)             | `elliotts-macbook-pro-1.tail91e620.ts.net`          |
+| 18792 | Tailscale VIP  | Obscura SA   | HTTPS (tunnel → 18792)             | `elliotts-macbook-pro-1.tail91e620.ts.net:18792`    |
 
-**Route map within port 18790:**
+**Route map within port 18790 (main gateway):**
 
-| Path                          | Method    | Description                            |
-|-------------------------------|-----------|----------------------------------------|
-| `/v1/chat/completions`        | POST      | OpenAI-compatible completions          |
-| `/v1/models`                  | GET       | List Obscura backends as model objects |
-| `/v1/chat/ws`                 | WebSocket | Bidirectional streaming chat           |
-| `/a2a/rpc`                    | POST      | A2A JSON-RPC                           |
-| `/a2a/v1/tasks`               | POST/GET  | A2A REST task management               |
-| `/a2a/v1/tasks/streaming`     | GET (SSE) | A2A SSE streaming responses            |
-| `/.well-known/agent.json`     | GET       | A2A agent card (public, no auth)       |
-| `/health`                     | GET       | Liveness probe (public, no auth)       |
+| Path                              | Method    | Auth          | Description                            |
+|-----------------------------------|-----------|---------------|----------------------------------------|
+| `/v1/chat/completions`            | POST      | Bearer        | OpenAI-compatible completions          |
+| `/v1/models`                      | GET       | Bearer        | List Obscura backends as model objects |
+| `/v1/chat/ws`                     | WebSocket | Bearer/api_key| Bidirectional streaming chat + presence|
+| `/a2a/rpc`                        | POST      | Bearer        | A2A JSON-RPC                           |
+| `/a2a/v1/tasks`                   | POST/GET  | Bearer        | A2A REST task management               |
+| `/a2a/v1/tasks/streaming`         | GET (SSE) | Bearer        | A2A SSE streaming responses            |
+| `/.well-known/agent.json`         | GET       | Public        | A2A agent card                         |
+| `/health`                         | GET       | Public        | Liveness probe                         |
+| `/channels/telegram/webhook`      | POST      | HMAC token    | Telegram Bot API inbound updates       |
+| `/channels/whatsapp/verify`       | GET       | Hub challenge | WhatsApp webhook verification          |
+| `/channels/whatsapp/webhook`      | POST      | HMAC sig      | WhatsApp Cloud API inbound messages    |
+| `/channels/configs`               | POST/GET  | Bearer        | Channel config CRUD                    |
+| `/channels/configs/{id}/apply`    | POST      | Bearer        | Hot-reload channel config to live router|
+| `/webhook/a2a`                    | POST      | HMAC-SHA256   | A2A push notification callbacks        |
+| `/peers/openclaw/.well-known/agent.json` | GET | Public   | Synthetic A2A card for OpenClaw bridge |
+
+**Route map within port 18792 (standalone agent):**
+
+| Path                              | Method    | Auth          | Description                            |
+|-----------------------------------|-----------|---------------|----------------------------------------|
+| `/`                               | GET       | Public        | Embedded dark-theme browser chat UI    |
+| `/ws`                             | WebSocket | Bearer/api_key| Streaming chat + platform messages + presence |
+| `/v1/chat/completions`            | POST      | Bearer        | OpenAI-compatible completions          |
+| `/v1/models`                      | GET       | Bearer        | List Obscura backends                  |
+| `/channels/telegram/webhook`      | POST      | HMAC token    | Telegram inbound (mirrored from :18790)|
+| `/channels/whatsapp/webhook`      | POST      | HMAC sig      | WhatsApp inbound (mirrored from :18790)|
+| `/health`                         | GET       | Public        | Liveness probe                         |
 
 ---
 
@@ -95,22 +115,28 @@ procedures.
 | `~/.obscura/network-gateway.token` | Obscura    | Inbound bearer auth on Obscura network gateway :18790  | `OBSCURA_NETWORK_TOKEN` env var → `~/.obscura/network-gateway.token` → empty (no auth)     |
 | `~/.obscura/network-gateway-webhook.secret` | Obscura | HMAC-SHA256 signing of push notification callbacks | `OBSCURA_WEBHOOK_SECRET` env var → `~/.obscura/network-gateway-webhook.secret`    |
 | `~/.openclaw/openclaw.json` → `a2aPeers[].token` | OpenClaw | OpenClaw→Obscura outbound calls :18790 | Read by OpenClaw at startup; set to match `~/.obscura/network-gateway.token`               |
+| `TELEGRAM_WEBHOOK_SECRET`    | Obscura          | Verify `X-Telegram-Bot-Api-Secret-Token` header       | `~/.obscura/config.toml` `[messaging.telegram] webhook_secret` → env var                   |
+| `WHATSAPP_APP_SECRET`        | Obscura          | Verify `X-Hub-Signature-256` on WhatsApp webhooks     | `~/.obscura/config.toml` `[messaging.whatsapp] app_secret` → env var                      |
+| `WHATSAPP_VERIFY_TOKEN`      | Obscura          | Verify Meta hub challenge on `/channels/whatsapp/verify` | `~/.obscura/config.toml` `[messaging.whatsapp] verify_token` → env var                  |
 
 **Middleware stack on port 18790 (outermost → innermost):**
 
 ```
-SecurityHeaders
-  → RequestSizeLimit (1 MB max body; exempt: /health, /.well-known/, /peers/)
-  → GatewayRateLimit (60 req/min/IP; exempt: /health, /.well-known/, /peers/)
-  → GatewayBearerAuth (exempt: /health, /.well-known/, /peers/, /webhook/)
+RequestSizeLimit    (1 MB max body; exempt: /health, /.well-known/, /peers/)
+  → SecurityHeaders
+  → GatewayRateLimit    (60 req/min/IP; exempt: /health, /.well-known/, /peers/)
+  → WebhookRateLimit    (20 req/min/IP on /webhook/ and /channels/*/webhook paths)
+  → GatewayBearerAuth   (exempt: /health, /.well-known/, /peers/, /webhook/,
+                                  /channels/telegram/webhook, /channels/whatsapp/)
   → CORS
   → routes
 ```
 
-`/webhook/a2a` is exempt from **bearer auth** (uses HMAC-SHA256 instead) but is
-**subject to rate limiting and request size enforcement**.
+`strict_webhook_verification = True` (default): webhook endpoints return `503` if
+their respective HMAC secret is not configured — preventing silent unauthenticated
+delivery.
 
-Exempt from all middleware: `/health`, `/.well-known/`, `/peers/`.
+Exempt from all auth+rate middleware: `/health`, `/.well-known/`, `/peers/`.
 
 ---
 
@@ -292,6 +318,83 @@ Tailscale `serve` is configured at gateway startup when `GatewayConfig.tailscale
 
 **Note:** Tailscale access goes through `GatewayBearerAuthMiddleware` — remote
 callers must supply the same bearer token as local callers.
+
+### 4.9 Platform message fanout (WhatsApp / Telegram → all WS clients)
+
+A single process-level `ConnectionRegistry` (in `connections.py`) owns one
+`channel_inject` subscription.  Every connected WS client — on either port —
+receives every platform message in real time:
+
+```
+External platform          Obscura :18790              ConnectionRegistry
+(WhatsApp / Telegram)       /channels/*/webhook              (fanout task)
+     │                            │                                │
+     │  POST /channels/…/webhook  │                                │
+     │  X-Hub-Signature-256: …    │                                │
+     │───────────────────────────►│                                │
+     │                            │ verify HMAC, parse update      │
+     │                            │ channel_router.dispatch(…)     │
+     │                            │                                │
+     │                            │  push_channel_message(msg)     │
+     │                            │───────────────────────────────►│
+     │  200 {"status":"ok"}       │                                │ broadcast to all
+     │◄───────────────────────────│                                │ WS clients:
+     │                            │                                │ {"type":"incoming",
+     │                            │                                │  "platform":"whatsapp",
+     │                            │                                │  "sender":"…",
+     │                            │                                │  "text":"…"}
+     │                            │       ◄────────────────────────│
+     │                            │  /v1/chat/ws client(s)         │
+     │                            │  /ws client(s)                 │
+     │                            │  (all receive the frame)       │
+```
+
+When a WS client responds, the registry's `_active_reply` callback routes the
+reply back to the originating platform channel.
+
+### 4.10 Presence broadcasts
+
+Every WS connection (on `/v1/chat/ws` or `/ws`) registers with the
+`ConnectionRegistry` on accept and deregisters on disconnect.  All other
+connected clients receive a presence frame:
+
+```
+Client A connects → registry.register() →
+    broadcast {"type":"presence","event":"connected","conn_id":"a1b2c3d4","count":2}
+    → received by Client B (if any)
+
+Client A disconnects → registry.unregister() →
+    broadcast {"type":"presence","event":"disconnected","conn_id":"a1b2c3d4","count":1}
+    → received by Client B (if any)
+```
+
+The standalone agent chat UI (`/`) displays the live client count in its
+status bar via these frames.
+
+### 4.11 Standalone agent direct chat
+
+```
+Browser (Tailscale or LAN)            Obscura Standalone Agent :18792
+     │                                               │
+     │  GET /                                        │
+     │──────────────────────────────────────────────►│
+     │  200 (dark-theme chat HTML + JS)              │
+     │◄──────────────────────────────────────────────│
+     │                                               │
+     │  WS /ws                                       │
+     │  (upgrade; token via Bearer or ?api_key=)     │
+     │──────────────────────────────────────────────►│ register in ConnectionRegistry
+     │                                               │ broadcast presence/connected
+     │  {"type":"presence","event":"connected","count":1}
+     │◄──────────────────────────────────────────────│
+     │                                               │
+     │  {"type":"message","content":"Hello!"}        │
+     │──────────────────────────────────────────────►│
+     │  {"type":"token","content":"Hi","session_id":"…"}  (streaming)
+     │◄──────────────────────────────────────────────│
+     │  {"type":"done","session_id":"…"}             │
+     │◄──────────────────────────────────────────────│
+```
 
 ---
 
@@ -504,7 +607,42 @@ curl -s \
 #   POST /webhook/a2a 200
 ```
 
-### 7.12 Agent monitor
+### 7.12 Standalone agent health
+
+```bash
+curl -s http://localhost:18792/health
+# Expected: {"status":"ok","service":"obscura-standalone-agent","port":18792}
+
+# Chat UI accessible in browser:
+open http://localhost:18792/
+
+# Over Tailscale:
+open https://elliotts-macbook-pro-1.tail91e620.ts.net:18792/
+```
+
+### 7.13 ConnectionRegistry connection count
+
+```python
+from obscura.integrations.network_gateway.connections import get_registry
+r = get_registry()
+print(f"Connected WS clients: {r.count}")
+```
+
+### 7.14 Telegram webhook smoke test (via Tailscale)
+
+```bash
+# Simulate a Telegram update to the Tailscale-exposed endpoint
+SECRET=$(python3 -c "import os; print(os.environ.get('TELEGRAM_WEBHOOK_SECRET',''))")
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: $SECRET" \
+  -d '{"update_id":1,"message":{"message_id":1,"from":{"id":12345,"first_name":"Test"},"chat":{"id":12345,"type":"private"},"text":"hello"}}' \
+  https://elliotts-macbook-pro-1.tail91e620.ts.net/channels/telegram/webhook
+# Expected: {"status":"ok"}
+# If 503: TELEGRAM_WEBHOOK_SECRET not configured in ~/.obscura/config.toml
+```
+
+### 7.15 Agent monitor
 
 ```bash
 # PID may differ — check the current lock files

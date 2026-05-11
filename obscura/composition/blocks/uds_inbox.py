@@ -57,14 +57,30 @@ async def install_uds_inbox(
 
     def _on_peer_message(payload: dict[str, Any]) -> None:
         try:
-            sender = payload.get("from_session") or payload.get("from") or "peer"
-            text   = payload.get("text") or payload.get("message") or ""
-            backend = payload.get("backend", "")
-            label  = f"{sender}({backend})" if backend else sender
-            logger.info("[peer:%s] %s", sender[:16], text[:120])
-
+            text = payload.get("text") or payload.get("message") or ""
             if not text:
                 return
+
+            # Resolve platform: use explicit "platform" key when set by the
+            # gateway's channel fanout (e.g. "telegram", "whatsapp"), fall
+            # back to "peer" for generic cross-session messages.
+            platform = payload.get("platform") or "peer"
+
+            # Sender label: prefer human-readable display_name, then "from",
+            # then "from_session" (which is often the platform name itself).
+            sender_id = (
+                payload.get("sender_id")
+                or payload.get("from_session")
+                or payload.get("from")
+                or "peer"
+            )
+            display_name = (
+                payload.get("display_name")
+                or payload.get("from")
+                or sender_id
+            )
+
+            logger.info("[%s:%s] %s", platform, display_name[:24], text[:120])
 
             # Inject into the REPL channel so it races with keyboard input.
             from obscura.integrations.messaging.channel_inject import (
@@ -76,9 +92,9 @@ async def install_uds_inbox(
                 return True
 
             pushed = push_channel_message(ChannelMessage(
-                platform="peer",
-                sender_id=sender,
-                display_name=label,
+                platform=platform,
+                sender_id=sender_id,
+                display_name=display_name,
                 text=text,
                 reply_fn=_noop_reply,
             ))

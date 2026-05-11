@@ -11,7 +11,18 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_home
+from obscura.integrations.messaging.cred_cipher import decrypt_credentials, encrypt_credentials
 from obscura.integrations.messaging.models import ConversationState
+
+
+def _encrypt_creds(creds: dict) -> str:
+    """Thin wrapper so callers in this module stay readable."""
+    return encrypt_credentials(creds)
+
+
+def _decrypt_creds(stored: str) -> dict:
+    """Thin wrapper so callers in this module stay readable."""
+    return decrypt_credentials(stored)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -731,7 +742,7 @@ class ChannelConfigStore(_SQLiteBase):
                     label,
                     1 if enabled else 0,
                     mode.strip().lower() or "chat",
-                    json.dumps(credentials or {}, ensure_ascii=True),
+                    _encrypt_creds(credentials or {}),
                     json.dumps(router_config or {}, ensure_ascii=True),
                     json.dumps(contacts or [], ensure_ascii=True),
                     now,
@@ -848,7 +859,7 @@ class ChannelConfigStore(_SQLiteBase):
                     new_label,
                     1 if new_enabled else 0,
                     new_mode,
-                    json.dumps(new_creds, ensure_ascii=True),
+                    _encrypt_creds(new_creds),
                     json.dumps(new_rc, ensure_ascii=True),
                     json.dumps(new_contacts, ensure_ascii=True),
                     now,
@@ -895,7 +906,7 @@ class ChannelConfigStore(_SQLiteBase):
         router_config: dict[str, Any] = {}
         contacts: list[str] = []
         try:
-            credentials = json.loads(row["credentials_json"])
+            credentials = _decrypt_creds(row["credentials_json"] or "{}")
         except Exception:
             logger.debug("suppressed exception in _row_to_record", exc_info=True)
         try:

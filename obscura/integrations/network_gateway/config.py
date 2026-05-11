@@ -127,10 +127,23 @@ class GatewayConfig:
     session_ttl: float = 3600.0
     debug: bool = False
     max_request_bytes: int = 1 * 1024 * 1024  # 1 MB
+    strict_webhook_verification: bool = True
+    """Reject webhook requests when their HMAC secret is not configured.
+    When False, accepts unverified payloads and logs a warning (permissive mode)."""
+    webhook_rate_limit: int = 20
+    """Max webhook+channel requests per 60-second window per IP (tighter than main rate limit)."""
+    control_plane_rate_limit: int = 10
+    """Max control-plane mutation requests (POST/PATCH/DELETE to /channels/configs) per 60-second
+    window per IP. Tighter than the general rate limit."""
     # Standalone agent — lightweight direct-chat server on a dedicated port.
     standalone_agent_enabled: bool = False
     standalone_agent_port: int = 18792
     standalone_agent_host: str = "0.0.0.0"
+    # Heartbeat subsystem — periodic scheduled agent turn broadcast to WS clients.
+    heartbeat_enabled: bool = False
+    heartbeat_interval: float = 1800.0  # 30 minutes
+    heartbeat_prompt: str = ""          # empty = use default
+    heartbeat_target: str = "ws"        # "ws" | "last"
 
     @classmethod
     def from_obscura_config(cls) -> "GatewayConfig":
@@ -177,6 +190,9 @@ class GatewayConfig:
                 "OBSCURA_STANDALONE_AGENT_HOST",
                 cfg.standalone_agent_host,
             ),
+            strict_webhook_verification=True,  # always on; no config field yet
+            webhook_rate_limit=20,
+            control_plane_rate_limit=10,
         )
 
 

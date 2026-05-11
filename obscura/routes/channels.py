@@ -71,6 +71,9 @@ async def telegram_webhook(
 
     # Verify secret token if configured
     telegram_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+    strict: bool = getattr(request.app.state, "strict_webhook_verification", False)
+    if not telegram_secret and strict:
+        raise HTTPException(status_code=503, detail="Telegram webhook secret not configured")
     if telegram_secret:
         if not x_telegram_bot_api_secret_token:
             logger.warning("Telegram webhook: missing secret token header")
@@ -157,6 +160,9 @@ async def whatsapp_webhook(
 
     # Verify Meta signature
     app_secret = os.environ.get("WHATSAPP_APP_SECRET", "")
+    strict: bool = getattr(request.app.state, "strict_webhook_verification", False)
+    if not app_secret and strict:
+        raise HTTPException(status_code=503, detail="WhatsApp app secret not configured")
     if app_secret:
         sig_header = request.headers.get("X-Hub-Signature-256", "")
         if not _verify_meta_signature(body, sig_header, app_secret):
@@ -214,6 +220,21 @@ async def whatsapp_webhook(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _redact_credentials(record_dict: dict) -> dict:
+    """Return a copy of *record_dict* with credential values masked.
+
+    Each value in the ``credentials`` sub-dict is replaced with
+    ``"<redacted>"`` so keys are visible (useful for debugging) but
+    secrets are never returned over the API.
+    """
+    import copy
+    out = copy.deepcopy(record_dict)
+    creds = out.get("credentials")
+    if isinstance(creds, dict):
+        out["credentials"] = {k: "<redacted>" for k in creds}
+    return out
 
 
 def _verify_meta_signature(body: bytes, sig_header: str, app_secret: str) -> bool:
@@ -321,7 +342,7 @@ async def list_channel_configs(
 ) -> list[dict[str, Any]]:
     """List all channel configurations."""
     store = _get_config_store()
-    return [r.to_dict() for r in store.list_all(enabled_only=enabled_only)]
+    return [_redact_credentials(r.to_dict()) for r in store.list_all(enabled_only=enabled_only)]
 
 
 @router.get("/configs/{config_id}")
@@ -334,7 +355,7 @@ async def get_channel_config(
     record = store.get(config_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Config '{config_id}' not found")
-    return record.to_dict()
+    return _redact_credentials(record.to_dict())
 
 
 @router.patch("/configs/{config_id}")

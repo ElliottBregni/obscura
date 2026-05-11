@@ -39,21 +39,31 @@ def _tailscale_available() -> bool:
     return shutil.which(_TAILSCALE_BIN) is not None
 
 
-async def configure_tailscale_serve(port: int, funnel: bool = False) -> bool:
+async def configure_tailscale_serve(
+    port: int,
+    *,
+    listen_port: int | None = None,
+    funnel: bool = False,
+) -> bool:
     """Expose ``localhost:{port}`` via Tailscale serve (or funnel).
 
     Runs::
 
-        tailscale serve --bg https+insecure://localhost:{port}
+        tailscale serve --bg [--https=<listen_port>] https+insecure://localhost:{port}
 
     When ``funnel=True``::
 
-        tailscale funnel --bg https+insecure://localhost:{port}
+        tailscale funnel --bg [--https=<listen_port>] https+insecure://localhost:{port}
 
     Parameters
     ----------
     port:
         The local TCP port the gateway is listening on.
+    listen_port:
+        The Tailscale HTTPS port to expose on the tailnet. Defaults to 443
+        (the primary ``/`` mapping). Pass a non-443 value to create a
+        secondary HTTPS endpoint, e.g. ``listen_port=18792`` results in
+        ``https://<machine>.ts.net:18792/``.
     funnel:
         If True, use ``tailscale funnel`` to make the endpoint reachable from
         the public internet (requires funnel to be enabled on the tailnet).
@@ -71,12 +81,10 @@ async def configure_tailscale_serve(port: int, funnel: bool = False) -> bool:
         return False
 
     cmd_name = "funnel" if funnel else "serve"
-    cmd = [
-        _TAILSCALE_BIN,
-        cmd_name,
-        "--bg",
-        f"https+insecure://localhost:{port}",
-    ]
+    cmd = [_TAILSCALE_BIN, cmd_name, "--bg"]
+    if listen_port is not None and listen_port != 443:
+        cmd.append(f"--https={listen_port}")
+    cmd.append(f"https+insecure://localhost:{port}")
 
     logger.debug("Running: %s", " ".join(cmd))
     try:
@@ -101,17 +109,20 @@ async def configure_tailscale_serve(port: int, funnel: bool = False) -> bool:
         return False
 
 
-async def remove_tailscale_serve(port: int) -> bool:
+async def remove_tailscale_serve(port: int, *, listen_port: int | None = None) -> bool:
     """Remove the Tailscale serve mapping for ``localhost:{port}``.
 
     Runs::
 
-        tailscale serve --remove localhost:{port}
+        tailscale serve --remove [--https=<listen_port>] localhost:{port}
 
     Parameters
     ----------
     port:
         The local TCP port to un-map.
+    listen_port:
+        The Tailscale HTTPS port the mapping was registered on. Must match
+        the value passed to :func:`configure_tailscale_serve`.
 
     Returns
     -------
@@ -121,7 +132,10 @@ async def remove_tailscale_serve(port: int) -> bool:
     if not _tailscale_available():
         return False
 
-    cmd = [_TAILSCALE_BIN, "serve", "--remove", f"localhost:{port}"]
+    cmd = [_TAILSCALE_BIN, "serve", "--remove"]
+    if listen_port is not None and listen_port != 443:
+        cmd.append(f"--https={listen_port}")
+    cmd.append(f"localhost:{port}")
     logger.debug("Running: %s", " ".join(cmd))
     try:
         proc = await asyncio.create_subprocess_exec(
