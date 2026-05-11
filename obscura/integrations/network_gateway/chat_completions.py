@@ -33,7 +33,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,20 @@ router = APIRouter()
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"] = "user"
     content: str | None = None
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def _flatten_multimodal(cls, v: Any) -> Any:
+        # OpenAI multimodal form: content can be a list of blocks like
+        # [{"type": "text", "text": "..."}]. Flatten to a plain string so the
+        # rest of the handler — which treats content as text — keeps working.
+        if isinstance(v, list):
+            return "".join(
+                b.get("text", "")
+                for b in v
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        return v
 
 
 class ChatCompletionRequest(BaseModel):
