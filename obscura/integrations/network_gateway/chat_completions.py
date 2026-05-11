@@ -214,19 +214,25 @@ async def _stream_agent(
 
 async def _sse_generator(
     backend: str,
-    model: str,
+    display_model: str,
+    effective_model: str,
     system_prompt: str,
     user_prompt: str,
     completion_id: str,
     created: int,
 ) -> AsyncIterator[str]:
-    """Yield SSE-formatted lines for a streaming chat completion."""
-    # Opening chunk with role
+    """Yield SSE-formatted lines for a streaming chat completion.
+
+    ``display_model`` is what the caller requested (echoed back in each chunk
+    so OpenAI clients can correlate). ``effective_model`` is what the SDK
+    actually calls — usually empty so the backend picks its own default,
+    since route prefixes like "obscura/claude" aren't valid SDK model IDs.
+    """
     opening: dict[str, Any] = {
         "id": completion_id,
         "object": "chat.completion.chunk",
         "created": created,
-        "model": model,
+        "model": display_model,
         "choices": [
             {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
         ],
@@ -235,13 +241,13 @@ async def _sse_generator(
 
     try:
         async for delta_text in _stream_agent(
-            backend, model, system_prompt, user_prompt
+            backend, effective_model, system_prompt, user_prompt
         ):
             chunk: dict[str, Any] = {
                 "id": completion_id,
                 "object": "chat.completion.chunk",
                 "created": created,
-                "model": model,
+                "model": display_model,
                 "choices": [
                     {
                         "index": 0,
@@ -254,12 +260,11 @@ async def _sse_generator(
     except Exception:
         logger.exception("Error during streamed agent run")
 
-    # Final chunk
     final: dict[str, Any] = {
         "id": completion_id,
         "object": "chat.completion.chunk",
         "created": created,
-        "model": model,
+        "model": display_model,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
     }
     yield f"data: {json.dumps(final)}\n\n"
@@ -327,6 +332,7 @@ async def chat_completions(
             _sse_generator(
                 backend,
                 body.model,
+                effective_model,
                 system_prompt,
                 user_prompt,
                 completion_id,
