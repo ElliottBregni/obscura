@@ -23,7 +23,7 @@ Notes on wuzapi quirks captured here:
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -96,10 +96,15 @@ class WuzapiUser(BaseModel):
         """Parse the comma-separated ``events`` field into a typed tuple."""
         if not self.events:
             return ()
-        valid: set[WuzapiEventName] = {
-            "Message", "ReadReceipt", "HistorySync", "ChatPresence",
-        }
-        return tuple(e for e in (p.strip() for p in self.events.split(",")) if e in valid)  # type: ignore[misc]
+        valid: set[str] = {"Message", "ReadReceipt", "HistorySync", "ChatPresence"}
+        names: list[WuzapiEventName] = []
+        for part in self.events.split(","):
+            stripped = part.strip()
+            if stripped in valid:
+                # Cast is safe because we just checked membership in the
+                # closed set of literal values.
+                names.append(stripped)  # type: ignore[arg-type]
+        return tuple(names)
 
 
 class WuzapiSessionStatus(BaseModel):
@@ -145,17 +150,16 @@ class WuzapiCreateUserRequest(BaseModel):
 class WuzapiConnectRequest(BaseModel):
     """Body for ``POST /session/connect``.
 
-    ``Subscribe`` is wuzapi's per-call event filter (intersected with the
-    user's stored ``events``). ``Immediate=True`` makes the call return
-    without waiting for login confirmation.
+    Field names match wuzapi's wire shape (``Subscribe``, ``Immediate``)
+    via Go's case-insensitive JSON decode — we just spell them Pythonically.
+    ``subscribe`` is wuzapi's per-call event filter; ``immediate=True``
+    makes the call return without waiting for login confirmation.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    subscribe: list[WuzapiEventName] = Field(
-        default_factory=lambda: ["Message"], alias="Subscribe"
-    )
-    immediate: bool = Field(default=True, alias="Immediate")
+    subscribe: list[WuzapiEventName] = Field(default_factory=lambda: ["Message"])
+    immediate: bool = True
 
 
 class WuzapiSendTextContextInfo(BaseModel):
@@ -163,49 +167,46 @@ class WuzapiSendTextContextInfo(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    stanza_id: str = Field(alias="StanzaId")
-    participant: str = Field(alias="Participant")
+    stanza_id: str
+    participant: str
 
 
 class WuzapiSendTextRequest(BaseModel):
     """Body for ``POST /chat/send/text``.
 
-    ``phone`` is a bare WhatsApp number (no plus, no ``@s.whatsapp.net``).
-    Wuzapi normalises it server-side. If ``id`` is omitted wuzapi generates
-    one.
+    ``phone`` accepts a bare phone number (no plus, no ``@s.whatsapp.net``)
+    OR a full WhatsApp JID for groups (``...@g.us``). Wuzapi's parseJID
+    server-side routes both correctly.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    phone: str = Field(alias="Phone")
-    body: str = Field(alias="Body")
-    id: str | None = Field(default=None, alias="Id")
-    link_preview: bool | None = Field(default=None, alias="LinkPreview")
-    context_info: WuzapiSendTextContextInfo | None = Field(
-        default=None, alias="ContextInfo"
-    )
+    phone: str
+    body: str
+    id: str | None = None
+    link_preview: bool | None = None
+    context_info: WuzapiSendTextContextInfo | None = None
 
 
 class WuzapiSetWebhookRequest(BaseModel):
     """Body for ``POST /webhook``.
 
-    Two non-obvious wire-format facts discovered against a running wuzapi:
+    Two non-obvious wire-format facts (discovered against a live wuzapi):
 
-    * Field name is lowercase ``webhookurl`` (Go's case-insensitive JSON
-      decoding lets ``webhookURL`` slip through, but the source-of-truth tag
-      is lowercase — alias matches the canonical form).
-    * ``events`` is ``[]string`` (a JSON array of strings), NOT a
-      comma-separated string. Passing a string returns HTTP 400
-      "could not decode payload".
+    * Wire key is ``webhookurl`` — no underscore. Go's case-insensitive
+      match doesn't bridge ``webhook_url`` to ``webhookurl``, so we use a
+      ``serialization_alias`` to emit the right key while keeping a
+      Pythonic field name.
+    * ``events`` is ``[]string`` (array), NOT a comma-separated string.
+      Passing a string returns HTTP 400 "could not decode payload".
 
-    Also: if ``events`` is omitted or empty, wuzapi only updates the
-    webhook URL and **does not** touch the events list. To explicitly clear
-    events, we'd need a separate flow; we don't need that path.
+    If ``events`` is omitted (None), wuzapi only updates the webhook URL
+    and preserves the existing event filter.
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    webhook_url: str = Field(alias="webhookurl")
+    webhook_url: str = Field(serialization_alias="webhookurl")
     events: list[WuzapiEventName] | None = None
 
 
@@ -258,7 +259,9 @@ class WuzapiWebhookConfig(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     webhook: str
-    subscribe: list[WuzapiEventName] = Field(default_factory=list)
+    subscribe: list[WuzapiEventName] = Field(
+        default_factory=lambda: []  # noqa: PIE807 — typed empty default
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -278,19 +281,18 @@ class WuzapiWebhookConfig(BaseModel):
 class WuzapiMessageEvent(BaseModel):
     """A ``Message`` event — what wuzapi sends when an inbound text arrives.
 
-    The full whatsmeow payload includes many nested fields; we only declare
-    the ones the adapter reads. Other fields are ignored. The discriminator
-    is ``type == "Message"`` at the envelope level.
+    ``info`` and ``raw_message`` are typed as ``dict[str, Any]`` deliberately:
+    the underlying whatsmeow event has 25+ nested fields whose shapes vary
+    by message kind (text, image, ephemeral, viewOnce, protocol, etc.).
+    Modeling each as a TypedDict would be high-churn for low value when
+    the adapter only reads a handful of keys with runtime narrowing. The
+    ``Any`` here is honest — it's an opaque external-API payload.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
-    # The wmiau.go dispatcher emits Info{...} + Message{...} sub-structs.
-    # We capture them as raw dicts and pluck what we need; once we have
-    # confirmed payload samples we can refine these into typed nested
-    # models. Marked here as a deliberate TODO.
-    info: dict[str, object] = Field(default_factory=dict, alias="Info")
-    raw_message: dict[str, object] = Field(default_factory=dict, alias="Message")
+    info: dict[str, Any] = Field(default_factory=dict, alias="Info")
+    raw_message: dict[str, Any] = Field(default_factory=dict, alias="Message")
 
 
 class WuzapiUnknownEvent(BaseModel):
@@ -300,12 +302,6 @@ class WuzapiUnknownEvent(BaseModel):
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
-
-
-WuzapiEventPayload = Annotated[
-    Union[WuzapiMessageEvent, WuzapiUnknownEvent],
-    Field(description="Inner event shape, discriminated by envelope.type"),
-]
 
 
 class WuzapiWebhookEnvelope(BaseModel):
@@ -320,7 +316,7 @@ class WuzapiWebhookEnvelope(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     type: str = ""
-    event: dict[str, object] = Field(default_factory=dict)
+    event: dict[str, Any] = Field(default_factory=dict)
     token: str = ""
     base64: str | None = None
     mime_type: str | None = Field(default=None, alias="mimeType")
@@ -332,7 +328,6 @@ __all__ = [
     "WuzapiConnectResponse",
     "WuzapiCreateUserRequest",
     "WuzapiEventName",
-    "WuzapiEventPayload",
     "WuzapiMessageEvent",
     "WuzapiProxyConfig",
     "WuzapiQRCodeResponse",

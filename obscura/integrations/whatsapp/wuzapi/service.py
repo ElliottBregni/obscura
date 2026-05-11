@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Final
 
 import uvicorn
@@ -87,7 +87,7 @@ async def wuzapi_service(
     webhook_host: str = DEFAULT_WEBHOOK_HOST,
     webhook_port: int = DEFAULT_WEBHOOK_PORT,
     account_id: str = "default",
-) -> AsyncIterator[None]:
+) -> AsyncGenerator[None]:
     """Run the inbound bridge for the lifetime of the ``async with`` block.
 
     Composes:
@@ -131,7 +131,7 @@ async def wuzapi_service(
         server.should_exit = True
         try:
             await asyncio.wait_for(serve_task, timeout=5.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             serve_task.cancel()
         await client.aclose()
         logger.info("wuzapi service: shut down")

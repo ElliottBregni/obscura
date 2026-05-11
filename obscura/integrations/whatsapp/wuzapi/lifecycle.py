@@ -15,6 +15,7 @@ shell output. Keeps the CLI surface clean.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import time
@@ -108,10 +109,10 @@ def status() -> WuzapiServiceStatus:
             elif value in ("waiting", "spawn scheduled", "not running"):
                 state = "loaded_not_running"
         elif s.startswith("pid = "):
-            with _suppress(ValueError):
+            with contextlib.suppress(ValueError):
                 pid = int(s.split(" = ", 1)[1])
         elif s.startswith("last exit code = "):
-            with _suppress(ValueError):
+            with contextlib.suppress(ValueError):
                 last_exit = int(s.split(" = ", 1)[1])
     return WuzapiServiceStatus(LABEL, state, pid, last_exit)
 
@@ -186,27 +187,6 @@ def tail_log(*, lines: int = 50) -> str:
         out_parts.append(f"# {label} ({path}):")
         out_parts.append(result.stdout)
     return "\n".join(out_parts)
-
-
-# ---------------------------------------------------------------------------
-# Internal: suppress without importing contextlib for one line
-# ---------------------------------------------------------------------------
-
-
-class _suppress:  # noqa: N801 — mirrors contextlib.suppress
-    def __init__(self, *exc_types: type[BaseException]) -> None:
-        self._types = exc_types
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: object,
-    ) -> bool:
-        return exc_type is not None and issubclass(exc_type, self._types)
 
 
 __all__ = [

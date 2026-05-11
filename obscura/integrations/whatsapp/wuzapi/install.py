@@ -158,15 +158,6 @@ def init_directories() -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _SecretFile:
-    name: str
-    generator: type[str] | None  # placeholder for future polymorphism
-
-    def path(self) -> Path:
-        return WUZAPI_HOME / self.name
-
-
 def generate_secrets(*, force: bool = False) -> bool:
     """Generate admin/HMAC/encryption secrets if they don't exist.
 

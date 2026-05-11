@@ -23,8 +23,10 @@ obscura's REPL inbox until you flip the config flag.
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
-from pathlib import Path
+from collections.abc import Coroutine
+from typing import Any
 
 import click
 
@@ -40,6 +42,7 @@ from obscura.integrations.whatsapp.wuzapi.install import (
     uninstall as do_uninstall,
 )
 from obscura.integrations.whatsapp.wuzapi.models import WuzapiSendTextRequest
+from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
 from obscura.integrations.whatsapp.wuzapi.setup import (
     QRArtifacts,
     ensure_user,
@@ -48,12 +51,13 @@ from obscura.integrations.whatsapp.wuzapi.setup import (
     load_user_token,
 )
 
+
 _DEFAULT_BASE_URL = "http://127.0.0.1:18793"
 
 
-def _run(coro: object) -> object:
+def _run[T](coro: Coroutine[Any, Any, T]) -> T:
     """Tiny helper so the commands can stay sync-bodied."""
-    return asyncio.run(coro)  # type: ignore[arg-type]
+    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +239,6 @@ def send_cmd(target: str, text: str) -> None:
 
     TARGET should be a phone number (digits, optionally with +).
     """
-    import re
     phone = re.sub(r"\D", "", target)
     if not phone:
         click.secho(f"invalid target: {target!r}", fg="red", err=True)
@@ -276,7 +279,6 @@ def daemon_cmd(webhook_port: int, auto_configure_webhook: bool) -> None:
 
     Ctrl-C to stop.
     """
-    from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
 
     async def _go() -> None:
         # Optionally make sure wuzapi knows where to POST.

@@ -22,7 +22,7 @@ import logging
 import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from obscura.integrations.messaging.identity import normalize_identity
 from obscura.integrations.messaging.models import PlatformMessage
@@ -82,7 +82,7 @@ def _strip_jid(jid: str) -> str:
     return normalize_identity(bare)
 
 
-def _extract_text(message: dict[str, object]) -> str:
+def _extract_text(message: dict[str, Any]) -> str:
     """Pull text from the wuzapi Message dict.
 
     wuzapi forwards whatsmeow's union shape verbatim, so the text can live
@@ -98,26 +98,29 @@ def _extract_text(message: dict[str, object]) -> str:
     string so the caller can decide whether to drop the event.
     """
 
-    def _from_inner(inner: object) -> str:
+    def _from_inner(inner: Any) -> str:
         if not isinstance(inner, dict):
             return ""
-        if isinstance(inner.get("conversation"), str):
-            return str(inner["conversation"])
-        ext = inner.get("extendedTextMessage")
-        if isinstance(ext, dict) and isinstance(ext.get("text"), str):
-            return str(ext["text"])
+        inner_d: dict[str, Any] = cast("dict[str, Any]", inner)
+        conv = inner_d.get("conversation")
+        if isinstance(conv, str):
+            return conv
+        ext = inner_d.get("extendedTextMessage")
+        if isinstance(ext, dict):
+            ext_d: dict[str, Any] = cast("dict[str, Any]", ext)
+            text = ext_d.get("text")
+            if isinstance(text, str):
+                return text
         return ""
 
-    # Top-level forms
     direct = _from_inner(message)
     if direct:
         return direct
-    # Wrapper forms — peel one or two layers
     for wrapper in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2"):
         outer = message.get(wrapper)
         if isinstance(outer, dict):
-            inner_msg = outer.get("message")
-            text = _from_inner(inner_msg) if isinstance(inner_msg, dict) else ""
+            outer_d: dict[str, Any] = cast("dict[str, Any]", outer)
+            text = _from_inner(outer_d.get("message"))
             if text:
                 return text
     logger.debug("wuzapi: no text extractable from message variant: %s",
@@ -125,7 +128,7 @@ def _extract_text(message: dict[str, object]) -> str:
     return ""
 
 
-def _parse_ts(info: dict[str, object]) -> datetime:
+def _parse_ts(info: dict[str, Any]) -> datetime:
     """Parse the wuzapi Info.Timestamp ISO8601 string into a UTC datetime."""
     raw = info.get("Timestamp")
     if not isinstance(raw, str):
@@ -206,23 +209,39 @@ class WuzapiAdapter:
     # ---------- outbound ----------
 
     async def send(self, recipient: str, text: str) -> bool:
-        """Send a text message to ``recipient`` (a phone number, with or without ``+``).
+        """Send a text message to ``recipient``.
 
-        Returns ``True`` on successful wuzapi acknowledgement, ``False``
-        on any transport error (logged at WARNING).
+        Recipient forms accepted (in order of specificity):
+
+        * ``"group:<group_jid_digits>"`` — channel_id form for group threads.
+          Reconstructs ``<digits>@g.us`` and passes the full JID to wuzapi.
+        * ``"<digits>@g.us"`` — already a group JID; passed through.
+        * Phone number (digits, optionally ``+``-prefixed) — digit-stripped
+          and sent as a direct message.
+
+        Wuzapi's ``Phone`` field accepts both phone numbers and full JIDs;
+        its server-side ``parseJID`` routes to the right whatsmeow path.
+        Returns ``True`` on wuzapi acknowledgement, ``False`` on any
+        transport error (logged at WARNING).
         """
-        phone = re.sub(r"\D", "", recipient)
-        if not phone:
-            logger.warning("wuzapi.send: empty recipient after digit-strip: %r", recipient)
-            return False
+        # Group routing — preserve the JID so wuzapi treats it as group send.
+        if recipient.startswith("group:"):
+            wire_target = f"{recipient.removeprefix('group:')}@g.us"
+        elif recipient.endswith("@g.us"):
+            wire_target = recipient
+        else:
+            wire_target = re.sub(r"\D", "", recipient)
+            if not wire_target:
+                logger.warning("wuzapi.send: empty recipient after digit-strip: %r", recipient)
+                return False
         try:
             resp = await self._client.send_text(
-                WuzapiSendTextRequest(phone=phone, body=text)
+                WuzapiSendTextRequest(phone=wire_target, body=text)
             )
         except WuzapiError:
-            logger.exception("wuzapi.send to %s failed", phone)
+            logger.exception("wuzapi.send to %s failed", wire_target)
             return False
-        logger.info("wuzapi.send id=%s to=%s", resp.id, phone)
+        logger.info("wuzapi.send id=%s to=%s", resp.id, wire_target)
         return True
 
     # ---------- webhook event handling ----------
@@ -240,11 +259,16 @@ class WuzapiAdapter:
             logger.debug("wuzapi: skipping non-Message event %r", envelope.type)
             return None
 
-        info = envelope.event.get("Info") if isinstance(envelope.event, dict) else None
-        msg = envelope.event.get("Message") if isinstance(envelope.event, dict) else None
-        if not isinstance(info, dict) or not isinstance(msg, dict):
+        info_raw = envelope.event.get("Info")
+        msg_raw = envelope.event.get("Message")
+        if not isinstance(info_raw, dict) or not isinstance(msg_raw, dict):
             logger.warning("wuzapi: malformed Message envelope (missing Info/Message)")
             return None
+        # Cast narrows from `dict[Unknown, Unknown]` (post-isinstance) to the
+        # opaque-payload type the helpers expect. We've already validated the
+        # outer shape; per-key access is best-effort downstream.
+        info: dict[str, Any] = cast("dict[str, Any]", info_raw)
+        msg: dict[str, Any] = cast("dict[str, Any]", msg_raw)
 
         if self._drop_from_me and bool(info.get("IsFromMe")):
             logger.debug("wuzapi: skipping IsFromMe=true echo")
@@ -263,10 +287,14 @@ class WuzapiAdapter:
         sender_id = _strip_jid(sender_jid)
         if is_group:
             channel_id = f"group:{_strip_jid(chat_jid)}"
-            recipient_id = "group"
         else:
             channel_id = f"dm:{sender_id}"
-            recipient_id = "me"
+        # ``recipient_id`` is the linked account's perspective — always
+        # ``"me"`` for inbound, regardless of DM vs group. Matches the
+        # convention used by every other adapter in the codebase
+        # (Twilio WhatsApp, iMessage, Slack, Discord). The DM-vs-group
+        # distinction lives in ``channel_id`` and ``metadata["is_group"]``.
+        recipient_id = "me"
 
         if not message_id:
             # Synthesize a stable ID for dedup

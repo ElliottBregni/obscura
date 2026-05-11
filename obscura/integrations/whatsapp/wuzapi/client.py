@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 from types import TracebackType
-from typing import Any, TypeVar
+from typing import Any, Self, TypeVar, cast, override
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -104,9 +104,11 @@ class _WuzapiBaseClient(AbstractAsyncContextManager["_WuzapiBaseClient"]):
         if self._owns_client:
             await self._http.aclose()
 
-    async def __aenter__(self) -> _WuzapiBaseClient:
+    @override
+    async def __aenter__(self) -> Self:
         return self
 
+    @override
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
@@ -124,9 +126,16 @@ class _WuzapiBaseClient(AbstractAsyncContextManager["_WuzapiBaseClient"]):
         path: str,
         *,
         json_body: BaseModel | None = None,
-    ) -> Any:
+    ) -> object:
+        """Make an authenticated request and return the unwrapped ``data`` payload.
+
+        Returns the bare ``data`` value from the wuzapi envelope as ``object``
+        (effectively JSON-any). Callers must narrow with ``isinstance(...)``
+        before structural access — :meth:`_request_typed` does the right
+        thing via Pydantic validation.
+        """
         headers = {"Content-Type": "application/json", **self._auth_headers()}
-        payload = (
+        payload: dict[str, object] | None = (
             json_body.model_dump(by_alias=True, exclude_none=True)
             if json_body is not None
             else None
@@ -136,14 +145,18 @@ class _WuzapiBaseClient(AbstractAsyncContextManager["_WuzapiBaseClient"]):
         )
         if resp.status_code >= 300:
             raise WuzapiHTTPError(resp.status_code, resp.text)
-        envelope: Any = resp.json()
-        if not isinstance(envelope, dict) or "success" not in envelope:
-            raise WuzapiResponseError(BaseModel, envelope)
+        envelope_raw: object = resp.json()
+        if not isinstance(envelope_raw, dict) or "success" not in envelope_raw:
+            raise WuzapiResponseError(BaseModel, cast("object", envelope_raw))
+        # Cast narrows from post-isinstance `dict[Unknown, Unknown]` to the
+        # JSON-shaped envelope. We've validated the outer keys; per-key
+        # access is best-effort and runtime-checked.
+        envelope: dict[str, Any] = cast("dict[str, Any]", envelope_raw)
         if not envelope["success"]:
-            raise WuzapiAPIError(
-                int(envelope.get("code", -1)),
-                str(envelope.get("error") or envelope.get("data") or envelope),
-            )
+            code_val = envelope.get("code", -1)
+            code = int(code_val) if isinstance(code_val, int) else -1
+            msg = envelope.get("error") or envelope.get("data") or envelope
+            raise WuzapiAPIError(code, str(msg))
         return envelope.get("data")
 
     async def _request_typed(
@@ -190,6 +203,7 @@ class WuzapiClient(_WuzapiBaseClient):
         super().__init__(base_url=base_url, timeout=timeout, http_client=http_client)
         self._token = token
 
+    @override
     def _auth_headers(self) -> dict[str, str]:
         return {"Token": self._token}
 
@@ -286,6 +300,7 @@ class WuzapiAdminClient(_WuzapiBaseClient):
         super().__init__(base_url=base_url, timeout=timeout, http_client=http_client)
         self._admin_token = admin_token
 
+    @override
     def _auth_headers(self) -> dict[str, str]:
         return {"Authorization": self._admin_token}
 
@@ -293,7 +308,8 @@ class WuzapiAdminClient(_WuzapiBaseClient):
         data = await self._request("GET", "/admin/users")
         if not isinstance(data, list):
             raise WuzapiResponseError(WuzapiUser, data)
-        return [WuzapiUser.model_validate(u) for u in data]
+        users_raw: list[Any] = cast("list[Any]", data)
+        return [WuzapiUser.model_validate(u) for u in users_raw]
 
     async def create_user(self, req: WuzapiCreateUserRequest) -> WuzapiUser:
         return await self._request_typed(

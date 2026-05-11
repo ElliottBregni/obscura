@@ -1,17 +1,15 @@
 """WhatsApp linking flow: create the wuzapi user, fetch QR, poll until linked.
 
 This is the post-install, pre-message-flow step. Once :mod:`install` has
-the binary running, ``setup_user()`` creates the per-user slot and
+the binary running, ``ensure_user()`` creates the per-user slot and
 ``link_session()`` walks the human through scanning the QR.
 
-The QR can be rendered three ways depending on environment:
-
-* **PNG file** — written to ``~/.obscura/wuzapi/last-qr.png`` and (on macOS)
-  opened in Preview. Most reliable for everyday CLI use.
-* **ASCII** — printed to stdout via ``qrcode`` library if installed, useful
-  for SSH sessions where Preview isn't available.
-* **Both** — default; we always write the PNG, and additionally print
-  ASCII if the lib is available.
+The QR is saved as a PNG to ``~/.obscura/wuzapi/last-qr.png`` and (on
+macOS) opened in Preview. ASCII rendering is intentionally not included
+here — that would pull in ``qrcode``/``pyzbar``/``Pillow`` as runtime
+deps for a one-shot setup step. If you need an ASCII QR for an SSH
+session, use a separate tool (``qrencode -t ANSI`` on the PNG, or open
+the PNG via ``imgcat``).
 
 No global state; all functions take an explicit :class:`WuzapiAdminClient`
 and :class:`WuzapiClient` so they're easy to mock in tests.
@@ -111,7 +109,12 @@ def load_admin_token() -> str:
 
 @dataclass(frozen=True)
 class QRArtifacts:
-    """Where the QR was rendered. ``ascii_text`` is None if qrcode lib missing."""
+    """Where the QR was rendered. ``ascii_text`` is always ``None`` today.
+
+    The field is retained for callers that want to print the QR inline —
+    they can supply their own rendering via ``qrencode -t ANSI`` on
+    ``png_path`` if needed.
+    """
 
     png_path: Path
     ascii_text: str | None
@@ -127,44 +130,10 @@ def _save_qr_png(qr_data_url: str) -> Path:
     return LAST_QR_PNG
 
 
-def _render_qr_ascii(qr_data_url: str) -> str | None:
-    """Render the QR to a Unicode-block-art string. Returns None if lib missing.
-
-    The wuzapi QR contains the URL to the WhatsApp linking endpoint
-    encoded as a *PNG*, not the underlying text. We try to OCR the QR PNG
-    via the ``qrcode`` library's reverse path; if unavailable, ASCII
-    rendering is skipped (PNG remains the fallback).
-    """
-    try:
-        import qrcode  # type: ignore[import-untyped]
-    except ImportError:
-        return None
-    try:
-        from PIL import Image  # type: ignore[import-untyped]
-        import pyzbar.pyzbar as _zbar  # type: ignore[import-untyped]
-    except ImportError:
-        return None
-    # Decode the original QR
-    png_path = _save_qr_png(qr_data_url)
-    decoded = _zbar.decode(Image.open(png_path))
-    if not decoded:
-        return None
-    payload = decoded[0].data.decode()
-    qr = qrcode.QRCode(border=1)
-    qr.add_data(payload)
-    qr.make()
-    lines: list[str] = []
-    matrix = qr.get_matrix()
-    for row in matrix:
-        lines.append("".join("██" if cell else "  " for cell in row))
-    return "\n".join(lines)
-
-
 def render_qr(qr_data_url: str) -> QRArtifacts:
-    """Render the QR to disk (PNG) and ASCII if libs are available."""
+    """Render the QR to disk (PNG). ``ascii_text`` is left ``None``."""
     png_path = _save_qr_png(qr_data_url)
-    ascii_text = _render_qr_ascii(qr_data_url)
-    return QRArtifacts(png_path=png_path, ascii_text=ascii_text)
+    return QRArtifacts(png_path=png_path, ascii_text=None)
 
 
 def open_qr_in_preview(png_path: Path) -> None:
