@@ -50,6 +50,7 @@ from obscura.composition.blocks import (
     install_tool_router,
     install_uds_inbox,
     install_vector_memory,
+    install_wuzapi_daemon,
 )
 from obscura.composition.core import build_core_session
 from obscura.composition.session import AgentSession, SessionConfig
@@ -118,6 +119,7 @@ async def build_repl_session(
     await install_supervisor(session, config)
     await install_kairos_engine(session, config)
     await install_imessage_daemon(session, config)
+    await install_wuzapi_daemon(session, config)
     await install_uds_inbox(session, config)
     await install_session_registration(session, config)
     await install_tool_router(session, config)
