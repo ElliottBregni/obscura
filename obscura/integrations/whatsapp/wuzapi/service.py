@@ -107,9 +107,17 @@ async def wuzapi_service(
     async def on_event(env: WuzapiWebhookEnvelope) -> None:
         msg = adapter.handle_event(env)
         if msg is None:
+            print(f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)", flush=True)
             return
         # push_channel_message is synchronous — it queues + UDS broadcasts
         delivered = push_channel_message(_to_channel_message(msg, adapter))
+        # Use print(..., flush=True) for daemon visibility: logger.info gets
+        # swallowed when launchd's stdout is block-buffered and the obscura
+        # CLI's bootstrap may have set log handlers we don't control.
+        print(
+            f"[wuzapi → REPL] from={msg.sender_id} text={msg.text[:80]!r} delivered={delivered}",
+            flush=True,
+        )
         logger.info(
             "wuzapi → REPL: from=%s text=%r delivered=%s",
             msg.sender_id, msg.text[:80], delivered,

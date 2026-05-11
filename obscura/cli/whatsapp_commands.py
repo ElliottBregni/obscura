@@ -279,6 +279,17 @@ def daemon_cmd(webhook_port: int, auto_configure_webhook: bool) -> None:
 
     Ctrl-C to stop.
     """
+    import logging
+    # The service's "wuzapi → REPL: from=... text=..." log line is at INFO.
+    # Without this, the daemon receives webhooks but appears silent.
+    # ``force=True`` overrides any handlers obscura's CLI bootstrap may
+    # have installed on the root logger before we got here.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+        force=True,
+    )
+    logging.getLogger("obscura.integrations.whatsapp.wuzapi").setLevel(logging.INFO)
 
     async def _go() -> None:
         # Optionally make sure wuzapi knows where to POST.
