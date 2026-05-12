@@ -81,14 +81,25 @@ async def install_wuzapi_daemon(
     ``session.supervisor`` — the wuzapi bridge is an HTTP receiver that
     push_channel_message-feeds the REPL queue, not a supervised agent
     client. The supervisor pattern doesn't apply.
+
+    Every meaningful early-return logs at INFO with an explicit ``[wuzapi]``
+    prefix so the banner output makes it obvious which gate the block
+    hit during startup.
     """
+    print("[wuzapi] block entered", flush=True)
     if session.surface != "repl":
+        print(f"[wuzapi] skip: surface={session.surface!r} (need 'repl')", flush=True)
         return
 
     section = _read_whatsapp_section()
     if not bool(section.get("enabled", False)):
+        print("[wuzapi] skip: [messaging.whatsapp].enabled is not true", flush=True)
         return
     if str(section.get("transport", "")).strip().lower() != "wuzapi":
+        print(
+            f"[wuzapi] skip: transport={section.get('transport')!r} (need 'wuzapi')",
+            flush=True,
+        )
         return
 
     webhook_port = int(section.get("webhook_port", _DEFAULT_WEBHOOK_PORT))
@@ -97,13 +108,14 @@ async def install_wuzapi_daemon(
     try:
         from obscura.integrations.whatsapp.wuzapi import lifecycle
         if not lifecycle.status().is_running:
-            logger.info(
-                "install_wuzapi_daemon: sidecar not running, skipping bridge "
-                "(run `obscura whatsapp install` then `obscura whatsapp link`)"
+            print(
+                "[wuzapi] skip: sidecar not running (run `obscura whatsapp install` "
+                "then `obscura whatsapp link`)",
+                flush=True,
             )
             return
-    except Exception:
-        logger.debug("install_wuzapi_daemon: lifecycle probe failed", exc_info=True)
+    except Exception as exc:
+        print(f"[wuzapi] skip: lifecycle probe failed: {exc!r}", flush=True)
         return
 
     # Auto-configure webhook on every REPL boot. Idempotent + cheap.
@@ -142,30 +154,29 @@ async def install_wuzapi_daemon(
     try:
         probe.bind(("127.0.0.1", webhook_port))
     except OSError:
-        logger.info(
-            "install_wuzapi_daemon: port %d already bound (likely the "
-            "standalone whatsapp-daemon LaunchAgent) — relying on its "
-            "UDS broadcasts; no second bridge started",
-            webhook_port,
+        print(
+            f"[wuzapi] skip: port {webhook_port} already bound (likely a "
+            f"standalone whatsapp-daemon); relying on its UDS broadcasts",
+            flush=True,
         )
         probe.close()
         return
     probe.close()
 
-    # Port is free — start the in-REPL bridge ourselves.
     try:
         from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
 
         cm = wuzapi_service(webhook_port=webhook_port)
         await cm.__aenter__()
-    except Exception:
-        logger.warning(
-            "install_wuzapi_daemon: failed to start webhook receiver",
-            exc_info=True,
+    except Exception as exc:
+        print(
+            f"[wuzapi] failed to start webhook receiver: {exc!r}",
+            flush=True,
         )
         return
 
     session.register_resource(cm, name="wuzapi_service")
-    logger.info(
-        "install_wuzapi_daemon: bridge live on 127.0.0.1:%d/inbound", webhook_port
+    print(
+        f"[wuzapi] bridge live on 127.0.0.1:{webhook_port}/inbound",
+        flush=True,
     )
