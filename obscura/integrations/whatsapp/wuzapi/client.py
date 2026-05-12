@@ -29,7 +29,7 @@ from obscura.integrations.whatsapp.wuzapi.models import (
     WuzapiConnectRequest,
     WuzapiConnectResponse,
     WuzapiCreateUserRequest,
-    WuzapiDownloadImageRequest,
+    WuzapiDownloadMediaRequest,
     WuzapiDownloadResponse,
     WuzapiEventName,
     WuzapiQRCodeResponse,
@@ -254,27 +254,21 @@ class WuzapiClient(_WuzapiBaseClient):
             json_body=req,
         )
 
-    async def download_image(
-        self, req: WuzapiDownloadImageRequest,
+    async def _download_media(
+        self,
+        path: str,
+        req: WuzapiDownloadMediaRequest,
     ) -> bytes:
-        """POST /chat/downloadimage — decrypt + fetch image bytes.
+        """Shared body for download_image/video/document/audio.
 
-        Takes the encrypted-media metadata from a Message webhook
-        (URL, MediaKey, FileEncSHA256, etc.) and returns the raw
-        decrypted bytes. wuzapi wraps the bytes in a ``data:image/...;
-        base64,...`` data URL — we unwrap that here so callers see
-        raw bytes.
-
-        Raises:
-            WuzapiAPIError: if wuzapi reports a download failure (no
-                session, bad media key, expired URL, etc).
-            WuzapiResponseError: if the response shape isn't a valid
-                data URL.
+        All four wuzapi endpoints take the same encrypted-media
+        metadata payload and return the same data-URL response shape.
+        Only the path differs.
         """
         import base64
 
         result = await self._request_typed(
-            "POST", "/chat/downloadimage",
+            "POST", path,
             response_model=WuzapiDownloadResponse,
             json_body=req,
         )
@@ -288,6 +282,53 @@ class WuzapiClient(_WuzapiBaseClient):
             raise WuzapiResponseError(
                 WuzapiDownloadResponse, result.data,
             ) from exc
+
+    async def download_image(
+        self, req: WuzapiDownloadMediaRequest,
+    ) -> bytes:
+        """POST /chat/downloadimage — decrypt + fetch image bytes.
+
+        Takes the encrypted-media metadata from a Message webhook and
+        returns raw decrypted bytes (wuzapi wraps them in a
+        ``data:image/...;base64,...`` URL which we unwrap here).
+        """
+        return await self._download_media("/chat/downloadimage", req)
+
+    async def download_video(
+        self, req: WuzapiDownloadMediaRequest,
+    ) -> bytes:
+        """POST /chat/downloadvideo — decrypt + fetch video bytes.
+
+        Same wire shape as ``download_image``; sized for large files
+        (consider increasing ``timeout`` on the client for videos
+        over a few MB).
+        """
+        return await self._download_media("/chat/downloadvideo", req)
+
+    async def download_document(
+        self, req: WuzapiDownloadMediaRequest,
+    ) -> bytes:
+        """POST /chat/downloaddocument — decrypt + fetch document bytes.
+
+        Same wire shape as ``download_image``. Documents preserve
+        their original filename in the inbound ``documentMessage``
+        ``fileName`` field; callers can use that for downstream
+        naming (the WuzapiAdapter already surfaces it in the text
+        marker).
+        """
+        return await self._download_media("/chat/downloaddocument", req)
+
+    async def download_audio(
+        self, req: WuzapiDownloadMediaRequest,
+    ) -> bytes:
+        """POST /chat/downloadaudio — decrypt + fetch audio bytes.
+
+        Same wire shape as ``download_image``. Covers both voice
+        notes (PTT) and uploaded audio files; the adapter
+        distinguishes them via the ``ptt`` flag on ``audioMessage``
+        but this endpoint downloads either form transparently.
+        """
+        return await self._download_media("/chat/downloadaudio", req)
 
     async def set_chat_presence(
         self,

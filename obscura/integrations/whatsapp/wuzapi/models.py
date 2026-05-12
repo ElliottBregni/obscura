@@ -188,15 +188,15 @@ class WuzapiSendTextRequest(BaseModel):
     context_info: WuzapiSendTextContextInfo | None = None
 
 
-class WuzapiDownloadImageRequest(BaseModel):
-    """Body for ``POST /chat/downloadimage``.
+class WuzapiDownloadMediaRequest(BaseModel):
+    """Body for any of ``/chat/downloadimage``, ``downloadvideo``,
+    ``downloaddocument``, ``downloadaudio``.
 
-    Wuzapi's download endpoint takes the encrypted media metadata that
-    came with the inbound Message webhook (URL, DirectPath, MediaKey,
-    Mimetype, FileEncSHA256, FileSHA256, FileLength) and returns the
-    decrypted bytes wrapped in a data-URL. The same shape (different
-    endpoint) is used for ``/chat/downloaddocument``, ``/chat/downloadvideo``,
-    and ``/chat/downloadaudio``.
+    All four endpoints take the same encrypted-media metadata from
+    the inbound Message webhook (URL, DirectPath, MediaKey, Mimetype,
+    FileEncSHA256, FileSHA256, FileLength) and return the decrypted
+    bytes wrapped in a data-URL. We share one model and let the
+    client method pick the endpoint based on media kind.
 
     Wire format note: wuzapi's Go struct uses PascalCase field names
     (``Url``, ``DirectPath``, etc.); Go's case-insensitive JSON decode
@@ -214,6 +214,12 @@ class WuzapiDownloadImageRequest(BaseModel):
     file_enc_sha256: str = Field(default="", serialization_alias="FileEncSHA256")
     file_sha256: str = Field(default="", serialization_alias="FileSHA256")
     file_length: int = Field(default=0, serialization_alias="FileLength")
+
+
+# Legacy alias for backward compat — old callsites that imported
+# WuzapiDownloadImageRequest still work. New code should use the
+# unified WuzapiDownloadMediaRequest name.
+WuzapiDownloadImageRequest = WuzapiDownloadMediaRequest
 
 
 class WuzapiDownloadResponse(BaseModel):
@@ -397,6 +403,7 @@ __all__ = [
     "WuzapiConnectResponse",
     "WuzapiCreateUserRequest",
     "WuzapiDownloadImageRequest",
+    "WuzapiDownloadMediaRequest",
     "WuzapiDownloadResponse",
     "WuzapiEventName",
     "WuzapiMessageEvent",

@@ -99,47 +99,72 @@ is set per Message), but the labels are surfaced to the agent as
 ``[label] ...`` so keep them short."""
 
 
+# Maps webhook variant key → (kind discriminator, default mimetype, marker
+# text). The marker text MUST match the synthesized text from
+# `_from_media` exactly so the service-side rewriter can find and
+# replace it with "[<label> at <path>]".
+_DOWNLOADABLE_VARIANTS: tuple[tuple[str, str, str, str], ...] = (
+    ("imageMessage",    "image",    "image/jpeg",                "[image]"),
+    ("videoMessage",    "video",    "video/mp4",                 "[video]"),
+    ("documentMessage", "document", "application/octet-stream",  "[document]"),
+    ("audioMessage",    "audio",    "audio/ogg",                 "[voice note]"),
+)
+
+
 def _extract_downloadable_media(message: dict[str, Any]) -> dict[str, Any] | None:
-    """Return wuzapi-shaped media metadata for the FIRST downloadable
+    """Return wuzapi-shaped media metadata for the first downloadable
     variant inside ``message``, or ``None`` if there's nothing to download.
 
-    Only image is supported as a download target today; document/video/
-    audio use the same wire shape and could be plumbed similarly when
-    the agent gains tools for those formats. The returned dict matches
-    :class:`WuzapiDownloadImageRequest`'s field names exactly so the
-    caller can construct the model with ``**payload``.
+    Covers image, video, document, and audio — all four wuzapi
+    ``/chat/download*`` endpoints take the same encrypted-media
+    metadata shape, so we use one extraction routine and let the
+    service layer dispatch to the right endpoint via the ``kind``
+    discriminator.
+
+    The returned dict includes:
+
+    * ``kind`` — ``"image" | "video" | "document" | "audio"``
+    * ``marker`` — the synthesized text marker the adapter put in
+      ``msg.text``, e.g. ``"[image]"`` or ``"[voice note]"``. The
+      service uses this for the path-rewrite text replacement.
+    * ``url``, ``direct_path``, ``media_key``, ``mimetype``,
+      ``file_enc_sha256``, ``file_sha256``, ``file_length`` — fields
+      :class:`WuzapiDownloadMediaRequest` expects.
 
     Searches inside ephemeral / view-once wrappers too — the
-    download-fields live on the nested imageMessage there.
+    download-fields live on the nested media payload there.
     """
     def _from(inner: Any) -> dict[str, Any] | None:
         if not isinstance(inner, dict):
             return None
         inner_d: dict[str, Any] = cast("dict[str, Any]", inner)
-        img = inner_d.get("imageMessage")
-        if not isinstance(img, dict):
-            return None
-        img_d: dict[str, Any] = cast("dict[str, Any]", img)
-        url = img_d.get("url")
-        if not isinstance(url, str) or not url:
-            return None
-        # File length arrives as a string in some webhook payloads, int
-        # in others. Tolerate both.
-        file_length_raw = img_d.get("fileLength", 0)
-        try:
-            file_length = int(file_length_raw) if file_length_raw else 0
-        except (TypeError, ValueError):
-            file_length = 0
-        return {
-            "kind": "image",
-            "url": url,
-            "direct_path": str(img_d.get("directPath") or ""),
-            "media_key": str(img_d.get("mediaKey") or ""),
-            "mimetype": str(img_d.get("mimetype") or "image/jpeg"),
-            "file_enc_sha256": str(img_d.get("fileEncSha256") or ""),
-            "file_sha256": str(img_d.get("fileSha256") or ""),
-            "file_length": file_length,
-        }
+        for variant_key, kind, default_mt, marker in _DOWNLOADABLE_VARIANTS:
+            media = inner_d.get(variant_key)
+            if not isinstance(media, dict):
+                continue
+            media_d: dict[str, Any] = cast("dict[str, Any]", media)
+            url = media_d.get("url")
+            if not isinstance(url, str) or not url:
+                return None
+            # File length arrives as a string in some webhook payloads,
+            # int in others. Tolerate both.
+            file_length_raw = media_d.get("fileLength", 0)
+            try:
+                file_length = int(file_length_raw) if file_length_raw else 0
+            except (TypeError, ValueError):
+                file_length = 0
+            return {
+                "kind": kind,
+                "marker": marker,
+                "url": url,
+                "direct_path": str(media_d.get("directPath") or ""),
+                "media_key": str(media_d.get("mediaKey") or ""),
+                "mimetype": str(media_d.get("mimetype") or default_mt),
+                "file_enc_sha256": str(media_d.get("fileEncSha256") or ""),
+                "file_sha256": str(media_d.get("fileSha256") or ""),
+                "file_length": file_length,
+            }
+        return None
 
     direct = _from(message)
     if direct:

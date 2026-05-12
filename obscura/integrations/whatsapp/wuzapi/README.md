@@ -213,6 +213,46 @@ through your WhatsApp.
   `obscura whatsapp uninstall --wipe-state` (also removes the linked
   device — you'd need to re-scan QR to relink).
 
+## Inbound media (image / video / document / audio)
+
+When a WhatsApp message arrives with media, wuzapi delivers the
+encrypted metadata in the webhook payload. The adapter extracts the
+download fields into `metadata["media_payload"]` with a discriminator
+`kind` ∈ `{image, video, document, audio}` and a `marker` field
+indicating which text-marker the adapter put in `msg.text`.
+
+The service then calls the corresponding `WuzapiClient` method —
+`download_image` / `download_video` / `download_document` /
+`download_audio` — all of which take the same `WuzapiDownloadMediaRequest`
+shape and hit the appropriate `/chat/download*` endpoint. Decoded
+bytes are saved via the shared
+[`obscura.integrations.messaging.media_store`][media_store] module to:
+
+```
+~/.obscura/media_inbound/whatsapp/<sanitized_message_id>.<ext>
+```
+
+The text marker is rewritten in place: `[image]` becomes `[image at
+/Users/.../media_inbound/whatsapp/abc.jpg]`. Same pattern for
+`[video]`, `[document]`, `[voice note]`. The agent's existing
+file-read / vision / audio tools pick the file up from there.
+
+**Why this design**: it's intentionally light. No new dataclass to
+import, no plumbing of `attachments` through `send_message` /
+the agent loop / each backend's message-construction code. Just a
+shared helper any messaging adapter can use. The same
+`media_store.save_inbound_media(platform=..., message_id=..., data=...,
+mimetype=...)` works for an iMessage adapter, a Telegram adapter, a
+Signal adapter — each puts their bytes under their own per-platform
+subdirectory and embeds the resulting path into the agent's prompt.
+
+Graceful degradation: any download or write failure logs at DEBUG
+and returns `None`; the message text stays as just the
+synthesized marker (`[image]`) and routes through to the agent,
+which acknowledges the media without being able to view it.
+
+[media_store]: ../../messaging/media_store.py
+
 ## Bug postmortem
 
 Every distinct bug we hit while building this out, with the symptom you'd

@@ -459,8 +459,10 @@ async def wuzapi_service(
         # bytes from wuzapi and save to disk BEFORE the ACL check.
         # Rewrite the text to point at the saved path so the agent's
         # file/vision tools can read it. Failures fall back gracefully
-        # to the synthesized "[image]" marker — the message still
-        # routes, just without the actual file.
+        # to the synthesized "[image]"/"[video]"/etc marker — the
+        # message still routes, just without the actual file. Covers
+        # all four downloadable kinds via the dispatcher in
+        # _download_and_save_media.
         media_payload = msg.metadata.get("media_payload")
         if isinstance(media_payload, dict):
             payload_dict = cast("dict[str, Any]", media_payload)
@@ -469,14 +471,21 @@ async def wuzapi_service(
                 str(msg.metadata.get("wuzapi_message_id") or ""),
             )
             if saved_path:
-                # Replace "[image]" prefix with "[image at /path/to/file.jpg]"
-                # while preserving any "caption: ..." suffix already there.
-                new_text = msg.text.replace(
-                    "[image]", f"[image at {saved_path}]", 1,
-                )
-                msg = dataclasses.replace(msg, text=new_text)
+                # Use the marker the adapter put in the text — e.g.
+                # "[image]", "[video]", "[document]", "[voice note]".
+                # Replace with "[<marker_inner> at <path>]" so the
+                # agent sees the path inline. Preserves any "caption:
+                # ..." suffix.
+                marker = str(payload_dict.get("marker") or "")
+                if marker and marker in msg.text:
+                    marker_inner = marker.strip("[]")
+                    new_text = msg.text.replace(
+                        marker, f"[{marker_inner} at {saved_path}]", 1,
+                    )
+                    msg = dataclasses.replace(msg, text=new_text)
+                kind = str(payload_dict.get("kind") or "media")
                 print(
-                    f"[wuzapi] downloaded image to {saved_path}",
+                    f"[wuzapi] downloaded {kind} to {saved_path}",
                     flush=True,
                 )
         # Belt-and-suspenders: the adapter already drops blank text but in
@@ -624,89 +633,65 @@ def _should_route_inbound(
     )
 
 
-def _mimetype_to_extension(mimetype: str) -> str:
-    """Map a mimetype to a file extension (incl. leading dot)."""
-    mt = mimetype.lower()
-    if "jpeg" in mt or "jpg" in mt:
-        return ".jpg"
-    if "png" in mt:
-        return ".png"
-    if "webp" in mt:
-        return ".webp"
-    if "gif" in mt:
-        return ".gif"
-    return ".bin"
-
-
-def _sanitize_filename_stem(stem: str) -> str:
-    """Strip everything except alphanum, dash, underscore from a filename
-    stem. Defaults to ``"image"`` if the result is empty."""
-    cleaned = "".join(c for c in stem if c.isalnum() or c in "-_")
-    return cleaned or "image"
-
-
 async def _download_and_save_media(
     client: WuzapiClient,
     media_payload: dict[str, Any],
     message_id: str,
 ) -> str | None:
-    """Download an inbound image and save to ``~/.obscura/whatsapp_inbound/``.
+    """Download inbound media via wuzapi, save under the shared
+    ``media_inbound/whatsapp/`` directory, and return the absolute path.
 
-    Returns the absolute path of the saved file on success, ``None``
-    on any failure (download error, write error, unsupported kind).
-    Failures are logged at DEBUG — the caller's job is to gracefully
-    fall back to the synthesized text marker if this returns None.
+    Dispatches to the right wuzapi endpoint based on
+    ``media_payload["kind"]`` — image, video, document, or audio. All
+    four use the same request shape (:class:`WuzapiDownloadMediaRequest`).
 
-    The path is what we surface to the agent: agents have a file-read
-    tool that takes an absolute path. The synthesized text becomes
-    e.g. ``[image at /Users/.../<msg_id>.jpg] caption: foo`` so the
-    LLM knows it can grab the file via its tools.
+    Returns ``None`` on any failure (download error, write error,
+    unsupported kind). Failures are logged at DEBUG; the caller's job
+    is to gracefully fall back to the synthesized text marker so the
+    agent still receives an acknowledgment.
+
+    The saved path is what we surface to the agent: it gets a prompt
+    like ``[image at /Users/.../media_inbound/whatsapp/abc.jpg]
+    caption: foo`` and picks up the file via its existing file/vision
+    tools. The file persists across turns so the agent can reference
+    it later in the conversation.
     """
-    from obscura.core.paths import resolve_obscura_home
+    from obscura.integrations.messaging.media_store import save_inbound_media
     from obscura.integrations.whatsapp.wuzapi.models import (
-        WuzapiDownloadImageRequest,
+        WuzapiDownloadMediaRequest,
     )
 
-    if media_payload.get("kind") != "image":
-        # Only image download is plumbed today; doc/video/audio would
-        # use the same shape via different wuzapi endpoints.
+    kind = str(media_payload.get("kind") or "")
+    downloader = {
+        "image": client.download_image,
+        "video": client.download_video,
+        "document": client.download_document,
+        "audio": client.download_audio,
+    }.get(kind)
+    if downloader is None:
         return None
 
     try:
-        req = WuzapiDownloadImageRequest(
+        req = WuzapiDownloadMediaRequest(
             url=str(media_payload.get("url", "")),
             direct_path=str(media_payload.get("direct_path", "")),
             media_key=str(media_payload.get("media_key", "")),
-            mimetype=str(media_payload.get("mimetype", "image/jpeg")),
+            mimetype=str(media_payload.get("mimetype", "")),
             file_enc_sha256=str(media_payload.get("file_enc_sha256", "")),
             file_sha256=str(media_payload.get("file_sha256", "")),
             file_length=int(media_payload.get("file_length", 0) or 0),
         )
-        data = await client.download_image(req)
+        data = await downloader(req)
     except Exception:
-        logger.debug("wuzapi: image download failed", exc_info=True)
+        logger.debug("wuzapi: %s download failed", kind, exc_info=True)
         return None
 
-    if not data:
-        return None
-
-    target_dir = resolve_obscura_home() / "whatsapp_inbound"
-    try:
-        target_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        logger.debug("wuzapi: could not create inbound dir", exc_info=True)
-        return None
-
-    ext = _mimetype_to_extension(str(media_payload.get("mimetype", "")))
-    stem = _sanitize_filename_stem(message_id) if message_id else "image"
-    target_path = target_dir / f"{stem}{ext}"
-    try:
-        target_path.write_bytes(data)
-    except Exception:
-        logger.debug("wuzapi: could not write image file", exc_info=True)
-        return None
-
-    return str(target_path)
+    return save_inbound_media(
+        platform="whatsapp",
+        message_id=message_id or kind,
+        data=data,
+        mimetype=str(media_payload.get("mimetype", "")),
+    )
 
 
 def _strip_device_suffix(jid: str) -> str:
