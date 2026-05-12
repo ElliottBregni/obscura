@@ -510,15 +510,25 @@ class WuzapiAdapter:
             "message_type": info.get("Type"),
             "push_name": info.get("PushName"),
         }
-        # If this is a downloadable media message (image today; doc/video/
-        # audio could join later), surface the wuzapi-shaped download
-        # metadata so the service layer can pull the bytes and save them
-        # to disk for the agent's tools to read. Stays absent when the
-        # message is text-only or a non-downloadable variant
-        # (sticker/location/contact).
+        # If this is a downloadable media message, surface the wuzapi-
+        # shaped download metadata so the service layer can pull the
+        # bytes and save them. Stays absent for text-only or non-
+        # downloadable variants (sticker/location/contact).
         media_payload = _extract_downloadable_media(msg)
         if media_payload is not None:
             metadata["media_payload"] = media_payload
+        # **Fast path**: wuzapi's processMedia hook runs server-side and
+        # embeds the decoded media bytes as a top-level `base64` field
+        # in the webhook envelope (mode is "base64" or "both" — the
+        # default). Surface this directly so the service can decode +
+        # save without a round-trip to /chat/download*. Critical
+        # because WhatsApp's CDN URLs in the inner imageMessage are
+        # single-use — they've already been consumed by processMedia,
+        # so /chat/download* would fail re-downloading them.
+        if envelope.base64:
+            metadata["inline_media_b64"] = envelope.base64
+            metadata["inline_media_mimetype"] = envelope.mime_type or ""
+            metadata["inline_media_filename"] = envelope.file_name or ""
 
         return PlatformMessage(
             platform=_PLATFORM,

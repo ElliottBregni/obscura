@@ -455,27 +455,64 @@ async def wuzapi_service(
                 flush=True,
             )
             return
-        # If this message had a downloadable media payload, pull the
-        # bytes from wuzapi and save to disk BEFORE the ACL check.
-        # Rewrite the text to point at the saved path so the agent's
-        # file/vision tools can read it. Failures fall back gracefully
-        # to the synthesized "[image]"/"[video]"/etc marker — the
-        # message still routes, just without the actual file. Covers
-        # all four downloadable kinds via the dispatcher in
-        # _download_and_save_media.
+        # If this message had downloadable media, save it to disk and
+        # rewrite the text to include the path. Two paths:
+        #
+        #   FAST: wuzapi's processMedia ran server-side and embedded
+        #         the bytes as envelope.base64 — the adapter copied
+        #         it into metadata["inline_media_b64"]. Just decode
+        #         + save. No HTTP roundtrip, can't fail on a
+        #         single-use CDN URL.
+        #   SLOW: fall back to /chat/download* via media_payload.
+        #         Useful when wuzapi is in S3-only mode or skipMedia
+        #         is true; otherwise typically redundant or fails.
+        #
+        # Failures at both layers fall back to the synthesized
+        # "[image]"/"[video]"/etc marker — message still routes, just
+        # without the file.
         media_payload = msg.metadata.get("media_payload")
         if isinstance(media_payload, dict):
             payload_dict = cast("dict[str, Any]", media_payload)
-            saved_path = await _download_and_save_media(
-                client, payload_dict,
-                str(msg.metadata.get("wuzapi_message_id") or ""),
-            )
+            message_id = str(msg.metadata.get("wuzapi_message_id") or "")
+            kind = str(payload_dict.get("kind") or "media")
+            saved_path: str | None = None
+
+            inline_b64 = msg.metadata.get("inline_media_b64")
+            if isinstance(inline_b64, str) and inline_b64:
+                inline_mimetype = str(
+                    msg.metadata.get("inline_media_mimetype")
+                    or payload_dict.get("mimetype")
+                    or "",
+                )
+                saved_path = _save_inline_media(
+                    inline_b64, inline_mimetype, message_id,
+                )
+                if saved_path:
+                    print(
+                        f"[wuzapi] saved inline {kind} bytes to {saved_path} "
+                        f"({len(inline_b64)} b64 chars)",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[wuzapi] inline {kind} decode/save failed; "
+                        f"falling back to /chat/download*",
+                        flush=True,
+                    )
+
+            if saved_path is None:
+                saved_path = await _download_and_save_media(
+                    client, payload_dict, message_id,
+                )
+                if saved_path:
+                    print(
+                        f"[wuzapi] downloaded {kind} to {saved_path}",
+                        flush=True,
+                    )
+
             if saved_path:
-                # Use the marker the adapter put in the text — e.g.
-                # "[image]", "[video]", "[document]", "[voice note]".
-                # Replace with "[<marker_inner> at <path>]" so the
-                # agent sees the path inline. Preserves any "caption:
-                # ..." suffix.
+                # Replace the synthesized marker with "[<kind> at <path>]".
+                # Preserves any "caption: ..." suffix already there.
                 marker = str(payload_dict.get("marker") or "")
                 if marker and marker in msg.text:
                     marker_inner = marker.strip("[]")
@@ -483,11 +520,6 @@ async def wuzapi_service(
                         marker, f"[{marker_inner} at {saved_path}]", 1,
                     )
                     msg = dataclasses.replace(msg, text=new_text)
-                kind = str(payload_dict.get("kind") or "media")
-                print(
-                    f"[wuzapi] downloaded {kind} to {saved_path}",
-                    flush=True,
-                )
         # Belt-and-suspenders: the adapter already drops blank text but in
         # case downstream parsing slips through, double-check here so we
         # never debounce empty content.
@@ -630,6 +662,43 @@ def _should_route_inbound(
     return False, (
         f"msg from non-allowlisted sender {sender_id} "
         f"(add to [messaging.whatsapp].reply_allowlist to enable)"
+    )
+
+
+def _save_inline_media(
+    b64_data: str,
+    mimetype: str,
+    message_id: str,
+) -> str | None:
+    """Fast path: decode wuzapi's server-side-delivered base64 and save.
+
+    wuzapi's processMedia runs whatsmeow.Download() inside the
+    sidecar before firing the webhook, then base64-encodes the bytes
+    into the envelope's top-level ``base64`` field. We use those
+    bytes directly — much faster than calling /chat/download* and
+    avoids the "single-use WhatsApp CDN URL" problem that breaks
+    re-download attempts after processMedia has already consumed
+    the URL once.
+
+    Returns the saved path on success, ``None`` if decoding/saving
+    fails (caller can then fall back to /chat/download*).
+    """
+    import base64 as _b64
+    if not b64_data:
+        return None
+    try:
+        data = _b64.b64decode(b64_data)
+    except Exception:
+        logger.debug("inline media: base64 decode failed", exc_info=True)
+        return None
+    if not data:
+        return None
+    from obscura.integrations.messaging.media_store import save_inbound_media
+    return save_inbound_media(
+        platform="whatsapp",
+        message_id=message_id or "media",
+        data=data,
+        mimetype=mimetype,
     )
 
 

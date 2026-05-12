@@ -464,3 +464,69 @@ def test_save_inbound_media_unknown_mimetype_uses_bin_ext(
     )
     assert path is not None
     assert path.endswith(".bin")
+
+
+# ---------------------------------------------------------------------------
+# _save_inline_media — fast-path for wuzapi's pre-downloaded base64
+# ---------------------------------------------------------------------------
+
+
+def test_save_inline_media_decodes_and_saves(_obscura_home: Path) -> None:
+    """Happy path: base64 from envelope decodes to bytes, lands on disk
+    via the shared media_store helper."""
+    from obscura.integrations.whatsapp.wuzapi.service import _save_inline_media
+    import base64
+
+    raw = b"\xff\xd8\xff\xe0fake jpeg"
+    b64 = base64.b64encode(raw).decode("ascii")
+    path = _save_inline_media(b64, "image/jpeg", "msg123")
+    assert path is not None
+    assert Path(path).read_bytes() == raw
+    assert path.endswith(".jpg")
+    assert "media_inbound/whatsapp/" in path
+
+
+def test_save_inline_media_empty_returns_none(_obscura_home: Path) -> None:
+    """Empty base64 string yields None — caller can fall back to
+    /chat/download*."""
+    from obscura.integrations.whatsapp.wuzapi.service import _save_inline_media
+
+    assert _save_inline_media("", "image/jpeg", "msg123") is None
+
+
+def test_save_inline_media_invalid_base64_returns_none(
+    _obscura_home: Path,
+) -> None:
+    """Malformed base64 (won't decode) returns None gracefully —
+    we don't crash and the on_event handler can fall back."""
+    from obscura.integrations.whatsapp.wuzapi.service import _save_inline_media
+
+    # Not valid base64; should be caught
+    assert _save_inline_media("!!!not_valid_b64!!!", "image/jpeg", "msg") is None
+
+
+def test_save_inline_media_uses_mimetype_for_extension(
+    _obscura_home: Path,
+) -> None:
+    """PNG mimetype → .png file. Verifies mimetype plumbs through."""
+    from obscura.integrations.whatsapp.wuzapi.service import _save_inline_media
+    import base64
+
+    b64 = base64.b64encode(b"\x89PNG\r\n").decode("ascii")
+    path = _save_inline_media(b64, "image/png", "p1")
+    assert path is not None
+    assert path.endswith(".png")
+
+
+def test_save_inline_media_no_message_id_uses_fallback_stem(
+    _obscura_home: Path,
+) -> None:
+    """Empty message_id falls back to 'media' so the file always lands."""
+    from obscura.integrations.whatsapp.wuzapi.service import _save_inline_media
+    import base64
+
+    b64 = base64.b64encode(b"x").decode("ascii")
+    path = _save_inline_media(b64, "image/jpeg", "")
+    assert path is not None
+    # Filename stem should be 'media' since message_id was empty
+    assert "/media.jpg" in path

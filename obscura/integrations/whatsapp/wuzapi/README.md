@@ -215,17 +215,29 @@ through your WhatsApp.
 
 ## Inbound media (image / video / document / audio)
 
-When a WhatsApp message arrives with media, wuzapi delivers the
-encrypted metadata in the webhook payload. The adapter extracts the
-download fields into `metadata["media_payload"]` with a discriminator
-`kind` ∈ `{image, video, document, audio}` and a `marker` field
-indicating which text-marker the adapter put in `msg.text`.
+When a WhatsApp message arrives with media, wuzapi delivers it via
+**two complementary paths** in the same webhook:
 
-The service then calls the corresponding `WuzapiClient` method —
-`download_image` / `download_video` / `download_document` /
-`download_audio` — all of which take the same `WuzapiDownloadMediaRequest`
-shape and hit the appropriate `/chat/download*` endpoint. Decoded
-bytes are saved via the shared
+**Fast path (default)**: wuzapi's `processMedia` hook runs server-side
+inside the sidecar, downloads + decrypts via whatsmeow.Download, and
+embeds the raw bytes as a top-level `base64` field on the webhook
+envelope (along with `mimeType` and `fileName`). The adapter surfaces
+this into `metadata["inline_media_b64"]`, and the service decodes +
+saves it directly — no further HTTP. This is critical because
+WhatsApp's CDN URLs are effectively single-use after processMedia
+consumes them.
+
+**Fallback path**: the adapter also extracts download metadata
+(`url`, `mediaKey`, `mimetype`, hashes) into `metadata["media_payload"]`
+with a `kind` ∈ `{image, video, document, audio}` discriminator. If
+the fast path didn't fire (e.g. wuzapi is in `media_delivery="s3"`
+mode, or `skipMedia=true`), the service calls the corresponding
+`WuzapiClient` method — `download_image` / `download_video` /
+`download_document` / `download_audio` — which all take the same
+`WuzapiDownloadMediaRequest` shape and hit the matching
+`/chat/download*` endpoint.
+
+Either path yields a path; the service writes via the shared
 [`obscura.integrations.messaging.media_store`][media_store] module to:
 
 ```
