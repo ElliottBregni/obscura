@@ -106,6 +106,71 @@ _CHANNEL_BLOCKED_SLASH_COMMANDS = frozenset({"quit", "exit"})
 is no legitimate reason for a remote sender to terminate the running
 session, so we hard-deny them and send a notice back."""
 
+_CHANNEL_PROGRESS_INITIAL_DELAY_S = 15.0
+"""Wait this long before the first 'still working' ping. Most turns
+finish well under this; the delay keeps us silent for short tasks."""
+_CHANNEL_PROGRESS_INTERVAL_S = 30.0
+"""Send a progress ping every N seconds after the initial delay."""
+_CHANNEL_PROGRESS_MESSAGES = (
+    "⏳ still working on it...",
+    "⏳ still processing, hang tight...",
+    "⏳ thinking through this one...",
+    "⏳ almost there...",
+    "⏳ on it, just a moment more...",
+)
+"""Rotated to avoid feeling robotic when several pings fire."""
+
+
+async def _channel_progress_pinger(
+    progress_fn: Any,
+    done_event: asyncio.Event,
+) -> None:
+    """Send periodic 'still working' pings via ``progress_fn`` until done.
+
+    Behavior:
+    * Waits :data:`_CHANNEL_PROGRESS_INITIAL_DELAY_S` before the first
+      ping — quiet for short turns (≤15s, which is most turns).
+    * After that, pings every :data:`_CHANNEL_PROGRESS_INTERVAL_S` seconds.
+    * ``done_event.set()`` ends the loop cleanly. Cancellation also
+      exits cleanly (caught around the sleeps).
+    * Ping failures are swallowed: a transient send error must not
+      kill the pinger or affect the final reply path.
+
+    ``progress_fn`` must already bypass any rate limit on the channel
+    — otherwise the hourly budget reserved for the final reply could
+    be exhausted by progress pings on a long-running turn.
+    """
+    try:
+        try:
+            await asyncio.wait_for(
+                done_event.wait(),
+                timeout=_CHANNEL_PROGRESS_INITIAL_DELAY_S,
+            )
+            return
+        except TimeoutError:
+            pass
+
+        idx = 0
+        while not done_event.is_set():
+            msg = _CHANNEL_PROGRESS_MESSAGES[
+                idx % len(_CHANNEL_PROGRESS_MESSAGES)
+            ]
+            try:
+                await progress_fn(msg)
+            except Exception:
+                _log.debug("channel progress ping failed", exc_info=True)
+            idx += 1
+            try:
+                await asyncio.wait_for(
+                    done_event.wait(),
+                    timeout=_CHANNEL_PROGRESS_INTERVAL_S,
+                )
+                return
+            except TimeoutError:
+                continue
+    except asyncio.CancelledError:
+        return
+
 
 async def _run_slash_command_for_channel(
     user_input: str,
@@ -679,14 +744,22 @@ async def repl(
                                     f"[{_plat} from {_label}]: {_ch_msg.text}"
                                 )
                             ctx._pending_channel_reply = _ch_msg.reply_fn  # type: ignore[attr-defined]
+                            # progress_fn (if the platform provides one)
+                            # carries "still working" pings during long
+                            # turns; bypass-rate-limit so it doesn't
+                            # eat the hourly budget reserved for the
+                            # final reply.
+                            ctx._pending_channel_progress = _ch_msg.progress_fn  # type: ignore[attr-defined]
                             _is_channel_injected = True
                         else:
                             user_input = _prompt_task.result()
                             ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                            ctx._pending_channel_progress = None  # type: ignore[attr-defined]
                     except Exception:
                         _log.debug("channel inject race failed, falling back to plain prompt", exc_info=True)
                         user_input = await bordered_prompt(session, status=prompt_status)
                         ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                        ctx._pending_channel_progress = None  # type: ignore[attr-defined]
                         _is_channel_injected = False
                 except (EOFError, KeyboardInterrupt):
                     _log.debug("suppressed exception in repl", exc_info=True)
@@ -1124,11 +1197,43 @@ async def repl(
                 # concurrent loop iterations don't overwrite ctx._pending_channel_reply
                 # before _on_done fires.
                 _captured_reply_fn = getattr(ctx, "_pending_channel_reply", None)
+                _captured_progress_fn = getattr(ctx, "_pending_channel_progress", None)
                 ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                ctx._pending_channel_progress = None  # type: ignore[attr-defined]
 
-                def _on_done(t: asyncio.Task[str], _reply_fn: object = _captured_reply_fn) -> None:
+                # If this is a channel-injected turn AND the platform
+                # provided a non-rate-limited progress_fn, start a
+                # pinger that sends "still working" updates so the
+                # remote user knows we're alive on a long turn.
+                _pinger_done_event: asyncio.Event | None = None
+                _pinger_task: asyncio.Task[None] | None = None
+                if _captured_progress_fn is not None:
+                    _pinger_done_event = asyncio.Event()
+                    _pinger_task = asyncio.create_task(
+                        _channel_progress_pinger(
+                            _captured_progress_fn, _pinger_done_event,
+                        ),
+                        name="channel-progress-pinger",
+                    )
+                    background_tasks.add(_pinger_task)
+
+                def _on_done(
+                    t: asyncio.Task[str],
+                    _reply_fn: object = _captured_reply_fn,
+                    _pinger_done: asyncio.Event | None = _pinger_done_event,
+                    _pinger_t: asyncio.Task[None] | None = _pinger_task,
+                ) -> None:
                     background_tasks.discard(t)
                     ss.reset()
+                    # Stop the progress pinger first — set the event for a
+                    # clean exit, then cancel as a belt-and-suspenders backup
+                    # in case the pinger is mid-`progress_fn(...)` and not
+                    # at a sleep checkpoint.
+                    if _pinger_done is not None:
+                        _pinger_done.set()
+                    if _pinger_t is not None and not _pinger_t.done():
+                        _pinger_t.cancel()
+                        background_tasks.discard(_pinger_t)
                     if t.cancelled():
                         return
                     try:

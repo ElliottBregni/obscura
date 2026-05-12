@@ -44,12 +44,27 @@ def _ensure_queue() -> asyncio.Queue[ChannelMessage]:
 
 @dataclass
 class ChannelMessage:
-    """A platform message ready to be injected as user_input."""
+    """A platform message ready to be injected as user_input.
+
+    ``reply_fn`` sends the final agent response back to the platform —
+    rate-limited (the WhatsApp transport enforces a min-gap + hourly cap
+    to bound runaway-loop blast radius) and clears the typing indicator
+    on completion. Exactly one call expected per turn.
+
+    ``progress_fn`` (optional) sends intermediate "still working" pings
+    *while the agent is processing*. It MUST bypass the rate limit (or
+    the hourly cap would burn through and prevent the final reply from
+    being delivered) and SHOULD NOT clear the typing indicator (the
+    keepalive task re-establishes it on its next iteration anyway).
+    Set to ``None`` when the channel doesn't support out-of-band pings
+    (e.g. peer-injected UDS messages — peers can't send outbound).
+    """
 
     platform: str  # "whatsapp", "imessage", "telegram"
     sender_id: str  # +12316333624, username, etc.
     text: str
     reply_fn: Callable[[str], Awaitable[bool]]  # sends reply back to platform
+    progress_fn: Callable[[str], Awaitable[bool]] | None = None
     display_name: str = ""
     account_id: str = "default"
 
@@ -109,6 +124,7 @@ def push_channel_message(msg: ChannelMessage) -> bool:
         sender_id=_sanitize_label(msg.sender_id),
         text=_sanitize_text(msg.text),
         reply_fn=msg.reply_fn,
+        progress_fn=msg.progress_fn,
         display_name=_sanitize_label(msg.display_name),
         account_id=msg.account_id,
     )

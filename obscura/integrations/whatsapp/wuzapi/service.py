@@ -312,11 +312,31 @@ def _to_channel_message(
         finally:
             await typing.stop(reply_target)
 
+    async def progress_fn(text: str) -> bool:
+        """Out-of-band 'still working' ping while the agent processes.
+
+        Bypasses the rate limit by construction (never calls
+        ``rate_limit.allow``) so the hourly cap is reserved exclusively
+        for final replies. Does NOT call ``typing.stop`` — the
+        keepalive in ``_TypingTracker`` will re-send ``composing`` on
+        its next tick (within ~8s), so the bubble naturally re-appears
+        between pings. Errors are swallowed: a failed progress ping
+        must never block the final reply path.
+        """
+        try:
+            return await adapter.send(reply_target, text)
+        except Exception:
+            logger.debug(
+                "progress ping send failed for %s", reply_target, exc_info=True,
+            )
+            return False
+
     return ChannelMessage(
         platform=msg.platform,
         sender_id=msg.sender_id,
         text=msg.text,
         reply_fn=reply_fn,
+        progress_fn=progress_fn,
         display_name=str(msg.metadata.get("push_name") or ""),
         account_id=msg.account_id,
     )

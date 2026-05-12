@@ -124,6 +124,17 @@ through your WhatsApp.
   and the agent's response flows back via the standard reply path.
   Anyone NOT in the allowlist can still chat normally with the agent;
   their command prefixes are simply routed as plain text.
+* **Progress pings on long-running turns**: if the agent takes more
+  than ~15 seconds to produce a final response, the bridge sends
+  periodic "⏳ still working on it..." messages back to the sender
+  (rotated across 5 phrasings, default ~30s interval). Progress pings
+  go through a separate `progress_fn` send path that bypasses the
+  reply rate limit — they never burn the hourly budget reserved for
+  the actual final response. Errors from a progress send are swallowed
+  so a flaky one mid-turn can't kill the pinger or block the reply.
+  The pinger task is cancelled the instant the agent task completes
+  (both via an `asyncio.Event` for clean exit and a hard `cancel()` as
+  a belt-and-suspenders backup).
 * **Typing indicator while the agent composes**: when an inbound message
   arrives, the wuzapi service sends `composing` presence to the chat
   before pushing the message into the REPL queue. A background keepalive
