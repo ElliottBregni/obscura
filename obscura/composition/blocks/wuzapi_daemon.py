@@ -75,10 +75,14 @@ async def install_wuzapi_daemon(
     session: AgentSession,
     config: SessionConfig,  # noqa: ARG001
 ) -> None:
-    """Start the wuzapi inbound bridge if opted in via config."""
+    """Start the wuzapi inbound bridge if opted in via config.
+
+    Unlike the iMessage daemon block, this one does NOT gate on
+    ``session.supervisor`` — the wuzapi bridge is an HTTP receiver that
+    push_channel_message-feeds the REPL queue, not a supervised agent
+    client. The supervisor pattern doesn't apply.
+    """
     if session.surface != "repl":
-        return
-    if session.supervisor is not None:
         return
 
     section = _read_whatsapp_section()
