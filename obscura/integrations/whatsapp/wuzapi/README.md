@@ -110,6 +110,19 @@ through your WhatsApp.
   section is missing), nothing runs in Obscura's process. The wuzapi
   LaunchAgent still runs (it's separate) but Obscura doesn't bridge to
   it. The off state is truly off.
+* **Multi-REPL: first-wins + auto-promotion**: only one process can bind
+  `127.0.0.1:18794`. The first REPL to start wins and becomes the
+  **OWNER** — it hosts the webhook receiver, parses inbound, and fans
+  out via UDS to every other REPL. Subsequent REPLs become **PEERs**:
+  they display inbound messages locally (via the UDS fanout) and spawn
+  a background watcher that re-probes the port every ~5s. When the
+  owner REPL exits, the next peer's probe wins the port and prints
+  `[wuzapi] AUTO-PROMOTED` — the bridge keeps running, no manual
+  restart. Look for `OWNER` / `PEER` / `AUTO-PROMOTED` in your REPL
+  boot output to know which role you're in. Replies only ever send
+  from the owner: peer-injected messages get a no-op reply_fn
+  ([uds_inbox.py](../../../composition/blocks/uds_inbox.py)) so you
+  don't get N replies per inbound across N open REPLs.
 
 ## Security
 

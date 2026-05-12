@@ -37,6 +37,7 @@ Opt-out:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import tomllib
 from typing import TYPE_CHECKING, Any, cast
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WEBHOOK_PORT = 18794
+_PROMOTION_PROBE_INTERVAL_S = 5.0
 
 
 def _read_whatsapp_section() -> dict[str, Any]:
@@ -115,6 +117,81 @@ def _cleanup_dead_session_state() -> int:
                 sock.unlink(missing_ok=True)
                 removed += 1
     return removed
+
+
+async def _try_acquire_port_and_start_service(
+    session: AgentSession,
+    webhook_port: int,
+) -> bool:
+    """Attempt to bind ``webhook_port`` and start the wuzapi service.
+
+    Returns True if we acquired the port AND the service entered cleanly
+    (i.e. this REPL is now the inbound owner). False means the port was
+    taken or service startup failed — caller stays in peer mode.
+
+    The probe→service-start sequence has a microsecond race window where
+    another peer could grab the port between our ``probe.close()`` and
+    uvicorn's bind. If that happens we catch the OSError and return False,
+    leaving us as a peer for the next promotion cycle.
+    """
+    import socket
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", webhook_port))
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+    try:
+        from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
+        cm = wuzapi_service(webhook_port=webhook_port)
+        await cm.__aenter__()
+    except Exception as exc:
+        print(
+            f"[wuzapi] port probe succeeded but service start failed: {exc!r}",
+            flush=True,
+        )
+        return False
+
+    session.register_resource(cm, name="wuzapi_service")
+    return True
+
+
+async def _promotion_watcher(
+    session: AgentSession,
+    webhook_port: int,
+) -> None:
+    """Poll ``webhook_port`` and auto-promote this REPL to owner when free.
+
+    Sleeps :data:`_PROMOTION_PROBE_INTERVAL_S` between probes. Exits as
+    soon as a probe succeeds and the service starts — no further work
+    needed once we own the port. Cancellation during ``asyncio.sleep`` is
+    a clean exit (caught and re-raised by the sleep itself, then we
+    return). Any other exception during a probe iteration is logged and
+    swallowed so transient failures don't kill the watcher.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_PROMOTION_PROBE_INTERVAL_S)
+        except asyncio.CancelledError:
+            return
+        try:
+            if await _try_acquire_port_and_start_service(session, webhook_port):
+                print(
+                    f"[wuzapi] AUTO-PROMOTED — bridge live on "
+                    f"127.0.0.1:{webhook_port}/inbound "
+                    f"(previous owner exited)",
+                    flush=True,
+                )
+                return
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.debug(
+                "wuzapi promotion watcher: probe iteration failed",
+                exc_info=True,
+            )
 
 
 async def install_wuzapi_daemon(
@@ -197,39 +274,28 @@ async def install_wuzapi_daemon(
             "install_wuzapi_daemon: webhook auto-configure failed", exc_info=True
         )
 
-    # Quick port-bind probe before spinning up uvicorn. If the standalone
-    # whatsapp-daemon LaunchAgent already owns the port, we don't try to
-    # second-bind — the daemon does the bridging and we just rely on its
-    # UDS broadcasts. This keeps the REPL boot quiet in the common case
-    # where users run the daemon LaunchAgent separately.
-    import socket
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        probe.bind(("127.0.0.1", webhook_port))
-    except OSError:
+    # Try to acquire the inbound port right now. If another REPL already
+    # owns it, we become a *peer* — receive inbound via UDS fanout from
+    # the owner — and spawn a promotion watcher that will auto-claim the
+    # port the moment the current owner exits. This is what makes
+    # "multi-REPL with no startup/shutdown hassle" work: any order of
+    # boots is fine, any order of exits is fine, the bridge always lives
+    # on whichever REPL happens to be running.
+    if await _try_acquire_port_and_start_service(session, webhook_port):
         print(
-            f"[wuzapi] skip: port {webhook_port} already bound (likely a "
-            f"standalone whatsapp-daemon); relying on its UDS broadcasts",
-            flush=True,
-        )
-        probe.close()
-        return
-    probe.close()
-
-    try:
-        from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
-
-        cm = wuzapi_service(webhook_port=webhook_port)
-        await cm.__aenter__()
-    except Exception as exc:
-        print(
-            f"[wuzapi] failed to start webhook receiver: {exc!r}",
+            f"[wuzapi] OWNER — bridge live on 127.0.0.1:{webhook_port}/inbound "
+            f"(inbound webhooks land here)",
             flush=True,
         )
         return
 
-    session.register_resource(cm, name="wuzapi_service")
     print(
-        f"[wuzapi] bridge live on 127.0.0.1:{webhook_port}/inbound",
+        f"[wuzapi] PEER — port {webhook_port} owned by another REPL; "
+        f"receiving via UDS fanout, will auto-promote if owner exits",
         flush=True,
     )
+    watcher = asyncio.create_task(
+        _promotion_watcher(session, webhook_port),
+        name="wuzapi-promotion-watcher",
+    )
+    session.register_resource(watcher, name="wuzapi_promotion_watcher")
