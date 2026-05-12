@@ -114,3 +114,47 @@ def test_alias_clock_resolves_to_current_time() -> None:
     result = reg.get("clock")
     assert result is not None
     assert result.name == "current_time"
+
+
+def test_skill_alias_removed_to_prevent_typeerror() -> None:
+    """Regression guard: 'skill' must not alias to 'task'.
+
+    The Claude SDK Skill tool's argument schema {skill, args} doesn't
+    line up with task(prompt, target, timeout_seconds) — routing it via
+    a name alias crashed task() with
+    TypeError("unexpected keyword argument 'skill'"), which the renderer
+    silently displayed with a ✓ glyph and confused the agent into
+    looping. If you're reintroducing this alias, build a proper
+    parameter-remapping bridge first.
+    """
+    reg = ToolRegistry()
+    reg.register(_spec("task"))
+    # Either resolves to None (no such tool) OR resolves to something
+    # other than 'task' — both are acceptable outcomes. What's NOT
+    # acceptable is silently routing to task() with mismatched kwargs.
+    result = reg.get("skill")
+    if result is not None:
+        assert result.name != "task", (
+            "alias 'skill' → 'task' was reintroduced; see "
+            "obscura/core/tools.py comment about Skill SDK schema "
+            "mismatch."
+        )
+
+
+def test_agent_alias_removed_to_prevent_typeerror() -> None:
+    """Regression guard: 'agent' must not alias to 'task'.
+
+    Same root cause as the 'skill' alias: the Claude SDK Agent tool
+    takes {description, prompt, subagent_type} — those kwargs don't
+    match task()'s signature. Routing via a name alias produced a
+    swallowed TypeError. See test above.
+    """
+    reg = ToolRegistry()
+    reg.register(_spec("task"))
+    result = reg.get("agent")
+    if result is not None:
+        assert result.name != "task", (
+            "alias 'agent' → 'task' was reintroduced; see "
+            "obscura/core/tools.py comment about Agent SDK schema "
+            "mismatch."
+        )
