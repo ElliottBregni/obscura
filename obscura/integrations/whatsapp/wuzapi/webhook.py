@@ -28,9 +28,11 @@ Adds zero new dependencies.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Final
+from urllib.parse import parse_qs
 
 from pydantic import ValidationError
 from starlette.applications import Starlette
@@ -97,12 +99,34 @@ def build_webhook_app(
                 logger.warning("wuzapi webhook signature rejected from %s", request.client)
                 return JSONResponse({"ok": False, "error": "bad_sig"}, status_code=401)
 
+        # Wuzapi POSTs webhooks as application/x-www-form-urlencoded, NOT
+        # as raw JSON. Body shape is:
+        #     instanceName=<user>&jsonData=<URL-encoded JSON envelope>
+        # If/when a future version switches to JSON Content-Type we still
+        # handle that; we check the header first.
+        content_type = request.headers.get("content-type", "").lower()
+        envelope_json: bytes | str
+        if "application/x-www-form-urlencoded" in content_type:
+            form = parse_qs(body.decode("utf-8", errors="replace"))
+            json_data_list = form.get("jsonData") or form.get("data") or []
+            if not json_data_list:
+                logger.warning(
+                    "wuzapi webhook form body missing 'jsonData' field "
+                    "(keys=%s)", list(form.keys()),
+                )
+                return JSONResponse({"ok": True, "ignored": "missing_json_data"})
+            envelope_json = json_data_list[0]
+        else:
+            envelope_json = body
+
         try:
-            envelope = WuzapiWebhookEnvelope.model_validate_json(body)
+            envelope = WuzapiWebhookEnvelope.model_validate_json(envelope_json)
         except ValidationError as exc:
             logger.warning("wuzapi webhook payload failed validation: %s", exc)
-            # Still 200 so wuzapi doesn't retry; we logged for ourselves.
             return JSONResponse({"ok": True, "ignored": "validation_error"})
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("wuzapi webhook body not parseable: %s", exc)
+            return JSONResponse({"ok": True, "ignored": "decode_error"})
 
         # Fire-and-forget the handler so we ack wuzapi instantly.
         asyncio.create_task(_safe_dispatch(on_event, envelope))
