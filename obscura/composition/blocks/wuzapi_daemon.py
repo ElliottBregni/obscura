@@ -71,6 +71,52 @@ def _read_whatsapp_section() -> dict[str, Any]:
     return cast("dict[str, Any]", section)
 
 
+def _cleanup_dead_session_state() -> int:
+    """Remove session locks/sockets whose PIDs no longer exist.
+
+    Orphan REPL state accumulates when prompt_toolkit crashes mid-startup
+    or when the user opens multiple REPL terminals and closes them
+    uncleanly. Each leftover lock/socket pretends to be a "live peer"
+    until cleaned. Returns the count of artifacts removed.
+    """
+    import json
+    import os
+    home = resolve_obscura_home()
+    sessions_dir = home / "sessions"
+    sockets_dir = home / "sockets"
+    if not sessions_dir.is_dir():
+        return 0
+
+    removed = 0
+    live_session_ids: set[str] = set()
+    for lock in sessions_dir.glob("*.lock"):
+        try:
+            data = json.loads(lock.read_text())
+            pid = int(data.get("pid", 0) or 0)
+            sid = str(data.get("session_id") or lock.stem)
+        except Exception:
+            lock.unlink(missing_ok=True)
+            removed += 1
+            continue
+        if pid <= 0:
+            lock.unlink(missing_ok=True)
+            removed += 1
+            continue
+        try:
+            os.kill(pid, 0)
+            live_session_ids.add(sid)
+        except (ProcessLookupError, PermissionError):
+            lock.unlink(missing_ok=True)
+            removed += 1
+
+    if sockets_dir.is_dir():
+        for sock in sockets_dir.glob("*.sock"):
+            if sock.stem not in live_session_ids:
+                sock.unlink(missing_ok=True)
+                removed += 1
+    return removed
+
+
 async def install_wuzapi_daemon(
     session: AgentSession,
     config: SessionConfig,  # noqa: ARG001
@@ -90,6 +136,13 @@ async def install_wuzapi_daemon(
     if session.surface != "repl":
         print(f"[wuzapi] skip: surface={session.surface!r} (need 'repl')", flush=True)
         return
+
+    # Sweep orphan session locks/sockets before anything else — accumulated
+    # dead state misleads discover_peers() (now self-filters but still
+    # reports dead peers) and bloats every sweep with no-op stats.
+    cleaned = _cleanup_dead_session_state()
+    if cleaned > 0:
+        print(f"[wuzapi] cleaned {cleaned} stale session lock(s)/socket(s)", flush=True)
 
     section = _read_whatsapp_section()
     if not bool(section.get("enabled", False)):
