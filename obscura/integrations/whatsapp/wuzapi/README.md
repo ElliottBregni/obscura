@@ -110,6 +110,31 @@ through your WhatsApp.
   section is missing), nothing runs in Obscura's process. The wuzapi
   LaunchAgent still runs (it's separate) but Obscura doesn't bridge to
   it. The off state is truly off.
+* **Reply ACL (default-deny on every inbound)**: wuzapi is a linked
+  device, so it sees *every* WhatsApp message the user's account
+  receives — friends, family, groups, everything. Without a filter the
+  agent would auto-respond to all of them ("AI texted my friend"
+  problem). The `[messaging.whatsapp].reply_allowlist` config is a
+  default-deny gate enforced in [service.py's on_event][svc] — if the
+  sender isn't on the list, the message gets dropped *before* the
+  debouncer ever sees it, so the agent never has a chance to respond.
+  Empty/missing list = nobody gets a response. Typical setup: put
+  your own number in the list so self-chats trigger the agent and
+  nothing else does. Distinct from `command_allowlist` — replies can
+  be allowed without granting command authority.
+* **Session ID announcement on owner startup**: when a REPL becomes
+  the wuzapi OWNER (first-wins on port `:18794` or auto-promoted after
+  the previous owner exits), it sends a one-time message to your
+  self-chat — `[obscura] session <id> connected as owner. Default
+  replier for this thread.` — so you can see at-a-glance which REPL
+  is driving the bridge. The announcement is fire-and-forget; if
+  wuzapi isn't linked or session_status fails it logs at DEBUG and
+  moves on. The message text is recorded in `_recent_send_texts` so
+  the inbound echo of the announcement gets caught by text-match
+  echo detection and doesn't loop back as a new inbound turn.
+
+[svc]: service.py
+
 * **REPL commands via messaging (with sender ACL)**: messages starting
   with `/`, `$`, or `@` are routed through the REPL's normal
   command-dispatch path instead of being treated as plain text — but

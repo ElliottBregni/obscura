@@ -234,3 +234,74 @@ def test_non_string_entries_skipped(_obscura_home: Path) -> None:
     )
     # Real assertion: still works with valid entry
     assert command_acl.is_command_allowed("whatsapp", "2316333624") is True
+
+
+# ---------------------------------------------------------------------------
+# is_reply_allowed — separate allowlist, same default-deny semantics
+# ---------------------------------------------------------------------------
+
+
+def test_reply_no_config_file_denies(_obscura_home: Path) -> None:
+    """Missing config — agent replies to no one."""
+    assert command_acl.is_reply_allowed("whatsapp", "12316333624") is False
+
+
+def test_reply_empty_allowlist_denies(_obscura_home: Path) -> None:
+    """Explicit empty reply_allowlist denies (default-deny semantics).
+
+    Regression guard for the 'AI texted my friend' bug: when wuzapi
+    fans out every inbound to the REPL, the agent must NOT auto-respond
+    unless the sender is explicitly allowlisted.
+    """
+    _write_config(
+        _obscura_home,
+        """
+        [messaging.whatsapp]
+        reply_allowlist = []
+        """,
+    )
+    assert command_acl.is_reply_allowed("whatsapp", "12316333624") is False
+
+
+def test_reply_allowlist_match(_obscura_home: Path) -> None:
+    _write_config(
+        _obscura_home,
+        """
+        [messaging.whatsapp]
+        reply_allowlist = ["2316333624"]
+        """,
+    )
+    assert command_acl.is_reply_allowed("whatsapp", "12316333624") is True
+
+
+def test_reply_and_command_allowlists_are_independent(_obscura_home: Path) -> None:
+    """The two lists don't bleed into each other — a sender on
+    command_allowlist but NOT on reply_allowlist still can't get a
+    response. (Defensive: enforces the two-list discipline so a future
+    refactor doesn't accidentally fall through one to the other.)"""
+    _write_config(
+        _obscura_home,
+        """
+        [messaging.whatsapp]
+        command_allowlist = ["2316333624"]
+        reply_allowlist = []
+        """,
+    )
+    assert command_acl.is_command_allowed("whatsapp", "2316333624") is True
+    assert command_acl.is_reply_allowed("whatsapp", "2316333624") is False
+
+
+def test_reply_friend_number_denied_default(_obscura_home: Path) -> None:
+    """The motivating scenario: friend texts user, user's reply_allowlist
+    has only their own number, friend doesn't get an auto-response."""
+    _write_config(
+        _obscura_home,
+        """
+        [messaging.whatsapp]
+        reply_allowlist = ["2316333624"]
+        """,
+    )
+    # Friend's number
+    assert command_acl.is_reply_allowed("whatsapp", "5551234567") is False
+    # User's own number still works
+    assert command_acl.is_reply_allowed("whatsapp", "2316333624") is True

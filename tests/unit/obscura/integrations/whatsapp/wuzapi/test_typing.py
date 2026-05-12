@@ -156,3 +156,41 @@ async def test_cancel_all_clears_all_tasks() -> None:
     await tracker.start("bob@s.whatsapp.net")
     tracker.cancel_all()
     assert len(tracker._tasks) == 0
+
+
+# ---------------------------------------------------------------------------
+# _strip_device_suffix — JID normalization for self-chat announcements
+# ---------------------------------------------------------------------------
+
+
+def test_strip_device_suffix_with_device() -> None:
+    """The linked-device JID 'phone:device@server' becomes 'phone@server'."""
+    from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+    assert (
+        _strip_device_suffix("12316333624:14@s.whatsapp.net")
+        == "12316333624@s.whatsapp.net"
+    )
+
+
+def test_strip_device_suffix_without_device() -> None:
+    """JID without a device segment passes through unchanged."""
+    from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+    assert (
+        _strip_device_suffix("12316333624@s.whatsapp.net")
+        == "12316333624@s.whatsapp.net"
+    )
+
+
+def test_strip_device_suffix_no_at_sign() -> None:
+    """Edge case: input without '@' returns unchanged (don't synthesize a server)."""
+    from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+    assert _strip_device_suffix("12316333624:14") == "12316333624:14"
+
+
+def test_strip_device_suffix_group_jid() -> None:
+    """Group JIDs (@g.us) shouldn't be affected — groups don't have device suffixes."""
+    from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+    assert (
+        _strip_device_suffix("12316333624-1234567890@g.us")
+        == "12316333624-1234567890@g.us"
+    )

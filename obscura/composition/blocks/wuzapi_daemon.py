@@ -145,7 +145,10 @@ async def _try_acquire_port_and_start_service(
 
     try:
         from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
-        cm = wuzapi_service(webhook_port=webhook_port)
+        cm = wuzapi_service(
+            webhook_port=webhook_port,
+            session_id=session.session_id,
+        )
         await cm.__aenter__()
     except Exception as exc:
         print(

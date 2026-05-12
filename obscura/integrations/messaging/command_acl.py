@@ -52,8 +52,8 @@ def _normalize_digits(s: str) -> str:
     return digits
 
 
-def _read_allowlist(platform: str) -> list[str]:
-    """Return ``[messaging.<platform>].command_allowlist`` from config.toml.
+def _read_allowlist(platform: str, *, key: str = "command_allowlist") -> list[str]:
+    """Return ``[messaging.<platform>].<key>`` from config.toml.
 
     Returns an empty list on any error (missing file, malformed TOML,
     wrong type for the field). Default-deny is the safe behavior.
@@ -75,7 +75,7 @@ def _read_allowlist(platform: str) -> list[str]:
     if not isinstance(section_raw, dict):
         return []
     section: dict[str, Any] = cast("dict[str, Any]", section_raw)
-    allowlist_raw = section.get("command_allowlist", [])
+    allowlist_raw = section.get(key, [])
     if not isinstance(allowlist_raw, list):
         return []
     allowlist_any: list[Any] = cast("list[Any]", allowlist_raw)
@@ -89,13 +89,46 @@ def is_command_allowed(platform: str, sender_id: str) -> bool:
     True only when the normalized sender matches a normalized allowlist
     entry.
     """
+    return _is_sender_in_allowlist(
+        platform, sender_id, allowlist_key="command_allowlist",
+    )
+
+
+def is_reply_allowed(platform: str, sender_id: str) -> bool:
+    """Is the agent permitted to *reply* to ``sender_id`` on ``platform``?
+
+    This gates auto-response itself — not commands. A non-allowlisted
+    sender's message is dropped before it reaches the REPL queue, so the
+    agent never sees it and never sends a reply. Default-deny: if the
+    list is missing or empty, the agent replies to no one. The
+    motivating bug was an agent texting a user's friend back when the
+    friend texted the user — wuzapi sees every WhatsApp inbound (any
+    sender, any chat) and without this gate, all of them were getting
+    processed as agent requests.
+
+    Reads ``[messaging.<platform>].reply_allowlist`` from config.toml.
+
+    Note: ``reply_allowlist`` is typically a superset of
+    ``command_allowlist`` — anyone who can talk to the agent must
+    obviously be allowed to talk to it, but not everyone allowed to
+    talk needs command authority. If you want one list for both, set
+    just ``command_allowlist`` and the same number to ``reply_allowlist``.
+    """
+    return _is_sender_in_allowlist(
+        platform, sender_id, allowlist_key="reply_allowlist",
+    )
+
+
+def _is_sender_in_allowlist(
+    platform: str, sender_id: str, *, allowlist_key: str,
+) -> bool:
     sender_norm = _normalize_digits(sender_id)
     if not sender_norm:
         return False
-    for entry in _read_allowlist(platform):
+    for entry in _read_allowlist(platform, key=allowlist_key):
         if _normalize_digits(entry) == sender_norm:
             return True
     return False
 
 
-__all__ = ["is_command_allowed"]
+__all__ = ["is_command_allowed", "is_reply_allowed"]

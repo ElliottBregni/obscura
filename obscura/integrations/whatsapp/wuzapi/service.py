@@ -33,6 +33,7 @@ from obscura.integrations.messaging.channel_inject import (
     ChannelMessage,
     push_channel_message,
 )
+from obscura.integrations.messaging.command_acl import is_reply_allowed
 from obscura.integrations.messaging.models import PlatformMessage
 from obscura.integrations.whatsapp.wuzapi.adapter import WuzapiAdapter
 from obscura.integrations.whatsapp.wuzapi.client import WuzapiClient
@@ -358,6 +359,7 @@ async def wuzapi_service(
     debounce_window_s: float = DEFAULT_DEBOUNCE_WINDOW_S,
     reply_min_gap_s: float = DEFAULT_REPLY_MIN_GAP_S,
     reply_max_per_hour: int = DEFAULT_REPLY_MAX_PER_HOUR,
+    session_id: str = "",
 ) -> AsyncGenerator[None]:
     """Run the inbound bridge for the lifetime of the ``async with`` block.
 
@@ -415,6 +417,21 @@ async def wuzapi_service(
         if not msg.text.strip():
             print(f"[wuzapi] dropped blank-text msg from {msg.sender_id}", flush=True)
             return
+        # Sender ACL — default-deny. wuzapi sees every WhatsApp inbound
+        # for this linked device (any sender, any chat including groups),
+        # but the agent should only respond to people on the
+        # reply_allowlist. Non-allowlisted senders are dropped silently
+        # before the message hits the REPL queue — the agent never sees
+        # them and never sends a reply. Without this gate, friends who
+        # text the user get auto-responses from the agent.
+        if not is_reply_allowed("whatsapp", msg.sender_id):
+            print(
+                f"[wuzapi] dropped msg from non-allowlisted sender "
+                f"{msg.sender_id} (add to [messaging.whatsapp]."
+                f"reply_allowlist to enable)",
+                flush=True,
+            )
+            return
         await debounced.feed(msg)
 
     app = build_webhook_app(on_event=on_event)
@@ -427,6 +444,18 @@ async def wuzapi_service(
     serve_task = asyncio.create_task(server.serve())
     logger.info("wuzapi service: webhook listening on %s:%d",
                 webhook_host, webhook_port)
+
+    # Announce this session's id to the linked device's self-chat so
+    # the user can see which obscura REPL is currently the bridge
+    # OWNER. Fire-and-forget — the startup path shouldn't block on a
+    # cosmetic message, and any failure (wuzapi not linked, network
+    # blip, no JID returned) is swallowed inside _announce_session.
+    if session_id:
+        asyncio.create_task(
+            _announce_session(client, adapter, session_id),
+            name="wuzapi-session-announce",
+        )
+
     try:
         yield
     finally:
@@ -440,6 +469,63 @@ async def wuzapi_service(
             serve_task.cancel()
         await client.aclose()
         logger.info("wuzapi service: shut down")
+
+
+def _strip_device_suffix(jid: str) -> str:
+    """Strip the ``:<device>`` segment from a WhatsApp JID.
+
+    whatsmeow's session_status returns the linked device JID like
+    ``12316333624:14@s.whatsapp.net`` (where ``:14`` identifies the
+    specific linked-device session). For outbound messages we want the
+    bare JID ``12316333624@s.whatsapp.net`` so WhatsApp routes to all
+    of the user's devices, not just the one wuzapi attached as.
+    """
+    if "@" not in jid:
+        return jid
+    phone_part, server = jid.split("@", 1)
+    if ":" in phone_part:
+        phone_part = phone_part.split(":", 1)[0]
+    return f"{phone_part}@{server}"
+
+
+async def _announce_session(
+    client: WuzapiClient,
+    adapter: WuzapiAdapter,
+    session_id: str,
+) -> None:
+    """Send a one-time 'session connected' message to the self-chat.
+
+    Looks up the linked device's own JID via wuzapi's session_status,
+    strips the device suffix, and sends an announcement using the same
+    adapter that handles normal outbound. Best-effort: any failure is
+    logged at DEBUG and swallowed. Sending via adapter.send means the
+    text is recorded in ``_recent_send_texts``, so when the message
+    bounces back as an inbound webhook event (as it does for any
+    outbound on linked-device WhatsApp) it gets caught by the
+    text-match echo detection and dropped — no feedback loop.
+    """
+    try:
+        status = await client.session_status()
+    except Exception:
+        logger.debug("session announce: status fetch failed", exc_info=True)
+        return
+    if not status.jid:
+        logger.debug("session announce: no JID in status (not linked?)")
+        return
+    self_jid = _strip_device_suffix(status.jid)
+    short_id = session_id[:8] if len(session_id) > 8 else session_id
+    msg = (
+        f"[obscura] session {short_id} connected as owner. "
+        f"Default replier for this thread."
+    )
+    try:
+        await adapter.send(self_jid, msg)
+        print(
+            f"[wuzapi] announced session {short_id} to {self_jid}",
+            flush=True,
+        )
+    except Exception:
+        logger.debug("session announce: send failed", exc_info=True)
 
 
 async def _safe_auto_respond(
