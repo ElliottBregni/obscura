@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any, Final, cast
@@ -170,13 +171,19 @@ class WuzapiAdapter:
         client: WuzapiClient,
         *,
         account_id: str = "default",
-        drop_from_me: bool = True,
         drop_non_text: bool = True,
+        echo_window_s: float = 120.0,
     ) -> None:
         self._client = client
         self._account_id = account_id
-        self._drop_from_me = drop_from_me
         self._drop_non_text = drop_non_text
+        # Echo detection: messages we sent via this adapter's `send()` come
+        # back as inbound Message events (IsFromMe=true) from whatsmeow's
+        # event loop. Track recent outbound IDs and drop matches in
+        # handle_event. Window must outlive any reasonable network round-
+        # trip (default 2 minutes is generous).
+        self._echo_window_s = echo_window_s
+        self._recent_sends: dict[str, float] = {}
 
     # ---------- lifecycle ----------
 
@@ -241,6 +248,16 @@ class WuzapiAdapter:
         except WuzapiError:
             logger.exception("wuzapi.send to %s failed", wire_target)
             return False
+        # Record the outbound ID so handle_event can drop the inevitable
+        # IsFromMe=true echo when whatsmeow loops it back as an inbound
+        # event. Prune old entries to bound memory.
+        now = time.time()
+        self._recent_sends[resp.id] = now
+        if len(self._recent_sends) > 256:
+            cutoff = now - self._echo_window_s * 2
+            self._recent_sends = {
+                k: v for k, v in self._recent_sends.items() if v >= cutoff
+            }
         logger.info("wuzapi.send id=%s to=%s", resp.id, wire_target)
         return True
 
@@ -270,9 +287,17 @@ class WuzapiAdapter:
         info: dict[str, Any] = cast("dict[str, Any]", info_raw)
         msg: dict[str, Any] = cast("dict[str, Any]", msg_raw)
 
-        if self._drop_from_me and bool(info.get("IsFromMe")):
-            logger.debug("wuzapi: skipping IsFromMe=true echo")
-            return None
+        # Echo detection: drop events whose ID matches a recent outbound
+        # we sent ourselves. This is the only IsFromMe-related filter —
+        # legitimate phone-typed self-messages (chat-with-self test case)
+        # also have IsFromMe=true but their IDs aren't in _recent_sends,
+        # so they pass through and reach the REPL.
+        msg_id = str(info.get("ID") or "")
+        if msg_id and msg_id in self._recent_sends:
+            sent_at = self._recent_sends[msg_id]
+            if time.time() - sent_at < self._echo_window_s:
+                logger.debug("wuzapi: dropping echo of our own send id=%s", msg_id)
+                return None
 
         text = _extract_text(msg)
         if self._drop_non_text and not text:
