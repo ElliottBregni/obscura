@@ -188,6 +188,32 @@ class WuzapiSendTextRequest(BaseModel):
     context_info: WuzapiSendTextContextInfo | None = None
 
 
+class WuzapiChatPresenceRequest(BaseModel):
+    """Body for ``POST /chat/presence`` — typing/recording/paused indicator.
+
+    ``phone`` accepts the same shapes as :class:`WuzapiSendTextRequest`
+    (bare digits or full JID). ``state`` is one of:
+
+    * ``composing`` — shows "typing..." in the recipient's chat
+    * ``recording`` — shows "recording audio..." (we don't use this)
+    * ``paused`` — clears the indicator immediately
+
+    WhatsApp's typing indicator auto-clears after roughly 10 seconds of
+    silence on the presence channel, so any agent that takes longer than
+    that to compose needs the caller to refresh by re-sending
+    ``composing`` periodically (see ``_TypingTracker`` in ``service.py``).
+
+    ``media`` defaults to ``"text"``. Other valid value is ``"audio"`` for
+    pairing with the ``recording`` state. We leave it as text.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    phone: str
+    state: str
+    media: str = "text"
+
+
 class WuzapiSetWebhookRequest(BaseModel):
     """Body for ``POST /webhook``.
 
@@ -324,6 +350,7 @@ class WuzapiWebhookEnvelope(BaseModel):
 
 
 __all__ = [
+    "WuzapiChatPresenceRequest",
     "WuzapiConnectRequest",
     "WuzapiConnectResponse",
     "WuzapiCreateUserRequest",

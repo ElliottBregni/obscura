@@ -25,6 +25,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from obscura.integrations.whatsapp.wuzapi.models import (
+    WuzapiChatPresenceRequest,
     WuzapiConnectRequest,
     WuzapiConnectResponse,
     WuzapiCreateUserRequest,
@@ -247,6 +248,32 @@ class WuzapiClient(_WuzapiBaseClient):
             "POST", "/chat/send/text",
             response_model=WuzapiSendTextResponse,
             json_body=req,
+        )
+
+    async def set_chat_presence(
+        self,
+        phone: str,
+        *,
+        state: str,
+        media: str = "text",
+    ) -> None:
+        """POST /chat/presence — set typing/paused indicator in a chat.
+
+        ``state``: ``"composing"`` shows "typing..."; ``"paused"`` clears
+        the indicator. WhatsApp times the indicator out after ~10s of
+        silence on the presence channel — refresh by re-sending
+        ``composing`` if the agent's compose phase runs longer.
+
+        Errors are NOT suppressed here — callers (typically
+        ``_TypingTracker``) wrap in try/except so a transient presence
+        failure never blocks the actual reply.
+        """
+        await self._request(
+            "POST",
+            "/chat/presence",
+            json_body=WuzapiChatPresenceRequest(
+                phone=phone, state=state, media=media,
+            ),
         )
 
     # ---------- webhook config ----------

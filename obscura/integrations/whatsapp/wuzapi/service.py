@@ -50,6 +50,13 @@ DEFAULT_REPLY_MIN_GAP_S: Final[float] = 3.0
 DEFAULT_REPLY_MAX_PER_HOUR: Final[int] = 20
 """Hard cap on replies-per-hour per sender. Bounds runaway loops even if
 echo detection has bugs."""
+DEFAULT_TYPING_REFRESH_INTERVAL_S: Final[float] = 8.0
+"""Re-send ``composing`` every 8s (under WhatsApp's ~10s timeout).
+Below 10s gives a comfortable margin; below 5s wastes API calls."""
+DEFAULT_TYPING_MAX_DURATION_S: Final[float] = 60.0
+"""Hard cap on how long a single typing indicator stays alive. If the
+agent never calls reply_fn (e.g. decides not to reply), the bubble
+auto-clears after this — avoids a forever-typing bubble."""
 """Default per-sender debounce window. Bursts within this window coalesce
 into a single PlatformMessage with newline-joined text. Tuned for human
 typing cadence — under 1s feels jumpy, over 5s feels laggy."""
@@ -126,6 +133,99 @@ class _DebouncedDispatcher:
 # ---------------------------------------------------------------------------
 
 
+class _TypingTracker:
+    """Per-recipient WhatsApp typing indicator with keepalive + auto-clear.
+
+    Lifecycle::
+
+        await tracker.start(jid)   # sends composing immediately
+        # ... agent generates a response ...
+        await tracker.stop(jid)    # cancels keepalive + sends paused
+
+    WhatsApp clears the indicator after ~10s of silence, so we refresh
+    ``composing`` every :data:`DEFAULT_TYPING_REFRESH_INTERVAL_S` seconds
+    until ``stop`` is called or :data:`DEFAULT_TYPING_MAX_DURATION_S` is
+    hit. All presence errors are swallowed — the typing bubble is a UX
+    nicety and must never block or fail a real reply.
+
+    Idempotency:
+    * ``start(jid)`` while a keepalive is already running for ``jid`` is
+      a no-op (won't double-fire the initial composing).
+    * ``stop(jid)`` when no keepalive exists still sends ``paused``
+      (clears any stale indicator from a previous session).
+    """
+
+    def __init__(
+        self,
+        client: WuzapiClient,
+        *,
+        refresh_interval_s: float = DEFAULT_TYPING_REFRESH_INTERVAL_S,
+        max_duration_s: float = DEFAULT_TYPING_MAX_DURATION_S,
+    ) -> None:
+        self._client = client
+        self._refresh_interval_s = refresh_interval_s
+        self._max_duration_s = max_duration_s
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+
+    async def start(self, jid: str) -> None:
+        existing = self._tasks.get(jid)
+        if existing is not None and not existing.done():
+            return
+        try:
+            await self._client.set_chat_presence(jid, state="composing")
+        except Exception:
+            logger.debug(
+                "typing: initial composing failed for %s", jid, exc_info=True,
+            )
+        self._tasks[jid] = asyncio.create_task(
+            self._keepalive(jid),
+            name=f"wuzapi-typing-{jid[:32]}",
+        )
+
+    async def stop(self, jid: str) -> None:
+        task = self._tasks.pop(jid, None)
+        if task is not None and not task.done():
+            task.cancel()
+        try:
+            await self._client.set_chat_presence(jid, state="paused")
+        except Exception:
+            logger.debug(
+                "typing: paused failed for %s", jid, exc_info=True,
+            )
+
+    async def _keepalive(self, jid: str) -> None:
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + self._max_duration_s
+        try:
+            while loop.time() < deadline:
+                try:
+                    await asyncio.sleep(self._refresh_interval_s)
+                except asyncio.CancelledError:
+                    return
+                try:
+                    await self._client.set_chat_presence(
+                        jid, state="composing",
+                    )
+                except Exception:
+                    logger.debug(
+                        "typing: refresh failed for %s", jid, exc_info=True,
+                    )
+            try:
+                await self._client.set_chat_presence(jid, state="paused")
+            except Exception:
+                logger.debug(
+                    "typing: auto-clear failed for %s", jid, exc_info=True,
+                )
+        finally:
+            self._tasks.pop(jid, None)
+
+    def cancel_all(self) -> None:
+        for task in list(self._tasks.values()):
+            if not task.done():
+                task.cancel()
+        self._tasks.clear()
+
+
 class _ReplyRateLimit:
     """Per-sender outbound rate limit. Hard backstop against runaway loops.
 
@@ -171,36 +271,46 @@ class _ReplyRateLimit:
 
 def _to_channel_message(
     msg: PlatformMessage,
+    reply_target: str,
     adapter: WuzapiAdapter,
     rate_limit: _ReplyRateLimit,
+    typing: _TypingTracker,
 ) -> ChannelMessage:
     """Repack a platform message into the inject-queue's shape.
 
     The ``reply_fn`` closure captures the adapter so the agent's reply
     routes back into the **same WhatsApp thread** the inbound came from.
-    We use the *full* Chat JID (preserved in ``metadata['jid_chat']``)
-    rather than the stripped ``sender_id`` — this correctly handles:
+    ``reply_target`` (the full Chat JID, preserved in
+    ``metadata['jid_chat']`` upstream) is computed by the caller so the
+    typing tracker can use the same target. Using the Chat JID rather
+    than the stripped ``sender_id`` correctly handles:
 
       * DMs to a phone contact     → Chat == Sender == phone JID
       * Group threads              → Chat == group JID (not the sender)
       * Self-chats from your phone → Chat == your own LID/phone JID
         (sender_id alone would be a bare LID number that wuzapi can't
         route as a phone number)
+
+    The reply_fn always stops the typing tracker on exit (success,
+    rate-limit drop, or exception). Without a try/finally here, a stuck
+    typing bubble would shadow real conversation state.
     """
-    reply_target = str(msg.metadata.get("jid_chat") or msg.sender_id)
 
     async def reply_fn(text: str) -> bool:
         # Rate-limit BEFORE adapter.send so we don't even mark the text
         # as "recently sent" when it's being dropped. The hourly cap +
         # min-gap together make runaway loops impossible to amplify.
-        allowed, reason = rate_limit.allow(reply_target)
-        if not allowed:
-            print(
-                f"[wuzapi rate-limit] dropping reply to {reply_target}: {reason}",
-                flush=True,
-            )
-            return False
-        return await adapter.send(reply_target, text)
+        try:
+            allowed, reason = rate_limit.allow(reply_target)
+            if not allowed:
+                print(
+                    f"[wuzapi rate-limit] dropping reply to {reply_target}: {reason}",
+                    flush=True,
+                )
+                return False
+            return await adapter.send(reply_target, text)
+        finally:
+            await typing.stop(reply_target)
 
     return ChannelMessage(
         platform=msg.platform,
@@ -248,10 +358,18 @@ async def wuzapi_service(
     rate_limit = _ReplyRateLimit(
         min_gap_s=reply_min_gap_s, max_per_hour=reply_max_per_hour,
     )
+    typing = _TypingTracker(client)
 
     async def _flush(msg: PlatformMessage) -> None:
+        reply_target = str(msg.metadata.get("jid_chat") or msg.sender_id)
+        # Show "typing..." on the recipient's phone while the agent is
+        # composing. Starts now (after debounce settles), stops in
+        # reply_fn after adapter.send completes. Hard-capped at
+        # DEFAULT_TYPING_MAX_DURATION_S so an agent that never replies
+        # doesn't leave a dangling bubble.
+        await typing.start(reply_target)
         delivered = push_channel_message(
-            _to_channel_message(msg, adapter, rate_limit)
+            _to_channel_message(msg, reply_target, adapter, rate_limit, typing)
         )
         print(
             f"[wuzapi → REPL] from={msg.sender_id} text={msg.text[:80]!r} delivered={delivered}",
@@ -292,6 +410,9 @@ async def wuzapi_service(
     try:
         yield
     finally:
+        # Cancel typing keepalives first so they don't fire mid-shutdown
+        # and race the client.aclose() below.
+        typing.cancel_all()
         server.should_exit = True
         try:
             await asyncio.wait_for(serve_task, timeout=5.0)

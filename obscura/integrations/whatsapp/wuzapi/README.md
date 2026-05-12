@@ -110,6 +110,16 @@ through your WhatsApp.
   section is missing), nothing runs in Obscura's process. The wuzapi
   LaunchAgent still runs (it's separate) but Obscura doesn't bridge to
   it. The off state is truly off.
+* **Typing indicator while the agent composes**: when an inbound message
+  arrives, the wuzapi service sends `composing` presence to the chat
+  before pushing the message into the REPL queue. A background keepalive
+  re-sends `composing` every 8s (WhatsApp clears the bubble after ~10s
+  of presence-channel silence). When the agent's `reply_fn` fires, the
+  service sends `paused` to clear the indicator — wrapped in try/finally
+  so the bubble always clears, even on rate-limit drops or send errors.
+  A hard 60s cap clears any dangling indicator if the agent decides not
+  to reply at all. All presence errors are swallowed: a failing typing
+  call never blocks the real reply.
 * **Multi-REPL: first-wins + auto-promotion**: only one process can bind
   `127.0.0.1:18794`. The first REPL to start wins and becomes the
   **OWNER** — it hosts the webhook receiver, parses inbound, and fans
