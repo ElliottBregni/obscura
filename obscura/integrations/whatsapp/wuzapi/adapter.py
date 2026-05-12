@@ -184,6 +184,11 @@ class WuzapiAdapter:
         # trip (default 2 minutes is generous).
         self._echo_window_s = echo_window_s
         self._recent_sends: dict[str, float] = {}
+        # Text-based echo backstop. Wuzapi's send() returns one ID format
+        # (3EB0...) but whatsmeow's looped-back IsFromMe=true events use a
+        # different ID family (3A...). Pure ID matching misses every echo.
+        # Comparing text + IsFromMe gate catches the real-world loop.
+        self._recent_send_texts: list[tuple[str, float]] = []
 
     # ---------- lifecycle ----------
 
@@ -243,16 +248,23 @@ class WuzapiAdapter:
         except WuzapiError:
             logger.exception("wuzapi.send to %s failed", wire_target)
             return False
-        # Record the outbound ID so handle_event can drop the inevitable
-        # IsFromMe=true echo when whatsmeow loops it back as an inbound
-        # event. Prune old entries to bound memory.
+        # Record both the wuzapi-returned ID AND the message text so
+        # handle_event can drop echoes by either fingerprint. Pure ID
+        # matching fails because wuzapi's send-returned IDs differ from
+        # whatsmeow's inbound-event IDs for the same wire-level message.
         now = time.time()
         self._recent_sends[resp.id] = now
+        self._recent_send_texts.append((text, now))
         if len(self._recent_sends) > 256:
             cutoff = now - self._echo_window_s * 2
             self._recent_sends = {
                 k: v for k, v in self._recent_sends.items() if v >= cutoff
             }
+        if len(self._recent_send_texts) > 256:
+            self._recent_send_texts = [
+                (t, ts) for (t, ts) in self._recent_send_texts
+                if now - ts < self._echo_window_s * 2
+            ]
         logger.info("wuzapi.send id=%s to=%s", resp.id, wire_target)
         return True
 
@@ -282,19 +294,36 @@ class WuzapiAdapter:
         info: dict[str, Any] = cast("dict[str, Any]", info_raw)
         msg: dict[str, Any] = cast("dict[str, Any]", msg_raw)
 
-        # Echo detection: drop events whose ID matches a recent outbound
-        # we sent ourselves. This is the only IsFromMe-related filter —
-        # legitimate phone-typed self-messages (chat-with-self test case)
-        # also have IsFromMe=true but their IDs aren't in _recent_sends,
-        # so they pass through and reach the REPL.
-        msg_id = str(info.get("ID") or "")
-        if msg_id and msg_id in self._recent_sends:
-            sent_at = self._recent_sends[msg_id]
-            if time.time() - sent_at < self._echo_window_s:
-                logger.debug("wuzapi: dropping echo of our own send id=%s", msg_id)
-                return None
-
+        # Extract text first so echo detection + blank filter can use it.
         text = _extract_text(msg)
+
+        # Echo detection — two-layer:
+        #   1. ID match: drops events whose ID was returned by our recent
+        #      send() call. Cheap, exact, but fails when wuzapi's
+        #      send-returned ID family (3EB0...) differs from whatsmeow's
+        #      inbound-event ID family (3A...) for the same wire message.
+        #   2. Text match GATED on IsFromMe=true: drops IsFromMe events
+        #      whose text exactly matches a recent send. The IsFromMe gate
+        #      prevents false positives where a contact quotes the bot's
+        #      reply back to us (the quote isn't IsFromMe).
+        msg_id_check = str(info.get("ID") or "")
+        now = time.time()
+        if msg_id_check and msg_id_check in self._recent_sends:
+            if now - self._recent_sends[msg_id_check] < self._echo_window_s:
+                logger.debug("wuzapi: dropping ID-matched echo id=%s", msg_id_check)
+                return None
+        if bool(info.get("IsFromMe")):
+            text_stripped = text.strip()
+            for sent_text, sent_at in self._recent_send_texts:
+                if now - sent_at > self._echo_window_s:
+                    continue
+                if text_stripped == sent_text.strip():
+                    logger.debug(
+                        "wuzapi: dropping text-matched echo (IsFromMe=true) len=%d",
+                        len(text_stripped),
+                    )
+                    return None
+
         if self._drop_non_text and not text.strip():
             # Catches: empty string, whitespace-only, and message variants
             # (delivery receipts, system events, etc.) whose extractable

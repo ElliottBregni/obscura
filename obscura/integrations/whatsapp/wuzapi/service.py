@@ -45,6 +45,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_WEBHOOK_HOST: Final[str] = "127.0.0.1"
 DEFAULT_WEBHOOK_PORT: Final[int] = 18794
 DEFAULT_DEBOUNCE_WINDOW_S: Final[float] = 2.5
+DEFAULT_REPLY_MIN_GAP_S: Final[float] = 3.0
+"""Minimum time between consecutive replies to the same sender."""
+DEFAULT_REPLY_MAX_PER_HOUR: Final[int] = 20
+"""Hard cap on replies-per-hour per sender. Bounds runaway loops even if
+echo detection has bugs."""
 """Default per-sender debounce window. Bursts within this window coalesce
 into a single PlatformMessage with newline-joined text. Tuned for human
 typing cadence — under 1s feels jumpy, over 5s feels laggy."""
@@ -121,9 +126,53 @@ class _DebouncedDispatcher:
 # ---------------------------------------------------------------------------
 
 
+class _ReplyRateLimit:
+    """Per-sender outbound rate limit. Hard backstop against runaway loops.
+
+    Two layered limits:
+
+    * ``min_gap_s``: minimum seconds between consecutive replies to the
+      same sender. Default 3s — fast enough for natural back-and-forth,
+      slow enough that a feedback loop can't fire 20 times per second.
+    * ``max_per_hour``: hard ceiling on replies to a single sender per
+      rolling hour. Default 20 — well above normal conversation pace,
+      orders of magnitude below a runaway loop.
+
+    When a reply is rate-limited, we log and drop it — the caller treats
+    that as a "no reply this turn" rather than a retry. Avoids piling up
+    deferred replies in memory.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_gap_s: float = DEFAULT_REPLY_MIN_GAP_S,
+        max_per_hour: int = DEFAULT_REPLY_MAX_PER_HOUR,
+    ) -> None:
+        self._min_gap_s = min_gap_s
+        self._max_per_hour = max_per_hour
+        self._history: dict[str, list[float]] = {}
+
+    def allow(self, sender: str) -> tuple[bool, str]:
+        """Return (allowed, reason). On True, records the send timestamp."""
+        import time as _time
+        now = _time.time()
+        h = self._history.setdefault(sender, [])
+        # Prune anything older than an hour
+        h[:] = [ts for ts in h if now - ts < 3600.0]
+        if h and (now - h[-1]) < self._min_gap_s:
+            gap = now - h[-1]
+            return False, f"min-gap {self._min_gap_s:g}s not elapsed (only {gap:.2f}s)"
+        if len(h) >= self._max_per_hour:
+            return False, f"hourly cap reached ({self._max_per_hour})"
+        h.append(now)
+        return True, ""
+
+
 def _to_channel_message(
     msg: PlatformMessage,
     adapter: WuzapiAdapter,
+    rate_limit: _ReplyRateLimit,
 ) -> ChannelMessage:
     """Repack a platform message into the inject-queue's shape.
 
@@ -141,6 +190,16 @@ def _to_channel_message(
     reply_target = str(msg.metadata.get("jid_chat") or msg.sender_id)
 
     async def reply_fn(text: str) -> bool:
+        # Rate-limit BEFORE adapter.send so we don't even mark the text
+        # as "recently sent" when it's being dropped. The hourly cap +
+        # min-gap together make runaway loops impossible to amplify.
+        allowed, reason = rate_limit.allow(reply_target)
+        if not allowed:
+            print(
+                f"[wuzapi rate-limit] dropping reply to {reply_target}: {reason}",
+                flush=True,
+            )
+            return False
         return await adapter.send(reply_target, text)
 
     return ChannelMessage(
@@ -167,6 +226,8 @@ async def wuzapi_service(
     account_id: str = "default",
     auto_responder: AutoResponder | None = None,
     debounce_window_s: float = DEFAULT_DEBOUNCE_WINDOW_S,
+    reply_min_gap_s: float = DEFAULT_REPLY_MIN_GAP_S,
+    reply_max_per_hour: int = DEFAULT_REPLY_MAX_PER_HOUR,
 ) -> AsyncGenerator[None]:
     """Run the inbound bridge for the lifetime of the ``async with`` block.
 
@@ -184,8 +245,14 @@ async def wuzapi_service(
     adapter = WuzapiAdapter(client, account_id=account_id)
     await adapter.start()
 
+    rate_limit = _ReplyRateLimit(
+        min_gap_s=reply_min_gap_s, max_per_hour=reply_max_per_hour,
+    )
+
     async def _flush(msg: PlatformMessage) -> None:
-        delivered = push_channel_message(_to_channel_message(msg, adapter))
+        delivered = push_channel_message(
+            _to_channel_message(msg, adapter, rate_limit)
+        )
         print(
             f"[wuzapi → REPL] from={msg.sender_id} text={msg.text[:80]!r} delivered={delivered}",
             flush=True,
