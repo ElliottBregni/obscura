@@ -110,18 +110,35 @@ through your WhatsApp.
   section is missing), nothing runs in Obscura's process. The wuzapi
   LaunchAgent still runs (it's separate) but Obscura doesn't bridge to
   it. The off state is truly off.
-* **Reply ACL (default-deny on every inbound)**: wuzapi is a linked
-  device, so it sees *every* WhatsApp message the user's account
-  receives — friends, family, groups, everything. Without a filter the
-  agent would auto-respond to all of them ("AI texted my friend"
-  problem). The `[messaging.whatsapp].reply_allowlist` config is a
-  default-deny gate enforced in [service.py's on_event][svc] — if the
-  sender isn't on the list, the message gets dropped *before* the
-  debouncer ever sees it, so the agent never has a chance to respond.
-  Empty/missing list = nobody gets a response. Typical setup: put
-  your own number in the list so self-chats trigger the agent and
-  nothing else does. Distinct from `command_allowlist` — replies can
-  be allowed without granting command authority.
+* **Reply ACL (conversation-aware, default-deny on every inbound)**:
+  wuzapi is a linked device so it sees *every* WhatsApp message the
+  user's account receives — friends, family, groups, the user typing
+  to other contacts, everything. The ACL in [`_should_route_inbound`
+  (service.py)][svc] applies a four-rule policy table before the
+  debouncer ever sees the message:
+
+    1. **Group chat** (chat JID ends `@g.us`) — drop unless the full
+       group JID is in `reply_allowlist`. No agent freelancing in
+       groups.
+    2. **Self-chat** (chat ≡ sender AND `IsFromMe=true`) — always
+       allow. This is *form-independent*: WhatsApp can route your own
+       messages with either your phone JID (10 digits) or your LID
+       (15 digits) depending on multi-device routing, but in a
+       self-chat the structural `chat == sender` equality holds in
+       both forms. So an allowlist with just your phone number still
+       lets your LID-form self-chats through.
+    3. **You typing in DM with someone else** (`IsFromMe=true` AND
+       `chat != sender`) — drop. Without this rule, every time you
+       text a friend the agent would generate a "reply" and send it
+       to your friend from your number — the exact "AI texted my
+       friend" failure mode.
+    4. **Inbound from another sender** (`IsFromMe=false`) — check
+       `sender_id` against `reply_allowlist`; allow only if listed.
+
+  The `reply_allowlist` is for case (4) and group allowlisting in case
+  (1). Cases (2) and (3) are structural and need no config. Distinct
+  from `command_allowlist` — replies can be allowed without granting
+  command authority.
 * **Session ID announcement on owner startup**: when a REPL becomes
   the wuzapi OWNER (first-wins on port `:18794` or auto-promoted after
   the previous owner exits), it sends a one-time message to your

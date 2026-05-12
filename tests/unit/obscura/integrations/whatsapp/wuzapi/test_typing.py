@@ -194,3 +194,135 @@ def test_strip_device_suffix_group_jid() -> None:
         _strip_device_suffix("12316333624-1234567890@g.us")
         == "12316333624-1234567890@g.us"
     )
+
+
+# ---------------------------------------------------------------------------
+# _should_route_inbound — conversation-aware ACL policy table
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _allowlist_config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Point command_acl at a temp config.toml with a known reply_allowlist."""
+    from textwrap import dedent
+    monkeypatch.setattr(
+        "obscura.integrations.messaging.command_acl.resolve_obscura_home",
+        lambda: tmp_path,
+    )
+    (tmp_path / "config.toml").write_text(dedent(
+        """
+        [messaging.whatsapp]
+        reply_allowlist = ["2316333624"]
+        """,
+    ))
+    return tmp_path
+
+
+def test_route_self_chat_lid_form_allowed(_allowlist_config: Any) -> None:
+    """The motivating bug: user texts themselves on phone, sender shows
+    as a 15-digit LID (not in the phone-number allowlist), but
+    chat==sender so the self-chat rule fires and allows it."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="187437204672730",
+        chat_jid="187437204672730@lid",
+        is_from_me=True,
+    )
+    assert allow is True
+    assert reason == "self-chat"
+
+
+def test_route_self_chat_phone_form_allowed(_allowlist_config: Any) -> None:
+    """Self-chat detection works equally for the phone-JID form."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="12316333624",
+        chat_jid="12316333624@s.whatsapp.net",
+        is_from_me=True,
+    )
+    assert allow is True
+    assert reason == "self-chat"
+
+
+def test_route_inbound_from_allowlisted_sender_allowed(_allowlist_config: Any) -> None:
+    """A non-self message from an allowlisted sender is allowed."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, _reason = _should_route_inbound(
+        sender_id="2316333624",
+        chat_jid="2316333624@s.whatsapp.net",
+        is_from_me=False,
+    )
+    assert allow is True
+
+
+def test_route_inbound_from_friend_denied(_allowlist_config: Any) -> None:
+    """The original 'AI texted my friend' bug: friend's message comes
+    in, friend not in allowlist, dropped before reaching agent."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="5551234567",
+        chat_jid="5551234567@s.whatsapp.net",
+        is_from_me=False,
+    )
+    assert allow is False
+    assert "non-allowlisted sender" in reason
+
+
+def test_route_user_typing_to_friend_denied(_allowlist_config: Any) -> None:
+    """User typing in DM with a friend (IsFromMe=true, chat != sender)
+    must not trigger the agent — would result in agent intercepting
+    user's outbound to others."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="187437204672730",  # user's LID
+        chat_jid="5551234567@s.whatsapp.net",  # friend's JID
+        is_from_me=True,
+    )
+    assert allow is False
+    assert "user-typed" in reason
+
+
+def test_route_group_chat_denied_by_default(_allowlist_config: Any) -> None:
+    """Group chats are denied by default, even if the user is the sender."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="187437204672730",
+        chat_jid="12345-67890@g.us",
+        is_from_me=True,
+    )
+    assert allow is False
+    assert "group" in reason
+
+
+def test_route_group_chat_allowed_if_jid_in_allowlist(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If a specific group JID is in reply_allowlist, messages in that
+    group are routed through to the agent."""
+    from textwrap import dedent
+    monkeypatch.setattr(
+        "obscura.integrations.messaging.command_acl.resolve_obscura_home",
+        lambda: tmp_path,
+    )
+    (tmp_path / "config.toml").write_text(dedent(
+        """
+        [messaging.whatsapp]
+        reply_allowlist = ["12345-67890@g.us"]
+        """,
+    ))
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, _reason = _should_route_inbound(
+        sender_id="5551234567",
+        chat_jid="12345-67890@g.us",
+        is_from_me=False,
+    )
+    # NOTE: digit-normalization in command_acl strips non-digits, so the
+    # group JID matches by its digit content. This is best-effort group
+    # allowlisting — if you need exact group JID matching, the helper
+    # would need a separate path.
+    # The current behavior: digits "1234567890" extracted from
+    # "12345-67890@g.us" match if "1234567890" appears in the list.
+    # Since "12345-67890@g.us" normalizes to "1234567890", and the
+    # allowlist entry "12345-67890@g.us" normalizes to "1234567890",
+    # they match.
+    assert allow is True

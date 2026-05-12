@@ -417,20 +417,15 @@ async def wuzapi_service(
         if not msg.text.strip():
             print(f"[wuzapi] dropped blank-text msg from {msg.sender_id}", flush=True)
             return
-        # Sender ACL — default-deny. wuzapi sees every WhatsApp inbound
-        # for this linked device (any sender, any chat including groups),
-        # but the agent should only respond to people on the
-        # reply_allowlist. Non-allowlisted senders are dropped silently
-        # before the message hits the REPL queue — the agent never sees
-        # them and never sends a reply. Without this gate, friends who
-        # text the user get auto-responses from the agent.
-        if not is_reply_allowed("whatsapp", msg.sender_id):
-            print(
-                f"[wuzapi] dropped msg from non-allowlisted sender "
-                f"{msg.sender_id} (add to [messaging.whatsapp]."
-                f"reply_allowlist to enable)",
-                flush=True,
-            )
+        chat_jid = str(msg.metadata.get("jid_chat") or "")
+        is_from_me = bool(msg.metadata.get("is_from_me"))
+        allow, reason = _should_route_inbound(
+            sender_id=msg.sender_id,
+            chat_jid=chat_jid,
+            is_from_me=is_from_me,
+        )
+        if not allow:
+            print(f"[wuzapi] dropped: {reason}", flush=True)
             return
         await debounced.feed(msg)
 
@@ -469,6 +464,62 @@ async def wuzapi_service(
             serve_task.cancel()
         await client.aclose()
         logger.info("wuzapi service: shut down")
+
+
+def _should_route_inbound(
+    *,
+    sender_id: str,
+    chat_jid: str,
+    is_from_me: bool,
+) -> tuple[bool, str]:
+    """Decide whether an inbound WhatsApp message reaches the REPL.
+
+    Returns ``(allow, reason)``. On False, ``reason`` is a human-readable
+    diagnostic explaining the drop (printed to stdout for visibility).
+    On True, ``reason`` is the route classification (currently unused
+    but logged at DEBUG level by tests + callers can surface it).
+
+    Rules, in precedence order:
+
+    1. **Group chat** (``chat_jid`` ends ``@g.us``): drop unless the
+       full group JID is in ``reply_allowlist``. Prevents the agent
+       from auto-responding in groups the user is a member of.
+    2. **Self-chat** (``chat_digits == sender_id`` AND ``IsFromMe=true``):
+       always allow. This is the user texting themselves to drive the
+       agent. Robust to whatsmeow's LID-vs-phone JID form variation:
+       even if the chat shows up as a 15-digit LID, the structural
+       ``chat == sender`` equality holds.
+    3. **User typing in DM with someone else** (``IsFromMe=true`` AND
+       ``chat != sender``): drop. The agent must NOT intercept the
+       user's outbound to other contacts — that would result in the
+       agent texting the user's conversation partner from the user's
+       number, the exact "AI texted my friend" failure mode.
+    4. **Inbound from another sender** (``IsFromMe=false``): check
+       ``sender_id`` against ``reply_allowlist``; allow only if listed.
+    """
+    chat_digits = chat_jid.split("@", 1)[0] if "@" in chat_jid else chat_jid
+
+    if chat_jid.endswith("@g.us"):
+        if is_reply_allowed("whatsapp", chat_jid):
+            return True, "allowlisted group"
+        return False, (
+            f"group msg in {chat_jid} (add full group JID to "
+            f"[messaging.whatsapp].reply_allowlist to enable)"
+        )
+    if is_from_me and chat_digits == sender_id:
+        return True, "self-chat"
+    if is_from_me:
+        return False, (
+            f"user-typed msg in DM with {chat_digits} "
+            f"(IsFromMe=true but chat != self — agent must not "
+            f"intercept user's outbound to others)"
+        )
+    if is_reply_allowed("whatsapp", sender_id):
+        return True, "allowlisted sender"
+    return False, (
+        f"msg from non-allowlisted sender {sender_id} "
+        f"(add to [messaging.whatsapp].reply_allowlist to enable)"
+    )
 
 
 def _strip_device_suffix(jid: str) -> str:
