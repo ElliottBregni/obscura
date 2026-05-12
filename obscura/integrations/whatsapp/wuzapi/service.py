@@ -382,6 +382,24 @@ async def wuzapi_service(
     )
     typing = _TypingTracker(client)
 
+    # Cache the linked device's own phone-JID digits for self-chat
+    # detection. WhatsApp Multi-Device can emit self-chat events with
+    # ANY combination of LID/phone forms for Chat and Sender, so we
+    # need a third reference point ("this is the linked device") in
+    # addition to the chat==sender structural check. Without this, a
+    # self-chat with Chat=phone/Sender=LID is mis-classified as
+    # "user typing in DM with phone-number-X" and dropped.
+    self_jid_digits: str = ""
+    try:
+        status = await client.session_status()
+        if status.jid:
+            self_jid_digits = _digits_only(_strip_device_suffix(status.jid))
+    except Exception:
+        logger.debug(
+            "wuzapi: failed to fetch self JID for ACL self-chat detection",
+            exc_info=True,
+        )
+
     async def _flush(msg: PlatformMessage) -> None:
         reply_target = str(msg.metadata.get("jid_chat") or msg.sender_id)
         # Show "typing..." on the recipient's phone while the agent is
@@ -423,6 +441,7 @@ async def wuzapi_service(
             sender_id=msg.sender_id,
             chat_jid=chat_jid,
             is_from_me=is_from_me,
+            self_jid_digits=self_jid_digits,
         )
         if not allow:
             print(f"[wuzapi] dropped: {reason}", flush=True)
@@ -466,38 +485,63 @@ async def wuzapi_service(
         logger.info("wuzapi service: shut down")
 
 
+def _digits_only(s: str) -> str:
+    """Extract digits + strip US country-code prefix for ACL comparisons.
+
+    Mirrors the normalization in command_acl so the self-chat detection
+    here and the allowlist lookup there agree on what "the same number"
+    means. Stripping the leading ``1`` matches a US 10-digit number
+    against an 11-digit-with-country-code form.
+    """
+    digits = "".join(c for c in s if c.isdigit())
+    if len(digits) >= 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits
+
+
 def _should_route_inbound(
     *,
     sender_id: str,
     chat_jid: str,
     is_from_me: bool,
+    self_jid_digits: str = "",
 ) -> tuple[bool, str]:
     """Decide whether an inbound WhatsApp message reaches the REPL.
 
     Returns ``(allow, reason)``. On False, ``reason`` is a human-readable
-    diagnostic explaining the drop (printed to stdout for visibility).
-    On True, ``reason`` is the route classification (currently unused
-    but logged at DEBUG level by tests + callers can surface it).
+    diagnostic; on True, ``reason`` is the route classification.
 
     Rules, in precedence order:
 
     1. **Group chat** (``chat_jid`` ends ``@g.us``): drop unless the
-       full group JID is in ``reply_allowlist``. Prevents the agent
-       from auto-responding in groups the user is a member of.
-    2. **Self-chat** (``chat_digits == sender_id`` AND ``IsFromMe=true``):
-       always allow. This is the user texting themselves to drive the
-       agent. Robust to whatsmeow's LID-vs-phone JID form variation:
-       even if the chat shows up as a 15-digit LID, the structural
-       ``chat == sender`` equality holds.
+       full group JID is in ``reply_allowlist``.
+    2. **Self-chat** (``IsFromMe=true`` AND any of three identity
+       matches holds): always allow. The three matches are:
+
+         * ``chat_digits == sender_digits`` — whatsmeow used the same
+           form for both ends (Chat=LID/Sender=LID OR
+           Chat=phone/Sender=phone).
+         * ``chat_digits == self_jid_digits`` — chat matches the
+           linked device's known phone JID. Catches the asymmetric
+           Chat=phone/Sender=LID case the user hit in production.
+         * ``sender_digits == self_jid_digits`` — sender matches the
+           linked device's known phone JID. Catches Chat=LID/Sender=phone.
+
+       The triple check is necessary because WhatsApp Multi-Device can
+       route self-chats with any combination of LID and phone forms
+       for Chat and Sender. We can't predict which combination
+       whatsmeow will emit, so having a third reference point (the
+       linked device's JID, cached at service startup) ensures every
+       combination still resolves correctly.
     3. **User typing in DM with someone else** (``IsFromMe=true`` AND
-       ``chat != sender``): drop. The agent must NOT intercept the
-       user's outbound to other contacts — that would result in the
-       agent texting the user's conversation partner from the user's
-       number, the exact "AI texted my friend" failure mode.
+       no self-chat match): drop. The agent must NOT intercept the
+       user's outbound to other contacts.
     4. **Inbound from another sender** (``IsFromMe=false``): check
        ``sender_id`` against ``reply_allowlist``; allow only if listed.
     """
-    chat_digits = chat_jid.split("@", 1)[0] if "@" in chat_jid else chat_jid
+    chat_raw = chat_jid.split("@", 1)[0] if "@" in chat_jid else chat_jid
+    chat_digits = _digits_only(chat_raw)
+    sender_digits = _digits_only(sender_id)
 
     if chat_jid.endswith("@g.us"):
         if is_reply_allowed("whatsapp", chat_jid):
@@ -506,13 +550,17 @@ def _should_route_inbound(
             f"group msg in {chat_jid} (add full group JID to "
             f"[messaging.whatsapp].reply_allowlist to enable)"
         )
-    if is_from_me and chat_digits == sender_id:
-        return True, "self-chat"
     if is_from_me:
+        if chat_digits and chat_digits == sender_digits:
+            return True, "self-chat (chat==sender)"
+        if self_jid_digits and chat_digits == self_jid_digits:
+            return True, "self-chat (chat matches linked device)"
+        if self_jid_digits and sender_digits == self_jid_digits:
+            return True, "self-chat (sender matches linked device)"
         return False, (
-            f"user-typed msg in DM with {chat_digits} "
-            f"(IsFromMe=true but chat != self — agent must not "
-            f"intercept user's outbound to others)"
+            f"user-typed msg in DM with {chat_raw} "
+            f"(IsFromMe=true but no self-chat match — agent must "
+            f"not intercept user's outbound to others)"
         )
     if is_reply_allowed("whatsapp", sender_id):
         return True, "allowlisted sender"

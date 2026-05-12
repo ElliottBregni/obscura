@@ -219,9 +219,7 @@ def _allowlist_config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def test_route_self_chat_lid_form_allowed(_allowlist_config: Any) -> None:
-    """The motivating bug: user texts themselves on phone, sender shows
-    as a 15-digit LID (not in the phone-number allowlist), but
-    chat==sender so the self-chat rule fires and allows it."""
+    """Self-chat with both Chat and Sender in LID form."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
     allow, reason = _should_route_inbound(
         sender_id="187437204672730",
@@ -229,11 +227,11 @@ def test_route_self_chat_lid_form_allowed(_allowlist_config: Any) -> None:
         is_from_me=True,
     )
     assert allow is True
-    assert reason == "self-chat"
+    assert reason.startswith("self-chat")
 
 
 def test_route_self_chat_phone_form_allowed(_allowlist_config: Any) -> None:
-    """Self-chat detection works equally for the phone-JID form."""
+    """Self-chat with both Chat and Sender in phone-JID form."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
     allow, reason = _should_route_inbound(
         sender_id="12316333624",
@@ -241,7 +239,54 @@ def test_route_self_chat_phone_form_allowed(_allowlist_config: Any) -> None:
         is_from_me=True,
     )
     assert allow is True
-    assert reason == "self-chat"
+    assert reason.startswith("self-chat")
+
+
+def test_route_self_chat_mixed_phone_chat_lid_sender(_allowlist_config: Any) -> None:
+    """The bug Elliott actually hit: Chat=phone, Sender=LID for the
+    same self-chat. chat==sender comparison fails (different forms),
+    but the self_jid_digits reference makes the match work because
+    chat matches the linked device's phone JID."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="187437204672730",
+        chat_jid="12316333624@s.whatsapp.net",
+        is_from_me=True,
+        self_jid_digits="2316333624",  # phone digits after country-code strip
+    )
+    assert allow is True
+    assert "linked device" in reason
+
+
+def test_route_self_chat_mixed_chat_lid_phone_sender(_allowlist_config: Any) -> None:
+    """Inverse of the above: Chat=LID, Sender=phone. Sender matches
+    the linked device's phone JID."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="12316333624",
+        chat_jid="187437204672730@lid",
+        is_from_me=True,
+        self_jid_digits="2316333624",
+    )
+    assert allow is True
+    assert "linked device" in reason
+
+
+def test_route_mixed_form_without_self_jid_falls_through(_allowlist_config: Any) -> None:
+    """If session_status fetch failed (self_jid_digits empty), the
+    Chat=phone/Sender=LID mixed case has no way to resolve and falls
+    through to the DM-intercept-deny branch. This is the pre-fix
+    behavior — documented so it's clear the self_jid path is what
+    saves it."""
+    from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+    allow, reason = _should_route_inbound(
+        sender_id="187437204672730",
+        chat_jid="12316333624@s.whatsapp.net",
+        is_from_me=True,
+        self_jid_digits="",  # session_status failed
+    )
+    assert allow is False
+    assert "user-typed" in reason
 
 
 def test_route_inbound_from_allowlisted_sender_allowed(_allowlist_config: Any) -> None:
