@@ -99,6 +99,61 @@ is set per Message), but the labels are surfaced to the agent as
 ``[label] ...`` so keep them short."""
 
 
+def _extract_downloadable_media(message: dict[str, Any]) -> dict[str, Any] | None:
+    """Return wuzapi-shaped media metadata for the FIRST downloadable
+    variant inside ``message``, or ``None`` if there's nothing to download.
+
+    Only image is supported as a download target today; document/video/
+    audio use the same wire shape and could be plumbed similarly when
+    the agent gains tools for those formats. The returned dict matches
+    :class:`WuzapiDownloadImageRequest`'s field names exactly so the
+    caller can construct the model with ``**payload``.
+
+    Searches inside ephemeral / view-once wrappers too — the
+    download-fields live on the nested imageMessage there.
+    """
+    def _from(inner: Any) -> dict[str, Any] | None:
+        if not isinstance(inner, dict):
+            return None
+        inner_d: dict[str, Any] = cast("dict[str, Any]", inner)
+        img = inner_d.get("imageMessage")
+        if not isinstance(img, dict):
+            return None
+        img_d: dict[str, Any] = cast("dict[str, Any]", img)
+        url = img_d.get("url")
+        if not isinstance(url, str) or not url:
+            return None
+        # File length arrives as a string in some webhook payloads, int
+        # in others. Tolerate both.
+        file_length_raw = img_d.get("fileLength", 0)
+        try:
+            file_length = int(file_length_raw) if file_length_raw else 0
+        except (TypeError, ValueError):
+            file_length = 0
+        return {
+            "kind": "image",
+            "url": url,
+            "direct_path": str(img_d.get("directPath") or ""),
+            "media_key": str(img_d.get("mediaKey") or ""),
+            "mimetype": str(img_d.get("mimetype") or "image/jpeg"),
+            "file_enc_sha256": str(img_d.get("fileEncSha256") or ""),
+            "file_sha256": str(img_d.get("fileSha256") or ""),
+            "file_length": file_length,
+        }
+
+    direct = _from(message)
+    if direct:
+        return direct
+    for wrapper in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2"):
+        outer = message.get(wrapper)
+        if isinstance(outer, dict):
+            outer_d: dict[str, Any] = cast("dict[str, Any]", outer)
+            payload = _from(outer_d.get("message"))
+            if payload is not None:
+                return payload
+    return None
+
+
 def _from_media(inner_d: dict[str, Any]) -> str:
     """If the message is a media variant, synthesize a text marker.
 
@@ -430,6 +485,15 @@ class WuzapiAdapter:
             "message_type": info.get("Type"),
             "push_name": info.get("PushName"),
         }
+        # If this is a downloadable media message (image today; doc/video/
+        # audio could join later), surface the wuzapi-shaped download
+        # metadata so the service layer can pull the bytes and save them
+        # to disk for the agent's tools to read. Stays absent when the
+        # message is text-only or a non-downloadable variant
+        # (sticker/location/contact).
+        media_payload = _extract_downloadable_media(msg)
+        if media_payload is not None:
+            metadata["media_payload"] = media_payload
 
         return PlatformMessage(
             platform=_PLATFORM,

@@ -29,6 +29,8 @@ from obscura.integrations.whatsapp.wuzapi.models import (
     WuzapiConnectRequest,
     WuzapiConnectResponse,
     WuzapiCreateUserRequest,
+    WuzapiDownloadImageRequest,
+    WuzapiDownloadResponse,
     WuzapiEventName,
     WuzapiQRCodeResponse,
     WuzapiSendTextRequest,
@@ -251,6 +253,41 @@ class WuzapiClient(_WuzapiBaseClient):
             response_model=WuzapiSendTextResponse,
             json_body=req,
         )
+
+    async def download_image(
+        self, req: WuzapiDownloadImageRequest,
+    ) -> bytes:
+        """POST /chat/downloadimage — decrypt + fetch image bytes.
+
+        Takes the encrypted-media metadata from a Message webhook
+        (URL, MediaKey, FileEncSHA256, etc.) and returns the raw
+        decrypted bytes. wuzapi wraps the bytes in a ``data:image/...;
+        base64,...`` data URL — we unwrap that here so callers see
+        raw bytes.
+
+        Raises:
+            WuzapiAPIError: if wuzapi reports a download failure (no
+                session, bad media key, expired URL, etc).
+            WuzapiResponseError: if the response shape isn't a valid
+                data URL.
+        """
+        import base64
+
+        result = await self._request_typed(
+            "POST", "/chat/downloadimage",
+            response_model=WuzapiDownloadResponse,
+            json_body=req,
+        )
+        # Parse data URL: "data:image/jpeg;base64,<payload>"
+        prefix, _, payload = result.data.partition(",")
+        if not payload or "base64" not in prefix:
+            raise WuzapiResponseError(WuzapiDownloadResponse, result.data)
+        try:
+            return base64.b64decode(payload)
+        except Exception as exc:
+            raise WuzapiResponseError(
+                WuzapiDownloadResponse, result.data,
+            ) from exc
 
     async def set_chat_presence(
         self,

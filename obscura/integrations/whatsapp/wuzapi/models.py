@@ -188,6 +188,48 @@ class WuzapiSendTextRequest(BaseModel):
     context_info: WuzapiSendTextContextInfo | None = None
 
 
+class WuzapiDownloadImageRequest(BaseModel):
+    """Body for ``POST /chat/downloadimage``.
+
+    Wuzapi's download endpoint takes the encrypted media metadata that
+    came with the inbound Message webhook (URL, DirectPath, MediaKey,
+    Mimetype, FileEncSHA256, FileSHA256, FileLength) and returns the
+    decrypted bytes wrapped in a data-URL. The same shape (different
+    endpoint) is used for ``/chat/downloaddocument``, ``/chat/downloadvideo``,
+    and ``/chat/downloadaudio``.
+
+    Wire format note: wuzapi's Go struct uses PascalCase field names
+    (``Url``, ``DirectPath``, etc.); Go's case-insensitive JSON decode
+    matches our Pythonic ``snake_case`` aliases via serialization_alias.
+    The SHA hashes and media key arrive as base64-encoded strings on
+    the inbound webhook and must be passed through verbatim.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    url: str = Field(serialization_alias="Url")
+    direct_path: str = Field(default="", serialization_alias="DirectPath")
+    media_key: str = Field(default="", serialization_alias="MediaKey")
+    mimetype: str = Field(default="", serialization_alias="Mimetype")
+    file_enc_sha256: str = Field(default="", serialization_alias="FileEncSHA256")
+    file_sha256: str = Field(default="", serialization_alias="FileSHA256")
+    file_length: int = Field(default=0, serialization_alias="FileLength")
+
+
+class WuzapiDownloadResponse(BaseModel):
+    """Output of ``POST /chat/downloadimage`` (and document/video/audio).
+
+    ``data`` is a data URL like ``data:image/jpeg;base64,/9j/4AAQ...`` —
+    callers decode the base64 payload to get the raw bytes. ``mimetype``
+    is convenient when the caller wants to pick a file extension.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    mimetype: str = Field(alias="Mimetype")
+    data: str = Field(alias="Data")
+
+
 class WuzapiChatPresenceRequest(BaseModel):
     """Body for ``POST /chat/presence`` — typing/recording/paused indicator.
 
@@ -354,6 +396,8 @@ __all__ = [
     "WuzapiConnectRequest",
     "WuzapiConnectResponse",
     "WuzapiCreateUserRequest",
+    "WuzapiDownloadImageRequest",
+    "WuzapiDownloadResponse",
     "WuzapiEventName",
     "WuzapiMessageEvent",
     "WuzapiProxyConfig",
