@@ -83,6 +83,58 @@ def _strip_jid(jid: str) -> str:
     return normalize_identity(bare)
 
 
+_MEDIA_VARIANTS: tuple[tuple[str, str], ...] = (
+    ("imageMessage", "image"),
+    ("videoMessage", "video"),
+    ("documentMessage", "document"),
+    ("audioMessage", "voice note"),
+    ("stickerMessage", "sticker"),
+    ("locationMessage", "location"),
+    ("contactMessage", "contact"),
+    ("liveLocationMessage", "live location"),
+)
+"""Maps the wuzapi Message variant key → human-readable label used in
+the synthesized text marker. Order doesn't matter (only one variant
+is set per Message), but the labels are surfaced to the agent as
+``[label] ...`` so keep them short."""
+
+
+def _from_media(inner_d: dict[str, Any]) -> str:
+    """If the message is a media variant, synthesize a text marker.
+
+    Output forms (only the relevant fields are included):
+
+    * ``[image]`` — image with no caption
+    * ``[image] caption: please look`` — image with caption
+    * ``[document] (invoice.pdf)`` — document with filename, no caption
+    * ``[document] (invoice.pdf) caption: my receipt`` — document with both
+    * ``[location] name: Times Square address: 7th Ave``
+
+    Returns ``""`` if the message isn't a recognized media variant —
+    caller falls through to the next probe.
+    """
+    for media_key, label in _MEDIA_VARIANTS:
+        media = inner_d.get(media_key)
+        if not isinstance(media, dict):
+            continue
+        media_d: dict[str, Any] = cast("dict[str, Any]", media)
+        parts: list[str] = [f"[{label}]"]
+        filename = media_d.get("fileName")
+        if isinstance(filename, str) and filename.strip():
+            parts.append(f"({filename.strip()})")
+        caption = media_d.get("caption")
+        if isinstance(caption, str) and caption.strip():
+            parts.append(f"caption: {caption.strip()}")
+        name = media_d.get("name")
+        if isinstance(name, str) and name.strip():
+            parts.append(f"name: {name.strip()}")
+        address = media_d.get("address")
+        if isinstance(address, str) and address.strip():
+            parts.append(f"address: {address.strip()}")
+        return " ".join(parts)
+    return ""
+
+
 def _extract_text(message: dict[str, Any]) -> str:
     """Pull text from the wuzapi Message dict.
 
@@ -94,6 +146,15 @@ def _extract_text(message: dict[str, Any]) -> str:
     * ``ephemeralMessage.message.conversation``        — disappearing msgs
     * ``ephemeralMessage.message.extendedTextMessage.text``
     * ``viewOnceMessage.message.{conversation|extendedTextMessage.text}``
+
+    Media variants (image, video, document, voice note, sticker,
+    location, contact) don't have raw text — they have media payloads
+    plus optional caption/filename/name fields. We synthesize a marker
+    like ``[image]`` or ``[image] caption: please look`` so the agent
+    receives *something* and can acknowledge the media, rather than the
+    event getting dropped as blank-text. Future: vision-capable
+    backends could receive the actual media payload via wuzapi's
+    download endpoints.
 
     We probe these in order. If none match, we log + return an empty
     string so the caller can decide whether to drop the event.
@@ -112,6 +173,9 @@ def _extract_text(message: dict[str, Any]) -> str:
             text = ext_d.get("text")
             if isinstance(text, str):
                 return text
+        media_marker = _from_media(inner_d)
+        if media_marker:
+            return media_marker
         return ""
 
     direct = _from_inner(message)

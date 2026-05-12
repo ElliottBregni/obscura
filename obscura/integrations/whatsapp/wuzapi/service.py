@@ -442,8 +442,16 @@ async def wuzapi_service(
     async def on_event(env: WuzapiWebhookEnvelope) -> None:
         msg = adapter.handle_event(env)
         if msg is None:
+            # handle_event returns None for several distinct reasons: a
+            # non-Message envelope type, a malformed Message payload, an
+            # ID-matched or text-matched echo of our own outbound, or a
+            # Message whose extractable text is blank (now rare since
+            # media variants synthesize markers, but reactions/receipts
+            # still fall here). DEBUG log inside the adapter has the
+            # specific cause.
             print(
-                f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)",
+                f"[wuzapi] adapter dropped event type={env.type!r} "
+                f"(non-Message, malformed, echo, or no extractable content)",
                 flush=True,
             )
             return
