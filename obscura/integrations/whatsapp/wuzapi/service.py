@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Final
 
 import uvicorn
@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WEBHOOK_HOST: Final[str] = "127.0.0.1"
 DEFAULT_WEBHOOK_PORT: Final[int] = 18794
+
+AutoResponder = Callable[[PlatformMessage, "WuzapiAdapter"], Awaitable[None]]
+"""Optional callable that produces and dispatches a reply for each inbound msg."""
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +90,7 @@ async def wuzapi_service(
     webhook_host: str = DEFAULT_WEBHOOK_HOST,
     webhook_port: int = DEFAULT_WEBHOOK_PORT,
     account_id: str = "default",
+    auto_responder: AutoResponder | None = None,
 ) -> AsyncGenerator[None]:
     """Run the inbound bridge for the lifetime of the ``async with`` block.
 
@@ -109,11 +113,7 @@ async def wuzapi_service(
         if msg is None:
             print(f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)", flush=True)
             return
-        # push_channel_message is synchronous — it queues + UDS broadcasts
         delivered = push_channel_message(_to_channel_message(msg, adapter))
-        # Use print(..., flush=True) for daemon visibility: logger.info gets
-        # swallowed when launchd's stdout is block-buffered and the obscura
-        # CLI's bootstrap may have set log handlers we don't control.
         print(
             f"[wuzapi → REPL] from={msg.sender_id} text={msg.text[:80]!r} delivered={delivered}",
             flush=True,
@@ -122,6 +122,11 @@ async def wuzapi_service(
             "wuzapi → REPL: from=%s text=%r delivered=%s",
             msg.sender_id, msg.text[:80], delivered,
         )
+        # If auto-responder is configured, dispatch the LLM call as a fire-
+        # and-forget task. Failures are isolated (logged + swallowed by the
+        # _safe_dispatch wrapper above) so they never reach the webhook ACK.
+        if auto_responder is not None:
+            asyncio.create_task(_safe_auto_respond(auto_responder, msg, adapter))
 
     app = build_webhook_app(on_event=on_event)
     config = uvicorn.Config(
@@ -145,7 +150,30 @@ async def wuzapi_service(
         logger.info("wuzapi service: shut down")
 
 
+async def _safe_auto_respond(
+    responder: AutoResponder,
+    msg: PlatformMessage,
+    adapter: WuzapiAdapter,
+) -> None:
+    """Run the auto-responder with exception isolation + visible logging."""
+    print(
+        f"[wuzapi auto-respond] starting for from={msg.sender_id} text={msg.text[:60]!r}",
+        flush=True,
+    )
+    try:
+        await responder(msg, adapter)
+    except Exception as exc:
+        print(
+            f"[wuzapi auto-respond] FAILED for from={msg.sender_id}: {exc!r}",
+            flush=True,
+        )
+        logger.exception("wuzapi auto-respond failed for %s", msg.sender_id)
+    else:
+        print(f"[wuzapi auto-respond] done for from={msg.sender_id}", flush=True)
+
+
 __all__ = [
+    "AutoResponder",
     "DEFAULT_WEBHOOK_HOST",
     "DEFAULT_WEBHOOK_PORT",
     "wuzapi_service",
