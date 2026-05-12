@@ -646,15 +646,17 @@ async def _download_and_save_media(
     four use the same request shape (:class:`WuzapiDownloadMediaRequest`).
 
     Returns ``None`` on any failure (download error, write error,
-    unsupported kind). Failures are logged at DEBUG; the caller's job
-    is to gracefully fall back to the synthesized text marker so the
-    agent still receives an acknowledgment.
+    unsupported kind). Failures are printed to stdout with the
+    ``[wuzapi]`` prefix so they're visible during diagnosis — without
+    visible failure breadcrumbs we couldn't tell whether the issue
+    was the download (wuzapi/network), the save (filesystem), or
+    upstream (no media_payload extracted). DEBUG log retains the full
+    traceback.
 
     The saved path is what we surface to the agent: it gets a prompt
     like ``[image at /Users/.../media_inbound/whatsapp/abc.jpg]
     caption: foo`` and picks up the file via its existing file/vision
-    tools. The file persists across turns so the agent can reference
-    it later in the conversation.
+    tools.
     """
     from obscura.integrations.messaging.media_store import save_inbound_media
     from obscura.integrations.whatsapp.wuzapi.models import (
@@ -669,29 +671,67 @@ async def _download_and_save_media(
         "audio": client.download_audio,
     }.get(kind)
     if downloader is None:
+        print(
+            f"[wuzapi] media download skipped: unknown kind {kind!r}",
+            flush=True,
+        )
         return None
+
+    url = str(media_payload.get("url", ""))
+    mimetype = str(media_payload.get("mimetype", ""))
+    print(
+        f"[wuzapi] downloading {kind} from wuzapi (mimetype={mimetype!r}, "
+        f"url_present={bool(url)})",
+        flush=True,
+    )
 
     try:
         req = WuzapiDownloadMediaRequest(
-            url=str(media_payload.get("url", "")),
+            url=url,
             direct_path=str(media_payload.get("direct_path", "")),
             media_key=str(media_payload.get("media_key", "")),
-            mimetype=str(media_payload.get("mimetype", "")),
+            mimetype=mimetype,
             file_enc_sha256=str(media_payload.get("file_enc_sha256", "")),
             file_sha256=str(media_payload.get("file_sha256", "")),
             file_length=int(media_payload.get("file_length", 0) or 0),
         )
         data = await downloader(req)
-    except Exception:
-        logger.debug("wuzapi: %s download failed", kind, exc_info=True)
+    except Exception as exc:
+        # Visible failure — likely causes:
+        #   * wuzapi binary is older than the /chat/download* endpoints
+        #     (404 / no route) — rebuild with `obscura whatsapp install`
+        #   * WhatsApp CDN URL expired (uncommon for fresh messages)
+        #   * WhatsApp session broken — `obscura whatsapp status`
+        #   * mediaKey mismatch (decode/serialization bug)
+        print(
+            f"[wuzapi] {kind} download failed: {exc!r}",
+            flush=True,
+        )
+        logger.debug("wuzapi: %s download exception", kind, exc_info=True)
         return None
 
-    return save_inbound_media(
+    if not data:
+        print(
+            f"[wuzapi] {kind} download returned empty bytes (wuzapi may "
+            f"have decoded but produced no payload)",
+            flush=True,
+        )
+        return None
+
+    saved_path = save_inbound_media(
         platform="whatsapp",
         message_id=message_id or kind,
         data=data,
-        mimetype=str(media_payload.get("mimetype", "")),
+        mimetype=mimetype,
     )
+    if saved_path is None:
+        print(
+            f"[wuzapi] {kind} downloaded ({len(data)} bytes) but could "
+            f"not be saved to disk — check ~/.obscura/media_inbound/ "
+            f"permissions",
+            flush=True,
+        )
+    return saved_path
 
 
 def _strip_device_suffix(jid: str) -> str:
