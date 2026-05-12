@@ -32,6 +32,14 @@ def _socket_path(session_id: str) -> Path:
     return _SOCKET_DIR / f"{session_id}.sock"
 
 
+# Session IDs hosted IN THIS PROCESS. Used by discover_peers() to filter
+# self-broadcasts — without this filter, push_channel_message's UDS
+# fanout sends to every .sock file (including our own) and our own
+# UDSInbox._on_peer_message re-injects into the local queue, creating
+# a per-inbound amplification storm. Updated by UDSInbox.start/stop.
+_LOCAL_SESSION_IDS: set[str] = set()
+
+
 class UDSInbox:
     """Unix Domain Socket inbox for receiving messages from other sessions.
 
@@ -57,6 +65,11 @@ class UDSInbox:
         """Start listening for messages."""
         self._on_message = on_message
         _SOCKET_DIR.mkdir(parents=True, exist_ok=True)
+        # Register self so discover_peers() filters us out. Without this,
+        # _uds_fanout broadcasts our message back to ourselves → infinite
+        # re-injection loop via _on_peer_message → push_channel_message →
+        # _uds_fanout → self → ...
+        _LOCAL_SESSION_IDS.add(self._session_id)
 
         # Remove stale socket.
         if self._socket_path.exists():
@@ -97,6 +110,7 @@ class UDSInbox:
             await self._server.wait_closed()
         if self._socket_path.exists():
             self._socket_path.unlink(missing_ok=True)
+        _LOCAL_SESSION_IDS.discard(self._session_id)
         logger.info("UDS inbox stopped")
 
     @property
@@ -146,13 +160,21 @@ async def send_message(
 
 
 def discover_peers() -> list[str]:
-    """Discover other running sessions by scanning the socket directory."""
+    """Discover other running sessions by scanning the socket directory.
+
+    Excludes any session_id hosted by the current process (registered in
+    :data:`_LOCAL_SESSION_IDS` by ``UDSInbox.start``). Without that filter
+    the caller's own UDS broadcasts would loop back into the caller's
+    own UDS inbox — a per-message amplification storm we observed in
+    production with the WhatsApp pipeline.
+    """
     if not _SOCKET_DIR.is_dir():
         return []
     peers: list[str] = []
     for sock_file in _SOCKET_DIR.glob("*.sock"):
         session_id = sock_file.stem
-        # Check if socket is still alive (not stale).
+        if session_id in _LOCAL_SESSION_IDS:
+            continue
         if sock_file.exists():
             peers.append(session_id)
     return peers
