@@ -128,7 +128,27 @@ async def install_wuzapi_daemon(
             "install_wuzapi_daemon: webhook auto-configure failed", exc_info=True
         )
 
-    # Enter the service CM; register for LIFO teardown on session aclose.
+    # Quick port-bind probe before spinning up uvicorn. If the standalone
+    # whatsapp-daemon LaunchAgent already owns the port, we don't try to
+    # second-bind — the daemon does the bridging and we just rely on its
+    # UDS broadcasts. This keeps the REPL boot quiet in the common case
+    # where users run the daemon LaunchAgent separately.
+    import socket
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", webhook_port))
+    except OSError:
+        logger.info(
+            "install_wuzapi_daemon: port %d already bound (likely the "
+            "standalone whatsapp-daemon LaunchAgent) — relying on its "
+            "UDS broadcasts; no second bridge started",
+            webhook_port,
+        )
+        probe.close()
+        return
+    probe.close()
+
+    # Port is free — start the in-REPL bridge ourselves.
     try:
         from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
 
@@ -136,8 +156,8 @@ async def install_wuzapi_daemon(
         await cm.__aenter__()
     except Exception:
         logger.warning(
-            "install_wuzapi_daemon: failed to start webhook receiver "
-            "(port %d may be in use)", webhook_port, exc_info=True,
+            "install_wuzapi_daemon: failed to start webhook receiver",
+            exc_info=True,
         )
         return
 
