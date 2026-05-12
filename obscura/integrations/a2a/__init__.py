@@ -32,7 +32,11 @@ if TYPE_CHECKING:
     from obscura.integrations.a2a.agent_card import AgentCardGenerator
     from obscura.integrations.a2a.client import A2AClient, A2ASessionManager
     from obscura.integrations.a2a.event_mapper import EventMapper
-    from obscura.integrations.a2a.openclaw_bridge import OpenClawBridge, OpenClawBridgeConfig, OpenClawContext
+    from obscura.integrations.a2a.openclaw_bridge import (
+        OpenClawBridge,
+        OpenClawBridgeConfig,
+        OpenClawContext,
+    )
     from obscura.integrations.a2a.server import ObscuraA2AServer
     from obscura.integrations.a2a.service import A2AService
     from obscura.integrations.a2a.store import (

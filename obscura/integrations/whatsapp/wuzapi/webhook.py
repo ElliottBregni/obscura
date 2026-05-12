@@ -90,13 +90,17 @@ def build_webhook_app(
     async def handle(request: Request) -> JSONResponse:
         body = await request.body()
         if len(body) > _MAX_BODY_BYTES:
-            logger.warning("wuzapi webhook body too large (%d bytes), dropping", len(body))
+            logger.warning(
+                "wuzapi webhook body too large (%d bytes), dropping", len(body)
+            )
             return JSONResponse({"ok": False, "error": "too_large"}, status_code=413)
 
         if verify_signature is not None:
             sig = request.headers.get("X-Signature", "")
             if not verify_signature(body, sig):
-                logger.warning("wuzapi webhook signature rejected from %s", request.client)
+                logger.warning(
+                    "wuzapi webhook signature rejected from %s", request.client
+                )
                 return JSONResponse({"ok": False, "error": "bad_sig"}, status_code=401)
 
         # Wuzapi POSTs webhooks as application/x-www-form-urlencoded, NOT
@@ -111,8 +115,8 @@ def build_webhook_app(
             json_data_list = form.get("jsonData") or form.get("data") or []
             if not json_data_list:
                 logger.warning(
-                    "wuzapi webhook form body missing 'jsonData' field "
-                    "(keys=%s)", list(form.keys()),
+                    "wuzapi webhook form body missing 'jsonData' field (keys=%s)",
+                    list(form.keys()),
                 )
                 return JSONResponse({"ok": True, "ignored": "missing_json_data"})
             envelope_json = json_data_list[0]

@@ -117,12 +117,16 @@ class BackendToolHostMixin:
 
         _cfg = ObscuraConfig.load()
         if not _cfg.a2a_bridge_enabled:
-            logger.debug("OpenClaw bridge disabled via config (a2a_bridge_enabled=false) — skipping")
+            logger.debug(
+                "OpenClaw bridge disabled via config (a2a_bridge_enabled=false) — skipping"
+            )
             return
 
         token = self._read_openclaw_token()
         if not token:
-            logger.debug("OPENCLAW_TOKEN not set and ~/.openclaw/openclaw.json not found — skipping OpenClaw bridge")
+            logger.debug(
+                "OPENCLAW_TOKEN not set and ~/.openclaw/openclaw.json not found — skipping OpenClaw bridge"
+            )
             return
 
         bridge = OpenClawBridge.from_config(
@@ -134,17 +138,25 @@ class BackendToolHostMixin:
         if healthy:
             logger.debug("OpenClaw bridge connected and healthy")
         else:
-            logger.debug("OpenClaw bridge connected but health check failed — gateway may be offline")
+            logger.debug(
+                "OpenClaw bridge connected but health check failed — gateway may be offline"
+            )
 
         self._openclaw_bridge = bridge
 
         # Register the ask_openclaw tool now that the bridge is available.
         async def _ask_openclaw_handler(message: str = "") -> str:
             if self._openclaw_bridge is None:
-                return json.dumps({"error": "openclaw_bridge_unavailable", "detail": "OpenClaw bridge is not connected"})
+                return json.dumps(
+                    {
+                        "error": "openclaw_bridge_unavailable",
+                        "detail": "OpenClaw bridge is not connected",
+                    }
+                )
             task = await self._openclaw_bridge.send(message)
             from obscura.core.enums.protocol import A2ATaskState
             from obscura.core.models.a2a import TextPart
+
             if task.status.state == A2ATaskState.COMPLETED and task.artifacts:
                 parts = task.artifacts[0].parts
                 return "".join(p.text for p in parts if isinstance(p, TextPart))
@@ -152,7 +164,15 @@ class BackendToolHostMixin:
             msg = task.status.message
             if msg and msg.parts:
                 from obscura.core.models.a2a import TextPart as _TP
-                return json.dumps({"error": "openclaw_failed", "detail": "".join(p.text for p in msg.parts if isinstance(p, _TP))})
+
+                return json.dumps(
+                    {
+                        "error": "openclaw_failed",
+                        "detail": "".join(
+                            p.text for p in msg.parts if isinstance(p, _TP)
+                        ),
+                    }
+                )
             return json.dumps({"error": "openclaw_failed", "detail": "Unknown error"})
 
         spec = ToolSpec(

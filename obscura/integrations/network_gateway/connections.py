@@ -174,7 +174,9 @@ class ConnectionRegistry:
     # Agent state broadcast
     # ------------------------------------------------------------------
 
-    async def broadcast_agent_state(self, state: str, *, conn_id: str | None = None) -> int:
+    async def broadcast_agent_state(
+        self, state: str, *, conn_id: str | None = None
+    ) -> int:
         """Broadcast agent running/idle state change to all connected clients."""
         frame: dict[str, Any] = {"type": "agent", "state": state}
         if conn_id is not None:

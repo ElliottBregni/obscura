@@ -75,9 +75,7 @@ async def configure_tailscale_serve(
         True if the command exited with status 0, False otherwise.
     """
     if not _tailscale_available():
-        logger.warning(
-            "tailscale not found in PATH — skipping Tailscale serve setup"
-        )
+        logger.warning("tailscale not found in PATH — skipping Tailscale serve setup")
         return False
 
     cmd_name = "funnel" if funnel else "serve"

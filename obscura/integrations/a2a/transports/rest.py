@@ -133,7 +133,9 @@ def create_wellknown_router(service: A2AService) -> APIRouter:
     @router.get("/.well-known/agent.json")
     async def wellknown_agent_card() -> dict[str, Any]:
         """A2A agent discovery endpoint."""
-        return service.get_agent_card().model_dump(mode="json", by_alias=True, exclude_none=True)
+        return service.get_agent_card().model_dump(
+            mode="json", by_alias=True, exclude_none=True
+        )
 
     return router
 

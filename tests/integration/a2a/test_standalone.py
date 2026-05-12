@@ -91,8 +91,16 @@ async def test_wellknown_required_fields(a2a_http: httpx.AsyncClient) -> None:
     resp = await a2a_http.get("/.well-known/agent.json")
     data = resp.json()
 
-    for field in ("name", "description", "url", "version", "protocolVersion",
-                  "skills", "capabilities", "securitySchemes"):
+    for field in (
+        "name",
+        "description",
+        "url",
+        "version",
+        "protocolVersion",
+        "skills",
+        "capabilities",
+        "securitySchemes",
+    ):
         assert field in data, f"Missing required field: {field}"
 
 

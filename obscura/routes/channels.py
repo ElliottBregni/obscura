@@ -73,7 +73,9 @@ async def telegram_webhook(
     telegram_secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
     strict: bool = getattr(request.app.state, "strict_webhook_verification", False)
     if not telegram_secret and strict:
-        raise HTTPException(status_code=503, detail="Telegram webhook secret not configured")
+        raise HTTPException(
+            status_code=503, detail="Telegram webhook secret not configured"
+        )
     if telegram_secret:
         if not x_telegram_bot_api_secret_token:
             logger.warning("Telegram webhook: missing secret token header")
@@ -162,7 +164,9 @@ async def whatsapp_webhook(
     app_secret = os.environ.get("WHATSAPP_APP_SECRET", "")
     strict: bool = getattr(request.app.state, "strict_webhook_verification", False)
     if not app_secret and strict:
-        raise HTTPException(status_code=503, detail="WhatsApp app secret not configured")
+        raise HTTPException(
+            status_code=503, detail="WhatsApp app secret not configured"
+        )
     if app_secret:
         sig_header = request.headers.get("X-Hub-Signature-256", "")
         if not _verify_meta_signature(body, sig_header, app_secret):
@@ -230,6 +234,7 @@ def _redact_credentials(record_dict: dict) -> dict:
     secrets are never returned over the API.
     """
     import copy
+
     out = copy.deepcopy(record_dict)
     creds = out.get("credentials")
     if isinstance(creds, dict):
@@ -342,7 +347,10 @@ async def list_channel_configs(
 ) -> list[dict[str, Any]]:
     """List all channel configurations."""
     store = _get_config_store()
-    return [_redact_credentials(r.to_dict()) for r in store.list_all(enabled_only=enabled_only)]
+    return [
+        _redact_credentials(r.to_dict())
+        for r in store.list_all(enabled_only=enabled_only)
+    ]
 
 
 @router.get("/configs/{config_id}")

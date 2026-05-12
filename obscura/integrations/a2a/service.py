@@ -179,9 +179,9 @@ class A2AService:
         return task
 
     # Per-sender rate limit: max N injects per sliding window
-    _INJECT_RATE_LIMIT: int = 10           # max messages
-    _INJECT_RATE_WINDOW: float = 60.0      # per this many seconds
-    _INJECT_TIMEOUT_MAX: float = 600.0     # hard cap on inject_timeout
+    _INJECT_RATE_LIMIT: int = 10  # max messages
+    _INJECT_RATE_WINDOW: float = 60.0  # per this many seconds
+    _INJECT_TIMEOUT_MAX: float = 600.0  # hard cap on inject_timeout
     _INJECT_TIMEOUT_DEFAULT: float = 300.0
 
     # sender_id → deque of timestamps
@@ -190,6 +190,7 @@ class A2AService:
     def _inject_rate_check(self, sender_id: str) -> bool:
         """Return True if the sender is within rate limit, False if throttled."""
         import time
+
         now = time.monotonic()
         window = self._INJECT_RATE_WINDOW
         bucket = self._inject_rate_buckets.setdefault(sender_id, [])
@@ -207,11 +208,10 @@ class A2AService:
         """Strip characters that could escape the '[Platform from X]: ' REPL prefix."""
         return (
             value.replace("[", "")
-                 .replace("]", "")
-                 .replace("\n", " ")
-                 .replace("\r", "")
-                 .replace("\x00", "")
-            [:128]
+            .replace("]", "")
+            .replace("\n", " ")
+            .replace("\r", "")
+            .replace("\x00", "")[:128]
         )
 
     async def _try_channel_inject(
@@ -254,7 +254,10 @@ class A2AService:
         # Liveness check: only inject if the REPL is actively waiting for messages.
         # asyncio.Queue stores pending getters in _getters (internal, stable since 3.4).
         if not getattr(queue, "_getters", None):
-            logger.debug("A2A channel inject: no REPL waiter, skipping inject for task %s", task.id)
+            logger.debug(
+                "A2A channel inject: no REPL waiter, skipping inject for task %s",
+                task.id,
+            )
             return None
 
         text = self._extract_text(message)
@@ -272,12 +275,17 @@ class A2AService:
         if not self._inject_rate_check(sender_id):
             logger.warning(
                 "A2A channel inject: rate limit hit for sender=%s task=%s — falling back to agent",
-                sender_id, task.id,
+                sender_id,
+                task.id,
             )
             return None
 
         # Resolve and clamp inject_timeout
-        _timeout = inject_timeout if inject_timeout is not None else self._INJECT_TIMEOUT_DEFAULT
+        _timeout = (
+            inject_timeout
+            if inject_timeout is not None
+            else self._INJECT_TIMEOUT_DEFAULT
+        )
         _timeout = max(1.0, min(_timeout, self._INJECT_TIMEOUT_MAX))
 
         if blocking:
@@ -301,13 +309,16 @@ class A2AService:
             if not pushed:
                 logger.warning(
                     "A2A channel inject: queue full, falling back to agent for task %s sender=%s",
-                    task.id, sender_id,
+                    task.id,
+                    sender_id,
                 )
                 return None
 
             logger.info(
                 "A2A task %s injected into REPL channel (blocking, timeout=%ss) sender=%s",
-                task.id, _timeout, sender_id,
+                task.id,
+                _timeout,
+                sender_id,
             )
             await self._store.transition(task.id, A2ATaskState.WORKING)
 
@@ -317,7 +328,8 @@ class A2AService:
                 logger.warning(
                     "A2A channel inject: REPL did not reply within %ss for task %s — "
                     "falling back to autonomous agent",
-                    _timeout, task.id,
+                    _timeout,
+                    task.id,
                 )
                 if not _reply_future.done():
                     _reply_future.cancel()
@@ -372,13 +384,15 @@ class A2AService:
             if not pushed:
                 logger.warning(
                     "A2A channel inject: queue full, falling back to agent for task %s sender=%s",
-                    task.id, sender_id,
+                    task.id,
+                    sender_id,
                 )
                 return None
 
             logger.info(
                 "A2A task %s injected into REPL channel (non-blocking) sender=%s",
-                task.id, sender_id,
+                task.id,
+                sender_id,
             )
             await self._store.transition(task.id, A2ATaskState.SUBMITTED)
             return task
@@ -724,7 +738,9 @@ class A2AService:
             # Resolve webhook secret (env var wins, then token file)
             secret = os.environ.get("OBSCURA_WEBHOOK_SECRET", "").strip()
             if not secret:
-                _secret_file = Path.home() / ".obscura" / "network-gateway-webhook.secret"
+                _secret_file = (
+                    Path.home() / ".obscura" / "network-gateway-webhook.secret"
+                )
                 try:
                     for _line in _secret_file.read_text(encoding="utf-8").splitlines():
                         _line = _line.split("#", 1)[0].strip()

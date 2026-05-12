@@ -231,9 +231,15 @@ class ObscuraConfig(BaseModel):
     network_gateway_token: str = ""  # loaded from env/file only — never settings.json
     network_gateway_rate_limit: int = 60
     network_gateway_tailscale_enabled: bool = False
-    network_gateway_tailscale_url: str = ""  # e.g. https://modernizedai.tail91e620.ts.net
-    network_gateway_request_timeout: float = 120.0  # OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT
-    network_gateway_ws_ping_interval: float = 30.0  # OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL
+    network_gateway_tailscale_url: str = (
+        ""  # e.g. https://modernizedai.tail91e620.ts.net
+    )
+    network_gateway_request_timeout: float = (
+        120.0  # OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT
+    )
+    network_gateway_ws_ping_interval: float = (
+        30.0  # OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL
+    )
     network_gateway_session_ttl: float = 3600.0  # OBSCURA_NETWORK_GATEWAY_SESSION_TTL
 
     # Standalone agent — direct-chat server on port 18791 (LAN / Tailscale)
@@ -565,7 +571,9 @@ class ObscuraConfig(BaseModel):
             ),
             # Moltbook — AI agent social network platform
             moltbook_url=_str("MOLTBOOK_URL", "moltbook_url", "https://moltbook.com"),
-            moltbook_agent_username=_str("MOLTBOOK_AGENT_USERNAME", "moltbook_agent_username", ""),
+            moltbook_agent_username=_str(
+                "MOLTBOOK_AGENT_USERNAME", "moltbook_agent_username", ""
+            ),
             moltbook_api_key=_str("MOLTBOOK_API_KEY", "moltbook_api_key", ""),
             moltbook_auto_post_enabled=_bool_optin(
                 "MOLTBOOK_AUTO_POST_ENABLED",
@@ -607,7 +615,8 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_AGENT_MONITOR_MESSAGE",
                 "agent_monitor_message",
                 "",
-            ) or (
+            )
+            or (
                 "Hi — I am the Claude Code assistant monitoring this workspace. "
                 "Elliott has asked me to stay available to all running agents. "
                 "If you need help with any task — code, planning, debugging, research, tool calls — "

@@ -131,7 +131,7 @@ class RuntimeEventAdapter(EventAdapter):
                 metadata={"turn": event.turn, "delta": True, "thinking": True},
                 raw=_safe_raw(event),
                 visibility=UiVisibility.NORMAL,  # actual visibility decided
-                                                  # by renderer's thinking pane
+                # by renderer's thinking pane
             )
             return
 
@@ -198,7 +198,11 @@ class RuntimeEventAdapter(EventAdapter):
                 source=UiEventSource.SYSTEM,
                 title=str(kind.value),
                 content=event.text or "",
-                metadata={"turn": event.turn, "channel": "banner", "agent_kind": kind.value},
+                metadata={
+                    "turn": event.turn,
+                    "channel": "banner",
+                    "agent_kind": kind.value,
+                },
                 raw=_safe_raw(event),
                 visibility=UiVisibility.NORMAL,
             )

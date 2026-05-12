@@ -700,13 +700,17 @@ def tui(  # noqa: PLR0913 — Click options are individual params on purpose.
 
 @main.command(name="gateway")
 @click.option("--host", default=None, help="Bind address (default from config).")
-@click.option("--port", default=None, type=int, help="Listen port (default from config).")
+@click.option(
+    "--port", default=None, type=int, help="Listen port (default from config)."
+)
 @click.option(
     "--backend",
     default=None,
     help="LLM backend to use for gateway sessions (default from config).",
 )
-@click.option("--token", default=None, help="Bearer token override (default: auto-loaded).")
+@click.option(
+    "--token", default=None, help="Bearer token override (default: auto-loaded)."
+)
 @click.option(
     "--reload",
     is_flag=True,

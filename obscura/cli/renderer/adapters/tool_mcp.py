@@ -67,7 +67,7 @@ def _split_mcp_name(name: str) -> tuple[str, str]:
     """
     if not name.startswith(_MCP_PREFIX):
         return "", name
-    rest = name[len(_MCP_PREFIX):]
+    rest = name[len(_MCP_PREFIX) :]
     parts = rest.split("__", 1)
     if len(parts) == 2:
         return parts[0], parts[1]

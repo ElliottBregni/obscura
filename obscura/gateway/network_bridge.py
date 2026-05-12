@@ -72,7 +72,10 @@ class GatewayAgentRunner:
 
     async def _ensure_running(self) -> None:
         """Start the orchestrator if it is not already running."""
-        if self.orchestrator.state in (GatewayState.INITIALIZING, GatewayState.SHUTDOWN):
+        if self.orchestrator.state in (
+            GatewayState.INITIALIZING,
+            GatewayState.SHUTDOWN,
+        ):
             logger.info(
                 "GatewayAgentRunner: orchestrator not running (state=%s), starting",
                 self.orchestrator.state.name,
@@ -117,7 +120,9 @@ class GatewayAgentRunner:
                 max_turns=max_turns,
             )
 
-            response: str = result.get("response", "") if isinstance(result, dict) else str(result)
+            response: str = (
+                result.get("response", "") if isinstance(result, dict) else str(result)
+            )
             return response.strip() or "(no response)"
 
         except RuntimeError as exc:
@@ -188,7 +193,9 @@ class GatewayNetworkBridge:
         self._started = True
         logger.info(
             "GatewayNetworkBridge ready — gateway mode=%s",
-            self.orchestrator._current_mode.name if self.orchestrator._current_mode else "unknown",
+            self.orchestrator._current_mode.name
+            if self.orchestrator._current_mode
+            else "unknown",
         )
 
     async def stop(self) -> None:
@@ -312,7 +319,9 @@ class GatewayNetworkBridge:
             logger.warning(
                 "GatewayNetworkBridge: mode switch to %s failed; staying in %s",
                 mode.name,
-                self.orchestrator._current_mode.name if self.orchestrator._current_mode else "unknown",
+                self.orchestrator._current_mode.name
+                if self.orchestrator._current_mode
+                else "unknown",
             )
         return success
 
@@ -345,7 +354,9 @@ class GatewayNetworkBridge:
     # Session inspection / clearing
     # ------------------------------------------------------------------
 
-    async def get_session_context(self, channel_key: str) -> list[dict[str, str]] | None:
+    async def get_session_context(
+        self, channel_key: str
+    ) -> list[dict[str, str]] | None:
         """Return the stored conversation history for *channel_key*, or None.
 
         Delegates to ``self.router._store.get()`` and returns the

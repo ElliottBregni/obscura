@@ -24,26 +24,26 @@ logger = logging.getLogger(__name__)
 
 class EngineeringAutomationSkill(Skill):
     """Skill for automating engineering workflows.
-    
+
     Provides capabilities to:
     - Fetch Jira tickets
     - Review GitHub PRs
     - Generate standup summaries
     - Track sprint progress
     """
-    
+
     name = "engineering-automation"
     description = "Automate engineering workflows - Jira, GitHub PRs, standups"
     version = "1.0.0"
-    
+
     # Load config from .obscura/automation/
     config_path = Path.home() / ".obscura" / "automation" / "config.env"
-    
+
     def __init__(self) -> None:
         super().__init__()
         self._load_config()
         self._automation_module = None
-    
+
     def _load_config(self) -> None:
         """Load configuration from env file."""
         if self.config_path.exists():
@@ -53,21 +53,23 @@ class EngineeringAutomationSkill(Skill):
                     if line and not line.startswith("#") and "=" in line:
                         key, value = line.split("=", 1)
                         os.environ.setdefault(key, value)
-    
+
     def _get_automation(self):
         """Lazy load automation module."""
         if self._automation_module is None:
             # Import from .obscura/automation/
             import sys
+
             automation_path = Path.home() / ".obscura" / "automation"
             if str(automation_path) not in sys.path:
                 sys.path.insert(0, str(automation_path))
-            
+
             from engineering_workflow import EngineeringAutomation
+
             self._automation_module = EngineeringAutomation()
-        
+
         return self._automation_module
-    
+
     @property
     def capabilities(self) -> list[SkillCapability]:
         """Define skill capabilities."""
@@ -138,11 +140,11 @@ class EngineeringAutomationSkill(Skill):
                 capability_type=CapabilityType.QUERY,
             ),
         ]
-    
+
     async def execute(self, capability: str, params: dict[str, Any]) -> Any:
         """Execute a capability."""
         auto = self._get_automation()
-        
+
         try:
             if capability == "daily_digest":
                 digest = await auto.generate_daily_digest()
@@ -153,7 +155,7 @@ class EngineeringAutomationSkill(Skill):
                     "my_prs": digest.my_prs,
                     "standup_summary": digest.standup_summary,
                 }
-            
+
             elif capability == "my_tickets":
                 if auto.jira:
                     tickets = await auto.jira.get_assigned_tickets()
@@ -162,40 +164,42 @@ class EngineeringAutomationSkill(Skill):
                         tickets = [t for t in tickets if t["status"] == status_filter]
                     return tickets
                 return {"error": "Jira not configured"}
-            
+
             elif capability == "review_prs":
                 if auto.github:
                     review_prs, _ = await auto.github.get_prs_to_review()
                     return review_prs
                 return {"error": "GitHub not configured"}
-            
+
             elif capability == "review_pr":
                 pr_number = params.get("pr_number")
                 if not pr_number:
                     return {"error": "pr_number required"}
                 return await auto.review_pr(pr_number)
-            
+
             elif capability == "standup_summary":
                 digest = await auto.generate_daily_digest()
                 return digest.standup_summary
-            
+
             else:
                 return {"error": f"Unknown capability: {capability}"}
-                
+
         except Exception as e:
             logger.error(f"Error executing {capability}: {e}")
             return {"error": str(e)}
-    
+
     async def health_check(self) -> dict[str, Any]:
         """Check skill health."""
         auto = self._get_automation()
-        
+
         return {
             "status": "healthy",
             "jira_configured": auto.jira_config.is_configured() if auto.jira else False,
-            "github_configured": auto.github_config.is_configured() if auto.github else False,
+            "github_configured": auto.github_config.is_configured()
+            if auto.github
+            else False,
         }
-    
+
     async def shutdown(self) -> None:
         """Cleanup resources."""
         if self._automation_module:

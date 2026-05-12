@@ -207,7 +207,7 @@ async def test_dispatch_routes_to_adapter_send(
     mock_adapter.send.assert_called_once()
     call_args = mock_adapter.send.call_args
     assert call_args[0][0] == "+15550001234"  # recipient
-    assert call_args[0][1] == "hello back"    # response text
+    assert call_args[0][1] == "hello back"  # response text
 
 
 # ---------------------------------------------------------------------------
@@ -388,21 +388,15 @@ async def test_poll_daemon_dispatches_all_platforms(
 
     # Build per-platform adapters — unique message_ids so dedup doesn't suppress
     imessage_adapter = MagicMock()
-    imessage_adapter.poll = AsyncMock(
-        return_value=[_make_msg("imessage")]
-    )
+    imessage_adapter.poll = AsyncMock(return_value=[_make_msg("imessage")])
     imessage_adapter.send = AsyncMock(return_value=True)
 
     whatsapp_adapter = MagicMock()
-    whatsapp_adapter.poll = AsyncMock(
-        return_value=[_make_msg("whatsapp")]
-    )
+    whatsapp_adapter.poll = AsyncMock(return_value=[_make_msg("whatsapp")])
     whatsapp_adapter.send = AsyncMock(return_value=True)
 
     discord_adapter = MagicMock()
-    discord_adapter.poll = AsyncMock(
-        return_value=[_make_msg("discord")]
-    )
+    discord_adapter.poll = AsyncMock(return_value=[_make_msg("discord")])
     discord_adapter.send = AsyncMock(return_value=True)
 
     # Register with both daemon (poll loop) and router (send replies)
@@ -444,9 +438,7 @@ async def test_poll_daemon_isolates_platform_errors(
 
     # Healthy adapter — returns one message per poll
     healthy_adapter = MagicMock()
-    healthy_adapter.poll = AsyncMock(
-        return_value=[_make_msg("whatsapp")]
-    )
+    healthy_adapter.poll = AsyncMock(return_value=[_make_msg("whatsapp")])
     healthy_adapter.send = AsyncMock(return_value=True)
 
     daemon.register("imessage", broken_adapter)

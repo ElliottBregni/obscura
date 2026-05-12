@@ -63,7 +63,9 @@ ws_router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-async def _challenge_auth(websocket: WebSocket, token: str) -> tuple[str | None, str | None]:
+async def _challenge_auth(
+    websocket: WebSocket, token: str
+) -> tuple[str | None, str | None]:
     """Challenge-response auth. Returns ``(None, resume_session_id)`` on success, ``("failed", None)`` on failure.
 
     Flow:
@@ -85,7 +87,10 @@ async def _challenge_auth(websocket: WebSocket, token: str) -> tuple[str | None,
         if auth_header.lower().startswith("bearer "):
             raw = auth_header[7:].strip()
             if raw and _hmac.compare_digest(raw, token):
-                return (None, None)  # skip challenge; caller will register + get conn_id
+                return (
+                    None,
+                    None,
+                )  # skip challenge; caller will register + get conn_id
 
     nonce = _uuid.uuid4().hex
     try:
@@ -105,9 +110,13 @@ async def _challenge_auth(websocket: WebSocket, token: str) -> tuple[str | None,
     if max_proto < PROTOCOL_MIN_SUPPORTED or min_proto > PROTOCOL_VERSION:
         logger.warning(
             "Gateway WS protocol mismatch: client=[%d,%d] server=%d",
-            min_proto, max_proto, PROTOCOL_VERSION,
+            min_proto,
+            max_proto,
+            PROTOCOL_VERSION,
         )
-        await websocket.close(code=4002, reason=f"Protocol mismatch: server={PROTOCOL_VERSION}")
+        await websocket.close(
+            code=4002, reason=f"Protocol mismatch: server={PROTOCOL_VERSION}"
+        )
         return ("failed", None)
 
     if token:
@@ -286,7 +295,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
             active_session_ids.add(_resume_sid)
     await websocket.send_json(connect_ok)
 
-    await registry.broadcast_presence("connected", conn_id, endpoint="/v1/chat/ws", exclude=conn_id)
+    await registry.broadcast_presence(
+        "connected", conn_id, endpoint="/v1/chat/ws", exclude=conn_id
+    )
     await registry.send_health(websocket)
 
     async def _keepalive() -> None:

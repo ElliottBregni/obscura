@@ -163,7 +163,9 @@ async def test_rest_agent_card(client: httpx.AsyncClient) -> None:
 @pytest.mark.e2e
 async def test_rest_create_task_nonblocking(client: httpx.AsyncClient) -> None:
     """POST /a2a/v1/tasks (blocking=False) returns a pending task immediately."""
-    resp = await client.post("/a2a/v1/tasks", json={"message": _msg(), "blocking": False})
+    resp = await client.post(
+        "/a2a/v1/tasks", json={"message": _msg(), "blocking": False}
+    )
     assert resp.status_code == 200
 
     data = resp.json()
@@ -177,7 +179,9 @@ async def test_rest_create_task_nonblocking(client: httpx.AsyncClient) -> None:
 @pytest.mark.e2e
 async def test_rest_task_id_is_stable(client: httpx.AsyncClient) -> None:
     """Task ID returned at creation matches the ID returned by GET."""
-    create = (await client.post("/a2a/v1/tasks", json={"message": _msg(), "blocking": False})).json()
+    create = (
+        await client.post("/a2a/v1/tasks", json={"message": _msg(), "blocking": False})
+    ).json()
     task_id = create["id"]
 
     get = (await client.get(f"/a2a/v1/tasks/{task_id}")).json()
@@ -239,7 +243,9 @@ async def test_rest_cancel_nonexistent_task(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.e2e
-async def test_rest_canceled_task_not_cancelable_again(client: httpx.AsyncClient) -> None:
+async def test_rest_canceled_task_not_cancelable_again(
+    client: httpx.AsyncClient,
+) -> None:
     """Canceling an already-canceled task returns 409 (InvalidTransition)."""
     task_id = (
         await client.post("/a2a/v1/tasks", json={"message": _msg(), "blocking": False})
@@ -251,7 +257,9 @@ async def test_rest_canceled_task_not_cancelable_again(client: httpx.AsyncClient
 
 
 @pytest.mark.e2e
-async def test_rest_task_history_contains_user_message(client: httpx.AsyncClient) -> None:
+async def test_rest_task_history_contains_user_message(
+    client: httpx.AsyncClient,
+) -> None:
     """The created task's history includes the original user message."""
     text = "e2e history check"
     task = (
@@ -460,7 +468,9 @@ async def test_openclaw_definition_card_has_openclaw_tags() -> None:
         data = (await c.get("/.well-known/agent.json")).json()
 
     for skill in data["skills"]:
-        assert "openclaw" in skill["tags"], f"Skill {skill['id']!r} missing openclaw tag"
+        assert "openclaw" in skill["tags"], (
+            f"Skill {skill['id']!r} missing openclaw tag"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 """Low-level Discord client via Discord REST API v10."""
+
 from __future__ import annotations
 
 import asyncio
@@ -134,8 +135,7 @@ class DiscordClient:
         """
         if not self._token:
             raise RuntimeError(
-                "Discord bot token is missing. "
-                "Set DISCORD_BOT_TOKEN or pass bot_token."
+                "Discord bot token is missing. Set DISCORD_BOT_TOKEN or pass bot_token."
             )
         session = await self._get_session()
         async with session.get(f"{_BASE_URL}/users/@me") as resp:
@@ -205,9 +205,9 @@ class DiscordClient:
                 continue
             ts_str: str = raw.get("timestamp") or ""
             try:
-                ts = datetime.fromisoformat(
-                    ts_str.replace("Z", "+00:00")
-                ).astimezone(UTC)
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(
+                    UTC
+                )
             except (ValueError, AttributeError):
                 logger.debug("Failed to parse Discord timestamp", exc_info=True)
                 ts = datetime.now(tz=UTC)

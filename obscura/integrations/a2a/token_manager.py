@@ -87,7 +87,9 @@ class A2ATokenManager:
                 )
                 raw_gateway = data.get("gateway")
                 gateway: dict[str, Any] = (
-                    cast(dict[str, Any], raw_gateway) if isinstance(raw_gateway, dict) else {}
+                    cast(dict[str, Any], raw_gateway)
+                    if isinstance(raw_gateway, dict)
+                    else {}
                 )
                 raw_auth = gateway.get("auth")
                 auth: dict[str, Any] = (

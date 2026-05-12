@@ -90,7 +90,9 @@ def is_command_allowed(platform: str, sender_id: str) -> bool:
     entry.
     """
     return _is_sender_in_allowlist(
-        platform, sender_id, allowlist_key="command_allowlist",
+        platform,
+        sender_id,
+        allowlist_key="command_allowlist",
     )
 
 
@@ -115,12 +117,17 @@ def is_reply_allowed(platform: str, sender_id: str) -> bool:
     just ``command_allowlist`` and the same number to ``reply_allowlist``.
     """
     return _is_sender_in_allowlist(
-        platform, sender_id, allowlist_key="reply_allowlist",
+        platform,
+        sender_id,
+        allowlist_key="reply_allowlist",
     )
 
 
 def _is_sender_in_allowlist(
-    platform: str, sender_id: str, *, allowlist_key: str,
+    platform: str,
+    sender_id: str,
+    *,
+    allowlist_key: str,
 ) -> bool:
     sender_norm = _normalize_digits(sender_id)
     if not sender_norm:

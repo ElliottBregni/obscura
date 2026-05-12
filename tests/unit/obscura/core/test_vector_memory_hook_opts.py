@@ -2,6 +2,7 @@
 
 Change 4: top_k default 5 -> 3, add inject_vector_memory flag
 """
+
 from __future__ import annotations
 
 import inspect
@@ -72,11 +73,7 @@ async def test_inject_hook_passes_top_k_3_to_search() -> None:
 
     store.search_reranked.assert_called_once()
     call_kwargs = store.search_reranked.call_args
-    top_k_used = (
-        call_kwargs[1].get("top_k")
-        if call_kwargs[1]
-        else call_kwargs[0][2]
-    )
+    top_k_used = call_kwargs[1].get("top_k") if call_kwargs[1] else call_kwargs[0][2]
     assert top_k_used == 3
 
 

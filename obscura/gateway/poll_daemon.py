@@ -71,7 +71,10 @@ class GatewayPollDaemon:
                 name=f"poll-{platform}",
             )
             self._tasks[platform] = task
-            logger.info("GatewayPollDaemon: started poll loop for %s (daemon already running)", platform)
+            logger.info(
+                "GatewayPollDaemon: started poll loop for %s (daemon already running)",
+                platform,
+            )
 
     def deregister(self, platform: str) -> bool:
         """Cancel and remove a platform adapter.
@@ -175,7 +178,10 @@ class GatewayPollDaemon:
             try:
                 await asyncio.sleep(self._poll_interval)
             except asyncio.CancelledError:
-                logger.debug("GatewayPollDaemon: poll loop cancelled during sleep for %s", platform)
+                logger.debug(
+                    "GatewayPollDaemon: poll loop cancelled during sleep for %s",
+                    platform,
+                )
                 return
 
         logger.debug("GatewayPollDaemon: poll loop exiting for %s", platform)

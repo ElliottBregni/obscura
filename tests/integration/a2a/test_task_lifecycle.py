@@ -28,6 +28,7 @@ def user_message_dict(text: str = "ping") -> dict[str, Any]:
         "parts": [{"kind": "text", "text": text}],
     }
 
+
 pytestmark = [pytest.mark.integration]
 
 
@@ -166,9 +167,7 @@ async def test_rest_cancel_pending_task(a2a_http, store: InMemoryTaskStore) -> N
 
 
 @pytest.mark.asyncio
-async def test_rest_cancel_completed_task_returns_409(
-    a2a_http, patch_session
-) -> None:
+async def test_rest_cancel_completed_task_returns_409(a2a_http, patch_session) -> None:
     """Canceling a COMPLETED task returns HTTP 409 Conflict."""
     create = await a2a_http.post(
         "/a2a/v1/tasks",

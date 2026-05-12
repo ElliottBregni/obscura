@@ -1,4 +1,5 @@
 """Persistent polling state for Discord (tracks latest message IDs per channel)."""
+
 from __future__ import annotations
 
 import json

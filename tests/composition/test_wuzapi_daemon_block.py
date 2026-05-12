@@ -65,7 +65,8 @@ async def test_try_acquire_returns_false_when_port_taken() -> None:
     try:
         session = _make_session()
         result = await wuzapi_daemon._try_acquire_port_and_start_service(
-            session, port,
+            session,
+            port,
         )
         assert result is False
         assert len(session._resources) == 0
@@ -93,7 +94,8 @@ async def test_try_acquire_registers_resource_on_success(
     )
 
     result = await wuzapi_daemon._try_acquire_port_and_start_service(
-        session, port,
+        session,
+        port,
     )
     assert result is True
     assert len(session._resources) == 1
@@ -120,7 +122,8 @@ async def test_try_acquire_returns_false_when_service_start_raises(
     )
 
     result = await wuzapi_daemon._try_acquire_port_and_start_service(
-        session, port,
+        session,
+        port,
     )
     assert result is False
     assert len(session._resources) == 0

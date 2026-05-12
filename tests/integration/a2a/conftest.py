@@ -63,7 +63,9 @@ class _FakeSession:
         return self._text
 
     async def stream_loop(
-        self, prompt: str, **_: Any  # noqa: ARG002
+        self,
+        prompt: str,
+        **_: Any,  # noqa: ARG002
     ) -> AsyncIterator[AgentEvent]:
         """Yield a single TEXT_DELTA + AGENT_DONE so the SSE mapper fires."""
 

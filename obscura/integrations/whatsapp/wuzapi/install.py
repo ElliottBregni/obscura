@@ -54,8 +54,8 @@ class InstallError(RuntimeError):
 class InstallReport:
     """Per-step outcome of an install run."""
 
-    cloned: bool      # True if we cloned fresh (False = already present)
-    built: bool       # True if we rebuilt (False = binary already up to date)
+    cloned: bool  # True if we cloned fresh (False = already present)
+    built: bool  # True if we rebuilt (False = binary already up to date)
     plist_written: bool
     secrets_generated: bool
 
@@ -95,7 +95,9 @@ def clone_or_pull(*, repo_url: str = WUZAPI_REPO_URL) -> bool:
     if (src / ".git").is_dir():
         result = subprocess.run(
             ["git", "-C", str(src), "pull", "--ff-only"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
             logger.warning("git pull failed (continuing): %s", result.stderr.strip())
@@ -103,7 +105,9 @@ def clone_or_pull(*, repo_url: str = WUZAPI_REPO_URL) -> bool:
     src.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         ["git", "clone", "--depth", "1", repo_url, str(src)],
-        capture_output=True, text=True, timeout=180,
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
     if result.returncode != 0:
         raise InstallError(f"git clone failed: {result.stderr.strip()}")
@@ -134,7 +138,9 @@ def build_binary(*, force: bool = False) -> bool:
     result = subprocess.run(
         ["go", "build", "-o", str(binary), "."],
         cwd=str(src),
-        capture_output=True, text=True, timeout=300,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if result.returncode != 0:
         raise InstallError(f"go build failed: {result.stderr.strip()}")

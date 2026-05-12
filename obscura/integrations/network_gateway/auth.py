@@ -103,12 +103,18 @@ class GatewayBearerAuthMiddleware(BaseHTTPMiddleware):
         # Tailscale identity bypass: if Tailscale Serve is active and the request
         # carries a valid tailscale-user-login header, treat the user as authenticated.
         import re as _re_ts
+
         ts_login = request.headers.get("tailscale-user-login", "")
-        if ts_login and getattr(request.app.state, "gateway_config", None) and \
-                getattr(request.app.state.gateway_config, "tailscale_enabled", False):
+        if (
+            ts_login
+            and getattr(request.app.state, "gateway_config", None)
+            and getattr(request.app.state.gateway_config, "tailscale_enabled", False)
+        ):
             # Basic sanity: header must look like an email or Tailscale user ID
-            if _re_ts.match(r'^[\w.+\-]+@[\w.\-]+$', ts_login):
-                logger.debug("GatewayBearerAuth: tailnet user %s auto-approved", ts_login)
+            if _re_ts.match(r"^[\w.+\-]+@[\w.\-]+$", ts_login):
+                logger.debug(
+                    "GatewayBearerAuth: tailnet user %s auto-approved", ts_login
+                )
                 response = await call_next(request)
                 response.headers["X-Tailscale-User"] = ts_login
                 return response
@@ -192,7 +198,9 @@ class GatewayRateLimitMiddleware(BaseHTTPMiddleware):
                 self._gc_counter = 0
                 stale_cutoff = now - _RATE_WINDOW_SECONDS
                 stale_keys = [
-                    k for k, v in self._buckets.items() if not v or v[-1] <= stale_cutoff
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
                 ]
                 for k in stale_keys:
                     del self._buckets[k]
@@ -304,9 +312,7 @@ class WebhookRateLimitMiddleware(BaseHTTPMiddleware):
             if len(fresh) >= self._max:
                 self._buckets[ip] = fresh
                 retry_after = int(_RATE_WINDOW_SECONDS - (now - fresh[0]) + 1)
-                logger.warning(
-                    "Webhook rate limit exceeded: ip=%s path=%s", ip, path
-                )
+                logger.warning("Webhook rate limit exceeded: ip=%s path=%s", ip, path)
                 return JSONResponse(
                     status_code=429,
                     content={"error": "rate_limit_exceeded"},
@@ -321,7 +327,9 @@ class WebhookRateLimitMiddleware(BaseHTTPMiddleware):
                 self._gc_counter = 0
                 stale_cutoff = now - _RATE_WINDOW_SECONDS
                 stale_keys = [
-                    k for k, v in self._buckets.items() if not v or v[-1] <= stale_cutoff
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
                 ]
                 for k in stale_keys:
                     del self._buckets[k]
@@ -406,7 +414,9 @@ class ControlPlaneRateLimitMiddleware(BaseHTTPMiddleware):
                 self._gc_counter = 0
                 stale_cutoff = now - _RATE_WINDOW_SECONDS
                 stale_keys = [
-                    k for k, v in self._buckets.items() if not v or v[-1] <= stale_cutoff
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
                 ]
                 for k in stale_keys:
                     del self._buckets[k]

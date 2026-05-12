@@ -908,7 +908,9 @@ class Agent:
 
         Stores context in memory, runs the agent, captures result.
         """
-        assert self._client is not None or (self._session is not None and self._session.backend is not None), "Agent.start() must be called before run()"
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before run()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -969,7 +971,9 @@ class Agent:
 
     async def stream(self, prompt: str, **context: Any) -> AsyncIterator[str]:
         """Stream the agent's response."""
-        assert self._client is not None or (self._session is not None and self._session.backend is not None), "Agent.start() must be called before stream()"
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before stream()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -1023,9 +1027,9 @@ class Agent:
 
         Returns the concatenated text output from all turns.
         """
-        assert self._client is not None or (self._session is not None and self._session.backend is not None), (
-            "Agent.start() must be called before run_loop()"
-        )
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before run_loop()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -1101,9 +1105,9 @@ class Agent:
         that happens: text deltas, tool calls, tool results, turn
         boundaries, and final completion.
         """
-        assert self._client is not None or (self._session is not None and self._session.backend is not None), (
-            "Agent.start() must be called before stream_loop()"
-        )
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before stream_loop()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()

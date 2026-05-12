@@ -156,18 +156,19 @@ Result: {result}
 {notes}
 """
 
+
 def generate_skill(category: str, name: str, description: str, index: int) -> None:
     """Generate a single skill."""
     skill_dir = SKILLS_DIR / category / name
     skill_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Generate SKILL.md
     trigger = name.replace("-", "_")
     capability = description.split(" ")[0].lower()
     example = f"Can you {description.lower()}?"
     result = f"Successfully {description.lower()}"
     notes = f"Skill #{index} in {category} category"
-    
+
     skill_md = SKILL_TEMPLATE.format(
         name=name,
         description=description,
@@ -177,26 +178,27 @@ def generate_skill(category: str, name: str, description: str, index: int) -> No
         result=result,
         notes=notes,
     )
-    
+
     (skill_dir / "SKILL.md").write_text(skill_md)
-    
+
     # Generate minimal Python module if needed
     init_file = skill_dir / "__init__.py"
     if not init_file.exists():
         init_file.write_text(f'"""{name} skill module."""\n')
 
+
 def main():
     """Generate all 100 skills."""
     print("🚀 Generating 100 Obscura skills...")
     print()
-    
+
     total = 0
     for category, skills in SKILL_CATEGORIES.items():
         print(f"📁 {category}: {len(skills)} skills")
         for i, (name, description) in enumerate(skills, 1):
             generate_skill(category, name, description, total + i)
         total += len(skills)
-    
+
     print()
     print(f"✅ Generated {total} skills in {SKILLS_DIR}")
     print()
@@ -204,6 +206,7 @@ def main():
     for category in SKILL_CATEGORIES:
         count = len(SKILL_CATEGORIES[category])
         print(f"  - {category}: {count} skills")
+
 
 if __name__ == "__main__":
     main()

@@ -3,6 +3,7 @@
 Change 1: Non-core tools appear as deferred lines; core tools get full description.
 Change 2: is_shadow specs are excluded from the listing entirely.
 """
+
 from __future__ import annotations
 
 from typing import Any

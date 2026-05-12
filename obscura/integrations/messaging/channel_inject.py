@@ -25,8 +25,8 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_MAX_TEXT_LEN: int = 4_096   # chars — injected text is truncated to this
-_MAX_LABEL_LEN: int = 128    # chars — display_name / sender_id prefix cap
+_MAX_TEXT_LEN: int = 4_096  # chars — injected text is truncated to this
+_MAX_LABEL_LEN: int = 128  # chars — display_name / sender_id prefix cap
 _QUEUE_MAXSIZE: int = 64
 
 # Module-level singleton — created at import time (thread-safe).
@@ -71,7 +71,12 @@ class ChannelMessage:
 
 def _sanitize_label(value: str) -> str:
     """Strip bracket/newline chars that could escape the '[Platform from X]: ' prefix."""
-    return value.replace("[", "").replace("]", "").replace("\n", " ").replace("\r", "")[:_MAX_LABEL_LEN]
+    return (
+        value.replace("[", "")
+        .replace("]", "")
+        .replace("\n", " ")
+        .replace("\r", "")[:_MAX_LABEL_LEN]
+    )
 
 
 def _sanitize_text(text: str) -> str:
@@ -168,13 +173,13 @@ async def _uds_fanout(msg: ChannelMessage) -> None:
         label = msg.display_name or msg.sender_id
         payload = {
             # Keys consumed by _on_peer_message in composition/blocks/uds_inbox.py
-            "platform":     msg.platform,
-            "sender_id":    msg.sender_id,
+            "platform": msg.platform,
+            "sender_id": msg.sender_id,
             "display_name": label,
-            "from":         label,          # legacy fallback
-            "from_session": msg.platform,   # legacy fallback
-            "text":         msg.text,
-            "backend":      f"channel:{msg.platform}",
+            "from": label,  # legacy fallback
+            "from_session": msg.platform,  # legacy fallback
+            "text": msg.text,
+            "backend": f"channel:{msg.platform}",
         }
         for session_id in peers:
             await send_message(session_id, payload)
@@ -182,4 +187,10 @@ async def _uds_fanout(msg: ChannelMessage) -> None:
         logger.debug("channel_inject: UDS fanout failed", exc_info=True)
 
 
-__all__ = ["ChannelMessage", "get_channel_queue", "push_channel_message", "subscribe", "unsubscribe"]
+__all__ = [
+    "ChannelMessage",
+    "get_channel_queue",
+    "push_channel_message",
+    "subscribe",
+    "unsubscribe",
+]

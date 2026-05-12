@@ -3,6 +3,7 @@
 Change 3: SNIP_TOOL_OUTPUT_THRESHOLD lowered from 10_000 to 3_000
 Change 7: should_auto_compact threshold lowered from 0.80 to 0.70
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -61,13 +62,17 @@ def test_snip_tool_outputs_snips_above_3000_tokens() -> None:
     large_text = "word " * 4000
     messages = [_make_tool_result_message(large_text)]
 
-    result, snipped_count, tokens_freed = snip_tool_outputs(messages, threshold_tokens=3_000)
+    result, snipped_count, tokens_freed = snip_tool_outputs(
+        messages, threshold_tokens=3_000
+    )
     assert snipped_count == 1
     assert tokens_freed > 0
     # The result text should contain the snip marker.
     result_block = result[0]["content"][0]
     text_out = result_block.get("text", "")
-    assert "[snipped:" in text_out, f"Expected [snipped:] in output, got: {text_out[:200]!r}"
+    assert "[snipped:" in text_out, (
+        f"Expected [snipped:] in output, got: {text_out[:200]!r}"
+    )
 
 
 def test_snip_tool_outputs_keeps_small_result_intact() -> None:
@@ -78,7 +83,9 @@ def test_snip_tool_outputs_keeps_small_result_intact() -> None:
     small_text = "word " * 100
     messages = [_make_tool_result_message(small_text)]
 
-    _result, snipped_count, tokens_freed = snip_tool_outputs(messages, threshold_tokens=3_000)
+    _result, snipped_count, tokens_freed = snip_tool_outputs(
+        messages, threshold_tokens=3_000
+    )
     assert snipped_count == 0
     assert tokens_freed == 0
 

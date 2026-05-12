@@ -124,8 +124,9 @@ def _extract_text(message: dict[str, Any]) -> str:
             text = _from_inner(outer_d.get("message"))
             if text:
                 return text
-    logger.debug("wuzapi: no text extractable from message variant: %s",
-                 sorted(message.keys()))
+    logger.debug(
+        "wuzapi: no text extractable from message variant: %s", sorted(message.keys())
+    )
     return ""
 
 
@@ -204,8 +205,9 @@ class WuzapiAdapter:
                 f"wuzapi session not linked (connected={status.connected}). "
                 "Run `obscura whatsapp link` to scan QR and link your account."
             )
-        logger.info("wuzapi adapter ready: jid=%s account_id=%s",
-                    status.jid, self._account_id)
+        logger.info(
+            "wuzapi adapter ready: jid=%s account_id=%s", status.jid, self._account_id
+        )
 
     # ---------- inbound (polling protocol, kept for compat) ----------
 
@@ -239,7 +241,9 @@ class WuzapiAdapter:
         else:
             wire_target = re.sub(r"\D", "", recipient)
             if not wire_target:
-                logger.warning("wuzapi.send: empty recipient after digit-strip: %r", recipient)
+                logger.warning(
+                    "wuzapi.send: empty recipient after digit-strip: %r", recipient
+                )
                 return False
         try:
             resp = await self._client.send_text(
@@ -262,7 +266,8 @@ class WuzapiAdapter:
             }
         if len(self._recent_send_texts) > 256:
             self._recent_send_texts = [
-                (t, ts) for (t, ts) in self._recent_send_texts
+                (t, ts)
+                for (t, ts) in self._recent_send_texts
                 if now - ts < self._echo_window_s * 2
             ]
         logger.info("wuzapi.send id=%s to=%s", resp.id, wire_target)
@@ -270,9 +275,7 @@ class WuzapiAdapter:
 
     # ---------- webhook event handling ----------
 
-    def handle_event(
-        self, envelope: WuzapiWebhookEnvelope
-    ) -> PlatformMessage | None:
+    def handle_event(self, envelope: WuzapiWebhookEnvelope) -> PlatformMessage | None:
         """Convert a wuzapi webhook envelope to a :class:`PlatformMessage`.
 
         Returns ``None`` if the event isn't a normal inbound text we should

@@ -58,14 +58,10 @@ async def test_send_message(bridge: OpenClawBridge) -> None:
     task = await bridge.send("ping")
 
     assert task.status.state == A2ATaskState.COMPLETED, (
-        f"Expected completed, got {task.status.state!r}. "
-        f"Task id={task.id}"
+        f"Expected completed, got {task.status.state!r}. Task id={task.id}"
     )
     assert task.artifacts, "Expected at least one artifact in completed task"
-    reply_text = "".join(
-        p.text for p in task.artifacts[0].parts
-        if hasattr(p, "text")
-    )
+    reply_text = "".join(p.text for p in task.artifacts[0].parts if hasattr(p, "text"))
     assert reply_text.strip(), "Expected non-empty reply text from OpenClaw"
 
 
@@ -127,9 +123,11 @@ async def test_openclaw_context_multiturn(bridge: OpenClawBridge) -> None:
     )
 
     # The second reply should mention the name (best-effort; models vary)
-    t2_reply = "".join(
-        p.text for p in t2.artifacts[0].parts if hasattr(p, "text")
-    ) if t2.artifacts else ""
+    t2_reply = (
+        "".join(p.text for p in t2.artifacts[0].parts if hasattr(p, "text"))
+        if t2.artifacts
+        else ""
+    )
     if t2_reply:
         # Soft assertion — log rather than fail if the model doesn't recall the name.
         # This catches obvious failures (empty reply, error message) without being

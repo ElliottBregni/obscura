@@ -59,7 +59,9 @@ from obscura.integrations.messaging.store import (
 
 logger = logging.getLogger(__name__)
 
-_MAX_REPLY_LEN: int = 4_000  # chars — platform reply size cap (WhatsApp/Telegram limit ~4096)
+_MAX_REPLY_LEN: int = (
+    4_000  # chars — platform reply size cap (WhatsApp/Telegram limit ~4096)
+)
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,8 @@ async def test_start_sends_composing_immediately() -> None:
     tracker = _TypingTracker(client, refresh_interval_s=60.0)
     await tracker.start("alice@s.whatsapp.net")
     client.set_chat_presence.assert_awaited_once_with(
-        "alice@s.whatsapp.net", state="composing",
+        "alice@s.whatsapp.net",
+        state="composing",
     )
     tracker.cancel_all()
 
@@ -77,7 +78,8 @@ async def test_stop_with_no_active_tracker_still_sends_paused() -> None:
     tracker = _TypingTracker(client)
     await tracker.stop("alice@s.whatsapp.net")
     client.set_chat_presence.assert_awaited_once_with(
-        "alice@s.whatsapp.net", state="paused",
+        "alice@s.whatsapp.net",
+        state="paused",
     )
 
 
@@ -87,7 +89,9 @@ async def test_keepalive_refreshes_composing() -> None:
     """Keepalive re-sends composing every refresh_interval_s."""
     client = _make_client()
     tracker = _TypingTracker(
-        client, refresh_interval_s=0.02, max_duration_s=10.0,
+        client,
+        refresh_interval_s=0.02,
+        max_duration_s=10.0,
     )
     await tracker.start("alice@s.whatsapp.net")
     # Let several refreshes fire
@@ -104,7 +108,9 @@ async def test_keepalive_auto_clears_on_max_duration() -> None:
     without anyone calling stop()."""
     client = _make_client()
     tracker = _TypingTracker(
-        client, refresh_interval_s=0.01, max_duration_s=0.05,
+        client,
+        refresh_interval_s=0.01,
+        max_duration_s=0.05,
     )
     await tracker.start("alice@s.whatsapp.net")
     # Wait past the max duration
@@ -166,6 +172,7 @@ async def test_cancel_all_clears_all_tasks() -> None:
 def test_strip_device_suffix_with_device() -> None:
     """The linked-device JID 'phone:device@server' becomes 'phone@server'."""
     from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+
     assert (
         _strip_device_suffix("12316333624:14@s.whatsapp.net")
         == "12316333624@s.whatsapp.net"
@@ -175,6 +182,7 @@ def test_strip_device_suffix_with_device() -> None:
 def test_strip_device_suffix_without_device() -> None:
     """JID without a device segment passes through unchanged."""
     from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+
     assert (
         _strip_device_suffix("12316333624@s.whatsapp.net")
         == "12316333624@s.whatsapp.net"
@@ -184,12 +192,14 @@ def test_strip_device_suffix_without_device() -> None:
 def test_strip_device_suffix_no_at_sign() -> None:
     """Edge case: input without '@' returns unchanged (don't synthesize a server)."""
     from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+
     assert _strip_device_suffix("12316333624:14") == "12316333624:14"
 
 
 def test_strip_device_suffix_group_jid() -> None:
     """Group JIDs (@g.us) shouldn't be affected — groups don't have device suffixes."""
     from obscura.integrations.whatsapp.wuzapi.service import _strip_device_suffix
+
     assert (
         _strip_device_suffix("12316333624-1234567890@g.us")
         == "12316333624-1234567890@g.us"
@@ -205,22 +215,26 @@ def test_strip_device_suffix_group_jid() -> None:
 def _allowlist_config(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     """Point command_acl at a temp config.toml with a known reply_allowlist."""
     from textwrap import dedent
+
     monkeypatch.setattr(
         "obscura.integrations.messaging.command_acl.resolve_obscura_home",
         lambda: tmp_path,
     )
-    (tmp_path / "config.toml").write_text(dedent(
-        """
+    (tmp_path / "config.toml").write_text(
+        dedent(
+            """
         [messaging.whatsapp]
         reply_allowlist = ["2316333624"]
         """,
-    ))
+        )
+    )
     return tmp_path
 
 
 def test_route_self_chat_lid_form_allowed(_allowlist_config: Any) -> None:
     """Self-chat with both Chat and Sender in LID form."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="187437204672730",
         chat_jid="187437204672730@lid",
@@ -233,6 +247,7 @@ def test_route_self_chat_lid_form_allowed(_allowlist_config: Any) -> None:
 def test_route_self_chat_phone_form_allowed(_allowlist_config: Any) -> None:
     """Self-chat with both Chat and Sender in phone-JID form."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="12316333624",
         chat_jid="12316333624@s.whatsapp.net",
@@ -248,6 +263,7 @@ def test_route_self_chat_mixed_phone_chat_lid_sender(_allowlist_config: Any) -> 
     but the self_jid_digits reference makes the match work because
     chat matches the linked device's phone JID."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="187437204672730",
         chat_jid="12316333624@s.whatsapp.net",
@@ -262,6 +278,7 @@ def test_route_self_chat_mixed_chat_lid_phone_sender(_allowlist_config: Any) -> 
     """Inverse of the above: Chat=LID, Sender=phone. Sender matches
     the linked device's phone JID."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="12316333624",
         chat_jid="187437204672730@lid",
@@ -272,13 +289,16 @@ def test_route_self_chat_mixed_chat_lid_phone_sender(_allowlist_config: Any) -> 
     assert "linked device" in reason
 
 
-def test_route_mixed_form_without_self_jid_falls_through(_allowlist_config: Any) -> None:
+def test_route_mixed_form_without_self_jid_falls_through(
+    _allowlist_config: Any,
+) -> None:
     """If session_status fetch failed (self_jid_digits empty), the
     Chat=phone/Sender=LID mixed case has no way to resolve and falls
     through to the DM-intercept-deny branch. This is the pre-fix
     behavior — documented so it's clear the self_jid path is what
     saves it."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="187437204672730",
         chat_jid="12316333624@s.whatsapp.net",
@@ -292,6 +312,7 @@ def test_route_mixed_form_without_self_jid_falls_through(_allowlist_config: Any)
 def test_route_inbound_from_allowlisted_sender_allowed(_allowlist_config: Any) -> None:
     """A non-self message from an allowlisted sender is allowed."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, _reason = _should_route_inbound(
         sender_id="2316333624",
         chat_jid="2316333624@s.whatsapp.net",
@@ -304,6 +325,7 @@ def test_route_inbound_from_friend_denied(_allowlist_config: Any) -> None:
     """The original 'AI texted my friend' bug: friend's message comes
     in, friend not in allowlist, dropped before reaching agent."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="5551234567",
         chat_jid="5551234567@s.whatsapp.net",
@@ -318,6 +340,7 @@ def test_route_user_typing_to_friend_denied(_allowlist_config: Any) -> None:
     must not trigger the agent — would result in agent intercepting
     user's outbound to others."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="187437204672730",  # user's LID
         chat_jid="5551234567@s.whatsapp.net",  # friend's JID
@@ -330,6 +353,7 @@ def test_route_user_typing_to_friend_denied(_allowlist_config: Any) -> None:
 def test_route_group_chat_denied_by_default(_allowlist_config: Any) -> None:
     """Group chats are denied by default, even if the user is the sender."""
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, reason = _should_route_inbound(
         sender_id="187437204672730",
         chat_jid="12345-67890@g.us",
@@ -340,22 +364,27 @@ def test_route_group_chat_denied_by_default(_allowlist_config: Any) -> None:
 
 
 def test_route_group_chat_allowed_if_jid_in_allowlist(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If a specific group JID is in reply_allowlist, messages in that
     group are routed through to the agent."""
     from textwrap import dedent
+
     monkeypatch.setattr(
         "obscura.integrations.messaging.command_acl.resolve_obscura_home",
         lambda: tmp_path,
     )
-    (tmp_path / "config.toml").write_text(dedent(
-        """
+    (tmp_path / "config.toml").write_text(
+        dedent(
+            """
         [messaging.whatsapp]
         reply_allowlist = ["12345-67890@g.us"]
         """,
-    ))
+        )
+    )
     from obscura.integrations.whatsapp.wuzapi.service import _should_route_inbound
+
     allow, _reason = _should_route_inbound(
         sender_id="5551234567",
         chat_jid="12345-67890@g.us",

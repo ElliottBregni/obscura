@@ -22,7 +22,9 @@ def _evt(kind: AgentEventKind, **kwargs) -> AgentEvent:
 
 def test_mcp_adapter_handles_mcp_prefixed_tools() -> None:
     a = MCPToolEventAdapter()
-    assert a.handles(_evt(AgentEventKind.TOOL_CALL, tool_name="mcp__github__list_repos"))
+    assert a.handles(
+        _evt(AgentEventKind.TOOL_CALL, tool_name="mcp__github__list_repos")
+    )
     assert not a.handles(_evt(AgentEventKind.TOOL_CALL, tool_name="run_command"))
     assert not a.handles(_evt(AgentEventKind.TEXT_DELTA, text="hi"))
 
@@ -94,7 +96,9 @@ def test_shell_adapter_titles_call_with_command() -> None:
 
 def test_shell_adapter_marks_nonzero_exit_as_error() -> None:
     a = ShellToolEventAdapter()
-    payload = '{"ok": false, "exit_code": 1, "stdout": "", "stderr": "command not found"}'
+    payload = (
+        '{"ok": false, "exit_code": 1, "stdout": "", "stderr": "command not found"}'
+    )
     out = list(
         a.adapt(
             _evt(

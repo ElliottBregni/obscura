@@ -609,7 +609,9 @@ class ModernRenderer:
         if title:
             body_parts.append(_styled(title, STYLE_DIM))
         if ui.content:
-            content_str = ui.content if isinstance(ui.content, str) else repr(ui.content)
+            content_str = (
+                ui.content if isinstance(ui.content, str) else repr(ui.content)
+            )
             snippet = _sanitize(content_str)
             if len(snippet) > 200:
                 snippet = snippet[:200] + "…"

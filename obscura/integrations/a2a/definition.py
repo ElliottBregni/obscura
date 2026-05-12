@@ -312,8 +312,7 @@ def openclaw_compatible_definition(
     """
     # Add "openclaw" tag to all skills
     skills_with_oc = [
-        replace(s, tags=[*s.tags, "openclaw"])
-        for s in DEFAULT_AGENT_DEFINITION.skills
+        replace(s, tags=[*s.tags, "openclaw"]) for s in DEFAULT_AGENT_DEFINITION.skills
     ]
     # Add "kimi-k2" tag specifically to the tool-use skill
     skills_with_oc = [

@@ -33,10 +33,8 @@ class OpenClawMode(BaseMode):
         # Try HTTP health check
         try:
             import httpx
-            response = httpx.get(
-                f"{config.openclaw.gateway_url}/health",
-                timeout=2.0
-            )
+
+            response = httpx.get(f"{config.openclaw.gateway_url}/health", timeout=2.0)
             return response.status_code == 200
         except Exception:
             return False

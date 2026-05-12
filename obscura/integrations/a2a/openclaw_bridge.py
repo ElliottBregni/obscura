@@ -361,14 +361,18 @@ class OpenClawBridge:
         """Extract the assistant reply text from an OpenAI-style response body."""
         raw_choices = body.get("choices")
         choices: list[dict[str, Any]] = (
-            cast(list[dict[str, Any]], raw_choices) if isinstance(raw_choices, list) else []
+            cast(list[dict[str, Any]], raw_choices)
+            if isinstance(raw_choices, list)
+            else []
         )
         if not choices:
             logger.warning("OpenClaw returned empty choices list")
             return ""
         first: dict[str, Any] = choices[0]
         raw_message = first.get("message")
-        message: dict[str, Any] = cast(dict[str, Any], raw_message) if raw_message else {}
+        message: dict[str, Any] = (
+            cast(dict[str, Any], raw_message) if raw_message else {}
+        )
         content = message.get("content")
         return str(content) if content is not None else ""
 
@@ -743,14 +747,16 @@ class OpenClawBridge:
             )
 
         try:
-            async with http.stream("POST", "/v1/chat/completions", json=payload) as resp:
+            async with http.stream(
+                "POST", "/v1/chat/completions", json=payload
+            ) as resp:
                 resp.raise_for_status()
                 self._circuit_breaker.record_success()
                 async for raw_line in resp.aiter_lines():
                     line = raw_line.strip()
                     if not line or not line.startswith("data:"):
                         continue
-                    data_str = line[len("data:"):].strip()
+                    data_str = line[len("data:") :].strip()
                     if data_str == "[DONE]":
                         break
                     try:

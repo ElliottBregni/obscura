@@ -215,7 +215,8 @@ class WuzapiClient(_WuzapiBaseClient):
     ) -> WuzapiConnectResponse:
         """POST /session/connect — initiate WhatsApp websocket + QR flow."""
         return await self._request_typed(
-            "POST", "/session/connect",
+            "POST",
+            "/session/connect",
             response_model=WuzapiConnectResponse,
             json_body=req or WuzapiConnectRequest(),
         )
@@ -245,7 +246,8 @@ class WuzapiClient(_WuzapiBaseClient):
     async def send_text(self, req: WuzapiSendTextRequest) -> WuzapiSendTextResponse:
         """POST /chat/send/text — outbound text message."""
         return await self._request_typed(
-            "POST", "/chat/send/text",
+            "POST",
+            "/chat/send/text",
             response_model=WuzapiSendTextResponse,
             json_body=req,
         )
@@ -272,7 +274,9 @@ class WuzapiClient(_WuzapiBaseClient):
             "POST",
             "/chat/presence",
             json_body=WuzapiChatPresenceRequest(
-                phone=phone, state=state, media=media,
+                phone=phone,
+                state=state,
+                media=media,
             ),
         )
 
@@ -340,7 +344,8 @@ class WuzapiAdminClient(_WuzapiBaseClient):
 
     async def create_user(self, req: WuzapiCreateUserRequest) -> WuzapiUser:
         return await self._request_typed(
-            "POST", "/admin/users",
+            "POST",
+            "/admin/users",
             response_model=WuzapiUser,
             json_body=req,
         )

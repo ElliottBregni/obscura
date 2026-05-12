@@ -83,6 +83,7 @@ def _cleanup_dead_session_state() -> int:
     """
     import json
     import os
+
     home = resolve_obscura_home()
     sessions_dir = home / "sessions"
     sockets_dir = home / "sockets"
@@ -135,6 +136,7 @@ async def _try_acquire_port_and_start_service(
     leaving us as a peer for the next promotion cycle.
     """
     import socket
+
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         probe.bind(("127.0.0.1", webhook_port))
@@ -145,6 +147,7 @@ async def _try_acquire_port_and_start_service(
 
     try:
         from obscura.integrations.whatsapp.wuzapi.service import wuzapi_service
+
         cm = wuzapi_service(
             webhook_port=webhook_port,
             session_id=session.session_id,
@@ -240,6 +243,7 @@ async def install_wuzapi_daemon(
     # Probe the sidecar — don't crash REPL boot if wuzapi is down.
     try:
         from obscura.integrations.whatsapp.wuzapi import lifecycle
+
         if not lifecycle.status().is_running:
             print(
                 "[wuzapi] skip: sidecar not running (run `obscura whatsapp install` "

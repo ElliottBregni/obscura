@@ -36,34 +36,34 @@ __all__ = [
 class UiEventKind(StrEnum):
     """High-level category the renderer dispatches on."""
 
-    MESSAGE = "message"          # assistant / user / model text
-    STATUS = "status"            # ephemeral activity indicator
-    TOOL_CALL = "tool_call"      # pre-execution tool invocation
+    MESSAGE = "message"  # assistant / user / model text
+    STATUS = "status"  # ephemeral activity indicator
+    TOOL_CALL = "tool_call"  # pre-execution tool invocation
     TOOL_RESULT = "tool_result"  # post-execution tool outcome
-    ERROR = "error"              # surfaced error (any source)
-    DEBUG = "debug"              # debug-mode-only diagnostic
-    TRACE = "trace"              # adapter/normalizer decision trace
+    ERROR = "error"  # surfaced error (any source)
+    DEBUG = "debug"  # debug-mode-only diagnostic
+    TRACE = "trace"  # adapter/normalizer decision trace
 
 
 class UiEventSource(StrEnum):
     """Logical origin of the event."""
 
     USER = "user"
-    AGENT = "agent"          # final user-facing agent text
-    MODEL = "model"          # raw model output (thinking, deltas)
-    TOOL = "tool"            # tool call/result
-    RUNTIME = "runtime"      # agent loop lifecycle (turn start, etc.)
-    SYSTEM = "system"        # operator/CLI events (compaction, plan, etc.)
-    PROVIDER = "provider"    # backend SDK system messages
+    AGENT = "agent"  # final user-facing agent text
+    MODEL = "model"  # raw model output (thinking, deltas)
+    TOOL = "tool"  # tool call/result
+    RUNTIME = "runtime"  # agent loop lifecycle (turn start, etc.)
+    SYSTEM = "system"  # operator/CLI events (compaction, plan, etc.)
+    PROVIDER = "provider"  # backend SDK system messages
 
 
 class UiVisibility(StrEnum):
     """How the renderer should treat the event in normal mode."""
 
-    NORMAL = "normal"            # always shown
-    COLLAPSED = "collapsed"      # shown but truncated/folded
-    HIDDEN = "hidden"            # never shown
-    DEBUG_ONLY = "debug_only"    # shown only when display mode is DEBUG
+    NORMAL = "normal"  # always shown
+    COLLAPSED = "collapsed"  # shown but truncated/folded
+    HIDDEN = "hidden"  # never shown
+    DEBUG_ONLY = "debug_only"  # shown only when display mode is DEBUG
 
 
 class UiSeverity(StrEnum):

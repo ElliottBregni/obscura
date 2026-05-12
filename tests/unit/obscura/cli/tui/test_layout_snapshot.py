@@ -272,12 +272,9 @@ async def test_long_live_region_label_does_not_push_toolbar_off_screen() -> None
 
     # All four bottom rows of the layout must still be present.
     assert "quit" in rows[-3] and "commands" in rows[-3], (
-        f"Toolbar pushed off-screen by long live-region preview; "
-        f"rows[-3]={rows[-3]!r}"
+        f"Toolbar pushed off-screen by long live-region preview; rows[-3]={rows[-3]!r}"
     )
-    assert "─" in rows[-2], (
-        f"Footer separator missing; rows[-2]={rows[-2]!r}"
-    )
+    assert "─" in rows[-2], f"Footer separator missing; rows[-2]={rows[-2]!r}"
     assert rows[-1].startswith("session "), (
         f"Footer header missing; rows[-1]={rows[-1]!r}"
     )

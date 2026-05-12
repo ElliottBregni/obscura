@@ -1,4 +1,5 @@
 """Tests for is_shadow flag on MCP shadow specs (Change 2 - discovery side)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -32,7 +33,9 @@ async def test_discover_mcp_tools_sets_is_shadow_true() -> None:
         async def list_tools(self) -> list[Any]:
             return fake_tools
 
-    with patch("obscura.integrations.mcp.discovery.MCPClient", return_value=_FakeClient()):
+    with patch(
+        "obscura.integrations.mcp.discovery.MCPClient", return_value=_FakeClient()
+    ):
         specs = await discover_mcp_tools(
             [{"name": "test_server", "transport": "stdio", "command": "echo"}]
         )
@@ -70,7 +73,9 @@ async def test_register_external_mcp_tools_registers_shadow_specs() -> None:
         async def list_tools(self) -> list[Any]:
             return fake_tools
 
-    with patch("obscura.integrations.mcp.discovery.MCPClient", return_value=_FakeClient()):
+    with patch(
+        "obscura.integrations.mcp.discovery.MCPClient", return_value=_FakeClient()
+    ):
         await register_external_mcp_tools(
             backend,
             [{"name": "myserver", "transport": "stdio", "command": "echo"}],

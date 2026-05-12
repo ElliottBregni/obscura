@@ -83,15 +83,19 @@ def whatsapp_group() -> None:
 @whatsapp_group.command("install")
 @click.option(
     "--port",
-    type=int, default=18793, show_default=True,
+    type=int,
+    default=18793,
+    show_default=True,
     help="Loopback port the wuzapi sidecar will listen on.",
 )
 @click.option(
-    "--force-rebuild", is_flag=True,
+    "--force-rebuild",
+    is_flag=True,
     help="Rebuild the Go binary even if it's already present.",
 )
 @click.option(
-    "--skip-start", is_flag=True,
+    "--skip-start",
+    is_flag=True,
     help="Don't kickstart the LaunchAgent after install (manual control).",
 )
 def install_cmd(port: int, force_rebuild: bool, skip_start: bool) -> None:
@@ -124,8 +128,12 @@ def install_cmd(port: int, force_rebuild: bool, skip_start: bool) -> None:
         sys.exit(1)
 
     if status.is_running:
-        click.secho(f"wuzapi running on 127.0.0.1:{port} (pid={status.pid})", fg="green")
-        click.echo("Next: `obscura whatsapp link` to scan QR and link your WhatsApp account.")
+        click.secho(
+            f"wuzapi running on 127.0.0.1:{port} (pid={status.pid})", fg="green"
+        )
+        click.echo(
+            "Next: `obscura whatsapp link` to scan QR and link your WhatsApp account."
+        )
     else:
         click.secho("wuzapi loaded but not yet running — check logs.", fg="yellow")
 
@@ -137,11 +145,16 @@ def install_cmd(port: int, force_rebuild: bool, skip_start: bool) -> None:
 
 @whatsapp_group.command("link")
 @click.option(
-    "--name", default="obscura", show_default=True,
+    "--name",
+    default="obscura",
+    show_default=True,
     help="wuzapi user slot name for this WhatsApp account.",
 )
 @click.option(
-    "--timeout", type=float, default=180.0, show_default=True,
+    "--timeout",
+    type=float,
+    default=180.0,
+    show_default=True,
     help="Seconds to wait for the QR scan before giving up.",
 )
 def link_cmd(name: str, timeout: float) -> None:
@@ -152,12 +165,11 @@ def link_cmd(name: str, timeout: float) -> None:
             user = await ensure_user(admin, name=name)
         click.echo(f"wuzapi user: {user.name} (id={user.id[:8]}…)")
         if user.logged_in:
-            click.secho(
-                f"already linked: jid={user.jid}  no scan needed.", fg="green"
-            )
+            click.secho(f"already linked: jid={user.jid}  no scan needed.", fg="green")
             return
 
         async with WuzapiClient(token=user.token) as client:
+
             async def on_qr(qr: QRArtifacts) -> None:
                 click.echo(f"QR saved to {qr.png_path}")
                 if qr.ascii_text:
@@ -167,9 +179,7 @@ def link_cmd(name: str, timeout: float) -> None:
                     click.echo("Opening QR in Preview (macOS)…")
 
             try:
-                status = await link_session(
-                    client, on_qr=on_qr, timeout_s=timeout
-                )
+                status = await link_session(client, on_qr=on_qr, timeout_s=timeout)
             except TimeoutError:
                 click.secho("Timed out waiting for QR scan.", fg="red", err=True)
                 sys.exit(1)
@@ -196,8 +206,9 @@ def status_cmd() -> None:
     try:
         token = load_user_token()
     except RuntimeError:
-        click.secho("No wuzapi user yet — run `obscura whatsapp link` first.",
-                    fg="yellow")
+        click.secho(
+            "No wuzapi user yet — run `obscura whatsapp link` first.", fg="yellow"
+        )
         return
 
     async def _probe() -> None:
@@ -223,7 +234,11 @@ def status_cmd() -> None:
 
 @whatsapp_group.command("logs")
 @click.option(
-    "-n", "--lines", type=int, default=50, show_default=True,
+    "-n",
+    "--lines",
+    type=int,
+    default=50,
+    show_default=True,
     help="Number of lines from the tail of each log file.",
 )
 def logs_cmd(lines: int) -> None:
@@ -276,34 +291,47 @@ _DEFAULT_AUTO_RESPOND_SYSTEM_PROMPT = (
 
 @whatsapp_group.command("daemon")
 @click.option(
-    "--webhook-port", type=int, default=18794, show_default=True,
+    "--webhook-port",
+    type=int,
+    default=18794,
+    show_default=True,
     help="Loopback port the inbound webhook receiver listens on.",
 )
 @click.option(
-    "--auto-configure-webhook/--no-auto-configure-webhook", default=True,
+    "--auto-configure-webhook/--no-auto-configure-webhook",
+    default=True,
     help="Reconfigure wuzapi's webhook URL to point at this receiver on startup.",
 )
 @click.option(
-    "--auto-respond/--no-auto-respond", default=False,
+    "--auto-respond/--no-auto-respond",
+    default=False,
     help="Generate an LLM reply for each inbound message and send it back via "
-         "WhatsApp. When off, inbound messages only land in the REPL queue.",
+    "WhatsApp. When off, inbound messages only land in the REPL queue.",
 )
 @click.option(
     "--auto-respond-backend",
     type=click.Choice(["claude", "copilot", "openai", "moonshot", "localllm"]),
-    default="claude", show_default=True,
+    default="claude",
+    show_default=True,
     help="Which backend powers the auto-reply when --auto-respond is on.",
 )
 @click.option(
-    "--auto-respond-system-prompt", default=_DEFAULT_AUTO_RESPOND_SYSTEM_PROMPT,
+    "--auto-respond-system-prompt",
+    default=_DEFAULT_AUTO_RESPOND_SYSTEM_PROMPT,
     help="System prompt for the auto-respond agent.",
 )
 @click.option(
-    "--auto-respond-timeout", type=float, default=60.0, show_default=True,
+    "--auto-respond-timeout",
+    type=float,
+    default=60.0,
+    show_default=True,
     help="Max seconds to wait for the LLM reply before giving up.",
 )
 @click.option(
-    "--auto-respond-max-chars", type=int, default=1000, show_default=True,
+    "--auto-respond-max-chars",
+    type=int,
+    default=1000,
+    show_default=True,
     help="Truncate replies to this many characters before sending (WhatsApp limit ~4096).",
 )
 def daemon_cmd(
@@ -358,7 +386,8 @@ def daemon_cmd(
                 click.echo(f"wuzapi webhook -> http://127.0.0.1:{webhook_port}/inbound")
             except WuzapiError as exc:
                 click.secho(
-                    f"warning: could not auto-configure webhook: {exc}", fg="yellow",
+                    f"warning: could not auto-configure webhook: {exc}",
+                    fg="yellow",
                 )
 
         click.echo(f"wuzapi daemon: listening on 127.0.0.1:{webhook_port}/inbound")
@@ -409,7 +438,8 @@ def _build_auto_responder(
         )
         try:
             async with await build_a2a_session(
-                config, task_id=f"wapp-{msg.message_id[:12]}",
+                config,
+                task_id=f"wapp-{msg.message_id[:12]}",
             ) as session:
                 result = await asyncio.wait_for(
                     session.run_loop_to_text(msg.text),
@@ -448,7 +478,8 @@ def _build_auto_responder(
 
 @whatsapp_group.command("uninstall")
 @click.option(
-    "--wipe-state", is_flag=True,
+    "--wipe-state",
+    is_flag=True,
     help="Also delete ~/.obscura/wuzapi/ (session DB, secrets — irrecoverable).",
 )
 @click.confirmation_option(prompt="Stop wuzapi and remove LaunchAgent?")
@@ -457,7 +488,9 @@ def uninstall_cmd(wipe_state: bool) -> None:
     do_uninstall(wipe_state=wipe_state)
     click.secho(
         "uninstalled."
-        + (" State wiped." if wipe_state else " State preserved at ~/.obscura/wuzapi/."),
+        + (
+            " State wiped." if wipe_state else " State preserved at ~/.obscura/wuzapi/."
+        ),
         fg="green",
     )
 

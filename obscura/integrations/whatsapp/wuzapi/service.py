@@ -176,7 +176,9 @@ class _TypingTracker:
             await self._client.set_chat_presence(jid, state="composing")
         except Exception:
             logger.debug(
-                "typing: initial composing failed for %s", jid, exc_info=True,
+                "typing: initial composing failed for %s",
+                jid,
+                exc_info=True,
             )
         self._tasks[jid] = asyncio.create_task(
             self._keepalive(jid),
@@ -191,7 +193,9 @@ class _TypingTracker:
             await self._client.set_chat_presence(jid, state="paused")
         except Exception:
             logger.debug(
-                "typing: paused failed for %s", jid, exc_info=True,
+                "typing: paused failed for %s",
+                jid,
+                exc_info=True,
             )
 
     async def _keepalive(self, jid: str) -> None:
@@ -205,17 +209,22 @@ class _TypingTracker:
                     return
                 try:
                     await self._client.set_chat_presence(
-                        jid, state="composing",
+                        jid,
+                        state="composing",
                     )
                 except Exception:
                     logger.debug(
-                        "typing: refresh failed for %s", jid, exc_info=True,
+                        "typing: refresh failed for %s",
+                        jid,
+                        exc_info=True,
                     )
             try:
                 await self._client.set_chat_presence(jid, state="paused")
             except Exception:
                 logger.debug(
-                    "typing: auto-clear failed for %s", jid, exc_info=True,
+                    "typing: auto-clear failed for %s",
+                    jid,
+                    exc_info=True,
                 )
         finally:
             self._tasks.pop(jid, None)
@@ -257,6 +266,7 @@ class _ReplyRateLimit:
     def allow(self, sender: str) -> tuple[bool, str]:
         """Return (allowed, reason). On True, records the send timestamp."""
         import time as _time
+
         now = _time.time()
         h = self._history.setdefault(sender, [])
         # Prune anything older than an hour
@@ -328,7 +338,9 @@ def _to_channel_message(
             return await adapter.send(reply_target, text)
         except Exception:
             logger.debug(
-                "progress ping send failed for %s", reply_target, exc_info=True,
+                "progress ping send failed for %s",
+                reply_target,
+                exc_info=True,
             )
             return False
 
@@ -378,7 +390,8 @@ async def wuzapi_service(
     await adapter.start()
 
     rate_limit = _ReplyRateLimit(
-        min_gap_s=reply_min_gap_s, max_per_hour=reply_max_per_hour,
+        min_gap_s=reply_min_gap_s,
+        max_per_hour=reply_max_per_hour,
     )
     typing = _TypingTracker(client)
 
@@ -417,7 +430,9 @@ async def wuzapi_service(
         )
         logger.info(
             "wuzapi → REPL: from=%s text=%r delivered=%s",
-            msg.sender_id, msg.text[:80], delivered,
+            msg.sender_id,
+            msg.text[:80],
+            delivered,
         )
         if auto_responder is not None:
             asyncio.create_task(_safe_auto_respond(auto_responder, msg, adapter))
@@ -427,7 +442,10 @@ async def wuzapi_service(
     async def on_event(env: WuzapiWebhookEnvelope) -> None:
         msg = adapter.handle_event(env)
         if msg is None:
-            print(f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)", flush=True)
+            print(
+                f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)",
+                flush=True,
+            )
             return
         # Belt-and-suspenders: the adapter already drops blank text but in
         # case downstream parsing slips through, double-check here so we
@@ -450,14 +468,18 @@ async def wuzapi_service(
 
     app = build_webhook_app(on_event=on_event)
     config = uvicorn.Config(
-        app, host=webhook_host, port=webhook_port,
-        log_level="warning", access_log=False,
+        app,
+        host=webhook_host,
+        port=webhook_port,
+        log_level="warning",
+        access_log=False,
     )
     server = uvicorn.Server(config)
 
     serve_task = asyncio.create_task(server.serve())
-    logger.info("wuzapi service: webhook listening on %s:%d",
-                webhook_host, webhook_port)
+    logger.info(
+        "wuzapi service: webhook listening on %s:%d", webhook_host, webhook_port
+    )
 
     # Announce this session's id to the linked device's self-chat so
     # the user can see which obscura REPL is currently the bridge

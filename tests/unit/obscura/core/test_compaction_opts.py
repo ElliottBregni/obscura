@@ -2,6 +2,7 @@
 
 Change 5: extract_memories max_tokens 1024 -> 512
 """
+
 from __future__ import annotations
 
 import pytest

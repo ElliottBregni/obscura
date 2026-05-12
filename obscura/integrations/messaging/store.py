@@ -11,7 +11,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from obscura.core.paths import resolve_obscura_home
-from obscura.integrations.messaging.cred_cipher import decrypt_credentials, encrypt_credentials
+from obscura.integrations.messaging.cred_cipher import (
+    decrypt_credentials,
+    encrypt_credentials,
+)
 from obscura.integrations.messaging.models import ConversationState
 
 
@@ -23,6 +26,7 @@ def _encrypt_creds(creds: dict) -> str:
 def _decrypt_creds(stored: str) -> dict:
     """Thin wrapper so callers in this module stay readable."""
     return decrypt_credentials(stored)
+
 
 if TYPE_CHECKING:
     from pathlib import Path

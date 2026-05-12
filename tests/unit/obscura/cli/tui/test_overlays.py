@@ -146,7 +146,8 @@ def test_tool_approval_overlay_renders_summary_and_scope() -> None:
         tool_input={"command": "git status"},
     )
     rendered = "".join(
-        text for _, text in overlays.tool_approval._render_text()  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+        text
+        for _, text in overlays.tool_approval._render_text()  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
     )
     assert "action:" in rendered
     assert "scope:" in rendered

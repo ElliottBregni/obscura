@@ -224,7 +224,7 @@ def test_tool_result_json_dict_extracts_stdout() -> None:
     body = "".join(r.text for r in state.transcript[-1].runs)
     # Body should surface the readable stdout, not the JSON envelope.
     assert "hello" in body
-    assert "{\"ok\":" not in body
+    assert '{"ok":' not in body
     assert "run_command" in body
     assert "✓" in body
 

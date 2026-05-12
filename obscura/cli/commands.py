@@ -5586,7 +5586,9 @@ async def cmd_tui(args: str, ctx: REPLContext) -> str | None:
 
     if not val:
         print_info(f"TUI display mode: {current}")
-        print_info("Use /tui debug for raw payloads + traces, /tui normal for clean output.")
+        print_info(
+            "Use /tui debug for raw payloads + traces, /tui normal for clean output."
+        )
         return None
 
     if val not in ("normal", "debug"):

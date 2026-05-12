@@ -75,9 +75,7 @@ async def install_uds_inbox(
                 or "peer"
             )
             display_name = (
-                payload.get("display_name")
-                or payload.get("from")
-                or sender_id
+                payload.get("display_name") or payload.get("from") or sender_id
             )
 
             logger.info("[%s:%s] %s", platform, display_name[:24], text[:120])
@@ -91,15 +89,19 @@ async def install_uds_inbox(
             async def _noop_reply(response: str) -> bool:  # noqa: ARG001
                 return True
 
-            pushed = push_channel_message(ChannelMessage(
-                platform=platform,
-                sender_id=sender_id,
-                display_name=display_name,
-                text=text,
-                reply_fn=_noop_reply,
-            ))
+            pushed = push_channel_message(
+                ChannelMessage(
+                    platform=platform,
+                    sender_id=sender_id,
+                    display_name=display_name,
+                    text=text,
+                    reply_fn=_noop_reply,
+                )
+            )
             if not pushed:
-                logger.warning("install_uds_inbox: channel queue full, peer message dropped")
+                logger.warning(
+                    "install_uds_inbox: channel queue full, peer message dropped"
+                )
         except Exception:
             logger.debug("install_uds_inbox: on_peer_message failed", exc_info=True)
 

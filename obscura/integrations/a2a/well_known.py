@@ -186,12 +186,16 @@ class WellKnownAgentRegistry:
         registry = cls()
         raw = config.get("well_known_agents", [])
         if not isinstance(raw, list):
-            logger.warning("well_known_agents must be a list; got %r — skipping", type(raw))
+            logger.warning(
+                "well_known_agents must be a list; got %r — skipping", type(raw)
+            )
             return registry
 
         for entry in raw:
             if not isinstance(entry, dict):
-                logger.warning("Skipping non-dict entry in well_known_agents: %r", entry)
+                logger.warning(
+                    "Skipping non-dict entry in well_known_agents: %r", entry
+                )
                 continue
             name = str(entry.get("name", "")).strip()
             url = str(entry.get("url", "")).strip()

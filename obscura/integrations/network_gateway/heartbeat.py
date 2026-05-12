@@ -59,7 +59,9 @@ class HeartbeatTask:
         self._task = asyncio.create_task(self._run())
         logger.info(
             "HeartbeatTask started: interval=%.0fs backend=%s target=%s",
-            self._interval, self._backend, self._target,
+            self._interval,
+            self._backend,
+            self._target,
         )
         return self._task
 
@@ -89,38 +91,51 @@ class HeartbeatTask:
         logger.info("HeartbeatTask: firing heartbeat turn")
 
         # Notify clients that heartbeat is starting
-        await self._registry.broadcast({
-            "type": "heartbeat",
-            "event": "start",
-            "timestamp": self._last_run,
-        })
+        await self._registry.broadcast(
+            {
+                "type": "heartbeat",
+                "event": "start",
+                "timestamp": self._last_run,
+            }
+        )
 
         try:
-            from obscura.integrations.network_gateway.chat_completions import _stream_agent
+            from obscura.integrations.network_gateway.chat_completions import (
+                _stream_agent,
+            )
+
             accumulated: list[str] = []
-            async for delta in _stream_agent(self._backend, self._backend, "", self._prompt):
+            async for delta in _stream_agent(
+                self._backend, self._backend, "", self._prompt
+            ):
                 accumulated.append(delta)
-                await self._registry.broadcast({
-                    "type": "heartbeat",
-                    "event": "token",
-                    "content": delta,
-                })
+                await self._registry.broadcast(
+                    {
+                        "type": "heartbeat",
+                        "event": "token",
+                        "content": delta,
+                    }
+                )
             result = "".join(accumulated)
         except Exception:
             logger.exception("HeartbeatTask: agent turn failed")
-            await self._registry.broadcast({
-                "type": "heartbeat",
-                "event": "error",
-                "message": "heartbeat turn failed",
-            })
+            await self._registry.broadcast(
+                {
+                    "type": "heartbeat",
+                    "event": "error",
+                    "message": "heartbeat turn failed",
+                }
+            )
             return
 
-        await self._registry.broadcast({
-            "type": "heartbeat",
-            "event": "done",
-            "result": result,
-            "timestamp": time.time(),
-        })
+        await self._registry.broadcast(
+            {
+                "type": "heartbeat",
+                "event": "done",
+                "result": result,
+                "timestamp": time.time(),
+            }
+        )
         logger.info("HeartbeatTask: done, result_len=%d", len(result))
 
         # Deliver to last active platform channel if target == "last"

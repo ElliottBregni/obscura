@@ -549,9 +549,7 @@ def _register_webhook_endpoints(app: "FastAPI") -> None:
             body = await request.json()
             task_id: str = body.get("id", "unknown")
             state: str = body.get("status", {}).get("state", "unknown")
-            _wh_logger.info(
-                "A2A webhook received: task_id=%s state=%s", task_id, state
-            )
+            _wh_logger.info("A2A webhook received: task_id=%s state=%s", task_id, state)
 
             # Extract text from artifacts and push into channel inject queue
             artifacts: list[Any] = body.get("artifacts", [])

@@ -152,9 +152,7 @@ async def _channel_progress_pinger(
 
         idx = 0
         while not done_event.is_set():
-            msg = _CHANNEL_PROGRESS_MESSAGES[
-                idx % len(_CHANNEL_PROGRESS_MESSAGES)
-            ]
+            msg = _CHANNEL_PROGRESS_MESSAGES[idx % len(_CHANNEL_PROGRESS_MESSAGES)]
             try:
                 await progress_fn(msg)
             except Exception:
@@ -216,9 +214,7 @@ async def _run_slash_command_for_channel(
     if not captured:
         captured = f"✓ ran {user_input.strip()}"
     if len(captured) > _CHANNEL_REPLY_MAX_CHARS:
-        captured = (
-            captured[:_CHANNEL_REPLY_MAX_CHARS] + "\n…[truncated]"
-        )
+        captured = captured[:_CHANNEL_REPLY_MAX_CHARS] + "\n…[truncated]"
     if reply_fn is not None:
         try:
             await reply_fn(captured)
@@ -701,10 +697,15 @@ async def repl(
                             ChannelMessage as _ChannelMessage,
                             get_channel_queue,
                         )
+
                         _ch_queue = get_channel_queue()
                         _prompt_coro = bordered_prompt(session, status=prompt_status)
-                        _prompt_task: asyncio.Task[str] = asyncio.ensure_future(_prompt_coro)
-                        _channel_task: asyncio.Task[_ChannelMessage] = asyncio.ensure_future(_ch_queue.get())
+                        _prompt_task: asyncio.Task[str] = asyncio.ensure_future(
+                            _prompt_coro
+                        )
+                        _channel_task: asyncio.Task[_ChannelMessage] = (
+                            asyncio.ensure_future(_ch_queue.get())
+                        )
                         _done, _pending = await asyncio.wait(
                             {_prompt_task, _channel_task},
                             return_when=asyncio.FIRST_COMPLETED,
@@ -732,17 +733,15 @@ async def repl(
                             # /help" and the slash branch's startswith
                             # check fails silently — the literal text gets
                             # sent to the agent as a prompt instead.
-                            if (
-                                _raw_text.startswith(("/", "$", "@"))
-                                and is_command_allowed(
-                                    _ch_msg.platform, _ch_msg.sender_id,
-                                )
+                            if _raw_text.startswith(
+                                ("/", "$", "@")
+                            ) and is_command_allowed(
+                                _ch_msg.platform,
+                                _ch_msg.sender_id,
                             ):
                                 user_input = _raw_text
                             else:
-                                user_input = (
-                                    f"[{_plat} from {_label}]: {_ch_msg.text}"
-                                )
+                                user_input = f"[{_plat} from {_label}]: {_ch_msg.text}"
                             ctx._pending_channel_reply = _ch_msg.reply_fn  # type: ignore[attr-defined]
                             # progress_fn (if the platform provides one)
                             # carries "still working" pings during long
@@ -756,8 +755,13 @@ async def repl(
                             ctx._pending_channel_reply = None  # type: ignore[attr-defined]
                             ctx._pending_channel_progress = None  # type: ignore[attr-defined]
                     except Exception:
-                        _log.debug("channel inject race failed, falling back to plain prompt", exc_info=True)
-                        user_input = await bordered_prompt(session, status=prompt_status)
+                        _log.debug(
+                            "channel inject race failed, falling back to plain prompt",
+                            exc_info=True,
+                        )
+                        user_input = await bordered_prompt(
+                            session, status=prompt_status
+                        )
                         ctx._pending_channel_reply = None  # type: ignore[attr-defined]
                         ctx._pending_channel_progress = None  # type: ignore[attr-defined]
                         _is_channel_injected = False
@@ -862,11 +866,15 @@ async def repl(
                         # the helper since they'd break the operator's
                         # local session.
                         _captured_reply_fn = getattr(
-                            ctx, "_pending_channel_reply", None,
+                            ctx,
+                            "_pending_channel_reply",
+                            None,
                         )
                         ctx._pending_channel_reply = None  # type: ignore[attr-defined]
                         await _run_slash_command_for_channel(
-                            user_input, ctx, _captured_reply_fn,
+                            user_input,
+                            ctx,
+                            _captured_reply_fn,
                         )
                         continue
 
@@ -1211,7 +1219,8 @@ async def repl(
                     _pinger_done_event = asyncio.Event()
                     _pinger_task = asyncio.create_task(
                         _channel_progress_pinger(
-                            _captured_progress_fn, _pinger_done_event,
+                            _captured_progress_fn,
+                            _pinger_done_event,
                         ),
                         name="channel-progress-pinger",
                     )
@@ -1253,7 +1262,10 @@ async def repl(
                             if resp_text:
                                 import asyncio as _asyncio
                                 import collections.abc as _abc
-                                if callable(_reply_fn) and isinstance(_reply_fn, _abc.Callable):
+
+                                if callable(_reply_fn) and isinstance(
+                                    _reply_fn, _abc.Callable
+                                ):
                                     _asyncio.get_running_loop().create_task(
                                         _reply_fn(resp_text)  # type: ignore[arg-type]
                                     )

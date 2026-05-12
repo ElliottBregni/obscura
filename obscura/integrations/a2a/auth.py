@@ -76,7 +76,9 @@ def _resolve_tokens(token_file: Path | None) -> frozenset[str]:
     if env_val:
         tokens = [t.strip() for t in env_val.split(":") if t.strip()]
         if tokens:
-            logger.debug("A2A auth: loaded %d token(s) from OBSCURA_A2A_TOKEN", len(tokens))
+            logger.debug(
+                "A2A auth: loaded %d token(s) from OBSCURA_A2A_TOKEN", len(tokens)
+            )
             return frozenset(tokens)
 
     path = token_file if token_file is not None else _DEFAULT_TOKEN_FILE
@@ -166,7 +168,9 @@ class A2ABearerAuthMiddleware(BaseHTTPMiddleware):
 
 def _extract_bearer(request: Request) -> str | None:
     """Return the raw token from ``Authorization: Bearer <token>``, or ``None``."""
-    header = request.headers.get("Authorization") or request.headers.get("authorization")
+    header = request.headers.get("Authorization") or request.headers.get(
+        "authorization"
+    )
     if not header:
         return None
     lower = header.lower()
@@ -178,7 +182,10 @@ def _extract_bearer(request: Request) -> str | None:
 
 def _client_ip(request: Request) -> str:
     """Best-effort client IP extraction."""
-    if os.environ.get("OBSCURA_TRUST_PROXY_HEADERS", "").strip().lower() in ("1", "true"):
+    if os.environ.get("OBSCURA_TRUST_PROXY_HEADERS", "").strip().lower() in (
+        "1",
+        "true",
+    ):
         xff = request.headers.get("X-Forwarded-For")
         if xff:
             return xff.split(",")[0].strip()
@@ -227,7 +234,9 @@ class A2ARateLimitMiddleware(BaseHTTPMiddleware):
         window_seconds: int = _RATE_LIMIT_WINDOW_SECONDS,
     ) -> None:
         super().__init__(app)
-        self._max = max_requests if max_requests is not None else _default_a2a_rate_limit()
+        self._max = (
+            max_requests if max_requests is not None else _default_a2a_rate_limit()
+        )
         self._window = window_seconds
         # { ip: [timestamp, ...] }
         self._buckets: dict[str, list[float]] = {}
@@ -284,7 +293,9 @@ class A2ARateLimitMiddleware(BaseHTTPMiddleware):
                 self._gc_counter = 0
                 stale_cutoff = now - self._window
                 stale_keys = [
-                    k for k, v in self._buckets.items() if not v or v[-1] <= stale_cutoff
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
                 ]
                 for k in stale_keys:
                     del self._buckets[k]

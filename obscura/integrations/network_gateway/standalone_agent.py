@@ -293,7 +293,9 @@ _CHAT_UI_HTML = """<!DOCTYPE html>
 # ---------------------------------------------------------------------------
 
 
-async def _sa_challenge_auth(websocket: WebSocket, token: str) -> tuple[bool, str | None]:
+async def _sa_challenge_auth(
+    websocket: WebSocket, token: str
+) -> tuple[bool, str | None]:
     """Challenge-response auth for standalone agent WS. Returns ``(True, resume_sid)`` on success.
 
     Flow:
@@ -334,9 +336,13 @@ async def _sa_challenge_auth(websocket: WebSocket, token: str) -> tuple[bool, st
     if max_proto < PROTOCOL_MIN_SUPPORTED or min_proto > PROTOCOL_VERSION:
         logger.warning(
             "Standalone agent WS protocol mismatch: client=[%d,%d] server=%d",
-            min_proto, max_proto, PROTOCOL_VERSION,
+            min_proto,
+            max_proto,
+            PROTOCOL_VERSION,
         )
-        await websocket.close(code=4002, reason=f"Protocol mismatch: server={PROTOCOL_VERSION}")
+        await websocket.close(
+            code=4002, reason=f"Protocol mismatch: server={PROTOCOL_VERSION}"
+        )
         return (False, None)
 
     if token:
@@ -550,10 +556,17 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
         repl_sessions: list[dict[str, str]] = []
         try:
             from obscura.kairos.uds_messaging import discover_peers
-            repl_sessions = [{"session_id": sid, "type": "repl"} for sid in discover_peers()]
+
+            repl_sessions = [
+                {"session_id": sid, "type": "repl"} for sid in discover_peers()
+            ]
         except Exception:
             pass
-        return {"ws_clients": ws_clients, "repl_sessions": repl_sessions, "total": len(ws_clients) + len(repl_sessions)}
+        return {
+            "ws_clients": ws_clients,
+            "repl_sessions": repl_sessions,
+            "total": len(ws_clients) + len(repl_sessions),
+        }
 
     # -- Embedded chat UI --------------------------------------------------
 
@@ -629,7 +642,9 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                 active_session_ids.add(_resume_sid)
         await websocket.send_json(connect_ok)
 
-        await registry.broadcast_presence("connected", conn_id, endpoint="/ws", exclude=conn_id)
+        await registry.broadcast_presence(
+            "connected", conn_id, endpoint="/ws", exclude=conn_id
+        )
         await registry.send_health(websocket)
 
         async def _keepalive() -> None:
@@ -699,7 +714,9 @@ def create_standalone_agent_app(config: GatewayConfig | None = None) -> FastAPI:
                     try:
                         await reply_fn(assistant_text)
                     except Exception:
-                        logger.exception("Failed to send reply to platform via reply_fn")
+                        logger.exception(
+                            "Failed to send reply to platform via reply_fn"
+                        )
 
         except WebSocketDisconnect:
             logger.debug("Standalone agent WS disconnected ids=%s", active_session_ids)

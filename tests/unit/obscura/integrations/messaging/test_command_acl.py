@@ -124,9 +124,13 @@ def test_jid_suffix_stripped(_obscura_home: Path) -> None:
         command_allowlist = ["2316333624"]
         """,
     )
-    assert command_acl.is_command_allowed(
-        "whatsapp", "12316333624@s.whatsapp.net",
-    ) is True
+    assert (
+        command_acl.is_command_allowed(
+            "whatsapp",
+            "12316333624@s.whatsapp.net",
+        )
+        is True
+    )
 
 
 def test_pretty_formatted_sender(_obscura_home: Path) -> None:
@@ -138,9 +142,13 @@ def test_pretty_formatted_sender(_obscura_home: Path) -> None:
         command_allowlist = ["2316333624"]
         """,
     )
-    assert command_acl.is_command_allowed(
-        "whatsapp", "+1 (231) 633-3624",
-    ) is True
+    assert (
+        command_acl.is_command_allowed(
+            "whatsapp",
+            "+1 (231) 633-3624",
+        )
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------

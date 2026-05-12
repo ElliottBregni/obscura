@@ -51,7 +51,11 @@ def _read_whatsapp_transport() -> str:
         return "twilio"
     messaging = raw.get("messaging", {})
     whatsapp = messaging.get("whatsapp", {}) if isinstance(messaging, dict) else {}
-    value = str(whatsapp.get("transport", "twilio")).strip().lower() if isinstance(whatsapp, dict) else "twilio"
+    value = (
+        str(whatsapp.get("transport", "twilio")).strip().lower()
+        if isinstance(whatsapp, dict)
+        else "twilio"
+    )
     return value if value in ("twilio", "wuzapi") else "twilio"
 
 
@@ -66,6 +70,7 @@ def _build_whatsapp_adapter(*, contacts: list[str], account_id: str = "default")
         return WuzapiAdapter(client, account_id=account_id)
 
     from obscura.integrations.whatsapp import WhatsAppAdapter
+
     return WhatsAppAdapter(contacts, account_id=account_id)
 
 
@@ -250,7 +255,9 @@ async def build_channel_router(
         # 0. inject_platforms kwarg takes highest priority
         if inject_platforms and platform in inject_platforms:
             channel_router.set_platform_mode(platform, ChannelMode.CHANNEL_INJECT)
-            logger.info("Platform %s → channel_inject mode (inject_platforms)", platform)
+            logger.info(
+                "Platform %s → channel_inject mode (inject_platforms)", platform
+            )
             return
 
         # 1. Explicit kwarg dict

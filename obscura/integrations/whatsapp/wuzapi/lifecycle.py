@@ -69,7 +69,9 @@ def _gui_target() -> str:
     return f"gui/{_uid()}/{LABEL}"
 
 
-def _run(*args: str, check: bool = False, timeout: float = 10.0) -> subprocess.CompletedProcess[str]:
+def _run(
+    *args: str, check: bool = False, timeout: float = 10.0
+) -> subprocess.CompletedProcess[str]:
     """Wrap subprocess.run with consistent defaults."""
     return subprocess.run(
         list(args),
@@ -125,9 +127,7 @@ def load() -> None:
     on already-known labels in our experience.
     """
     if not is_plist_installed():
-        raise LifecycleError(
-            f"plist not found at {PLIST_PATH}; run install first"
-        )
+        raise LifecycleError(f"plist not found at {PLIST_PATH}; run install first")
     result = _run("launchctl", "load", "-w", str(PLIST_PATH))
     if result.returncode != 0 and "already loaded" not in result.stderr.lower():
         raise LifecycleError(f"launchctl load failed: {result.stderr.strip()}")

@@ -80,11 +80,7 @@ class GatewaySessionStore:
     def _reap_expired(self) -> None:
         """Remove sessions that have been idle longer than the TTL."""
         now = time.monotonic()
-        expired = [
-            sid
-            for sid, ts in self._last_access.items()
-            if now - ts > self._ttl
-        ]
+        expired = [sid for sid, ts in self._last_access.items() if now - ts > self._ttl]
         for sid in expired:
             self._history.pop(sid, None)
             self._last_access.pop(sid, None)

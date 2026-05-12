@@ -145,7 +145,9 @@ def mcp_tool_call_chunks(item: Any, *, started: bool) -> list[StreamChunk]:
             try:
                 args_str = args if isinstance(args, str) else json.dumps(args)
             except (TypeError, ValueError):
-                logger.debug("suppressed exception in mcp_tool_call_chunks", exc_info=True)
+                logger.debug(
+                    "suppressed exception in mcp_tool_call_chunks", exc_info=True
+                )
                 args_str = str(args)
             chunks.append(
                 StreamChunk(

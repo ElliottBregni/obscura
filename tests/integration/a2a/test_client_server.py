@@ -39,9 +39,7 @@ pytestmark = [pytest.mark.integration]
 
 
 @pytest.fixture()
-async def a2a_client(
-    app, patch_session
-) -> AsyncIterator[A2AClient]:
+async def a2a_client(app, patch_session) -> AsyncIterator[A2AClient]:
     """A2AClient using ASGI transport — no real network, no LLM calls."""
     transport = httpx.ASGITransport(app=app)
     client = A2AClient(TEST_AGENT_URL, transport=transport)
@@ -94,10 +92,7 @@ async def test_client_send_message_has_artifact(a2a_client: A2AClient) -> None:
     assert len(task.artifacts) > 0
 
     text_values = [
-        p.text
-        for art in task.artifacts
-        for p in art.parts
-        if hasattr(p, "text")
+        p.text for art in task.artifacts for p in art.parts if hasattr(p, "text")
     ]
     assert FAKE_RESPONSE in text_values
 

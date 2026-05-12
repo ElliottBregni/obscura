@@ -32,6 +32,7 @@ def _get_or_create_key() -> bytes:
             return raw
     # Generate new key
     from cryptography.fernet import Fernet
+
     key = Fernet.generate_key()
     _KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
     _KEY_PATH.write_bytes(key)
@@ -44,6 +45,7 @@ def encrypt_credentials(creds: dict) -> str:
     """Encrypt *creds* dict and return a JSON envelope string for SQLite storage."""
     try:
         from cryptography.fernet import Fernet
+
         key = _get_or_create_key()
         f = Fernet(key)
         plaintext = json.dumps(creds, ensure_ascii=True).encode()
@@ -74,6 +76,7 @@ def decrypt_credentials(stored: str) -> dict:
     if obj.get("v") == _ENVELOPE_VERSION and "ct" in obj:
         try:
             from cryptography.fernet import Fernet, InvalidToken  # noqa: F401
+
             key = _get_or_create_key()
             f = Fernet(key)
             plaintext = f.decrypt(obj["ct"].encode())

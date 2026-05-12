@@ -17,7 +17,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TOKEN_FILE = Path.home() / ".obscura" / "network-gateway.token"
-_DEFAULT_WEBHOOK_SECRET_FILE = Path.home() / ".obscura" / "network-gateway-webhook.secret"
+_DEFAULT_WEBHOOK_SECRET_FILE = (
+    Path.home() / ".obscura" / "network-gateway-webhook.secret"
+)
 
 # Obscura backends advertised by the gateway
 KNOWN_BACKENDS: tuple[str, ...] = (
@@ -142,8 +144,8 @@ class GatewayConfig:
     # Heartbeat subsystem — periodic scheduled agent turn broadcast to WS clients.
     heartbeat_enabled: bool = False
     heartbeat_interval: float = 1800.0  # 30 minutes
-    heartbeat_prompt: str = ""          # empty = use default
-    heartbeat_target: str = "ws"        # "ws" | "last"
+    heartbeat_prompt: str = ""  # empty = use default
+    heartbeat_target: str = "ws"  # "ws" | "last"
 
     @classmethod
     def from_obscura_config(cls) -> "GatewayConfig":

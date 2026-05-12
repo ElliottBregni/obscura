@@ -94,7 +94,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Start the process-level channel fanout — fans incoming platform messages
     # (WhatsApp, Telegram, etc.) out to all connected WS clients via the
     # ConnectionRegistry broadcast.
-    from obscura.integrations.network_gateway.connections import get_registry as _get_registry
+    from obscura.integrations.network_gateway.connections import (
+        get_registry as _get_registry,
+    )
+
     _conn_registry = _get_registry()
     _conn_registry.start_channel_fanout()
 
@@ -102,6 +105,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     _heartbeat = None
     if gateway_config is not None and gateway_config.heartbeat_enabled:
         from obscura.integrations.network_gateway.heartbeat import HeartbeatTask
+
         _heartbeat = HeartbeatTask(
             _conn_registry,
             interval=gateway_config.heartbeat_interval,
@@ -144,18 +148,20 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     continue
                 try:
                     _pid = str(_pconf.get("platform", "unknown"))
-                    _rec = ChannelConfigRecord.from_dict({
-                        "id": _hashlib.md5(_pid.encode()).hexdigest(),
-                        "platform": _pid,
-                        "label": _pconf.get("label", _pid),
-                        "enabled": _pconf.get("enabled", True),
-                        "mode": _pconf.get("mode", "channel_inject"),
-                        "credentials": _pconf.get("credentials", {}),
-                        "contacts": _pconf.get("contacts", []),
-                        "router_config": {},
-                        "created_at_epoch_s": _time_mod.time(),
-                        "updated_at_epoch_s": _time_mod.time(),
-                    })
+                    _rec = ChannelConfigRecord.from_dict(
+                        {
+                            "id": _hashlib.md5(_pid.encode()).hexdigest(),
+                            "platform": _pid,
+                            "label": _pconf.get("label", _pid),
+                            "enabled": _pconf.get("enabled", True),
+                            "mode": _pconf.get("mode", "channel_inject"),
+                            "credentials": _pconf.get("credentials", {}),
+                            "contacts": _pconf.get("contacts", []),
+                            "router_config": {},
+                            "created_at_epoch_s": _time_mod.time(),
+                            "updated_at_epoch_s": _time_mod.time(),
+                        }
+                    )
                     await _ch_router.apply_config(_rec)
                     _loaded += 1
                 except Exception:
@@ -327,10 +333,14 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
     app.add_middleware(GatewayRateLimitMiddleware, max_requests=config.rate_limit)
 
     # Tighter rate limit for webhook + channel paths
-    app.add_middleware(WebhookRateLimitMiddleware, max_requests=config.webhook_rate_limit)
+    app.add_middleware(
+        WebhookRateLimitMiddleware, max_requests=config.webhook_rate_limit
+    )
 
     # Control-plane rate limit for config mutation endpoints
-    app.add_middleware(ControlPlaneRateLimitMiddleware, max_requests=config.control_plane_rate_limit)
+    app.add_middleware(
+        ControlPlaneRateLimitMiddleware, max_requests=config.control_plane_rate_limit
+    )
 
     # Security headers
     app.add_middleware(SecurityHeadersMiddleware)
@@ -365,11 +375,14 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         channels: dict[str, Any] = {}
         try:
             from obscura.routes.channels import _channel_router as _ch_router_ref
+
             if _ch_router_ref is not None:
                 adapters = getattr(_ch_router_ref, "_adapters", {})
                 for platform_id, adapter in adapters.items():
                     try:
-                        probe = await asyncio.wait_for(adapter.health_check(), timeout=3.0)
+                        probe = await asyncio.wait_for(
+                            adapter.health_check(), timeout=3.0
+                        )
                     except asyncio.TimeoutError:
                         probe = {"status": "timeout"}
                     except AttributeError:
@@ -385,7 +398,9 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
 
     # -- Connected peers endpoint ------------------------------------------
 
-    from obscura.integrations.network_gateway.connections import get_registry as _get_peers_registry
+    from obscura.integrations.network_gateway.connections import (
+        get_registry as _get_peers_registry,
+    )
 
     @app.get("/v1/peers", tags=["peers"])
     async def list_peers() -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
@@ -402,7 +417,10 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         repl_sessions: list[dict[str, str]] = []
         try:
             from obscura.kairos.uds_messaging import discover_peers
-            repl_sessions = [{"session_id": sid, "type": "repl"} for sid in discover_peers()]
+
+            repl_sessions = [
+                {"session_id": sid, "type": "repl"} for sid in discover_peers()
+            ]
         except Exception:
             pass
 
@@ -485,9 +503,9 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
             return JSONResponse({"error": "webhook_not_configured"}, status_code=503)
         if wh_secret:
             sig_header = request.headers.get("X-Webhook-Signature", "")
-            expected = "sha256=" + _hmac.new(
-                wh_secret.encode(), raw, "sha256"
-            ).hexdigest()
+            expected = (
+                "sha256=" + _hmac.new(wh_secret.encode(), raw, "sha256").hexdigest()
+            )
             if not sig_header or not _hmac.compare_digest(sig_header, expected):
                 logger.warning(
                     "webhook_a2a: invalid/missing signature from ip=%s",
@@ -547,7 +565,9 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
         # -- Sanitize sender identity ----------------------------------------
         raw_sender = str(body.get("from") or body.get("agent") or "")[:64]
         # Allow alphanumeric + safe punctuation only; fall back to generic label
-        sender = raw_sender if _re.fullmatch(r"[\w.\-]+", raw_sender) else "webhook-peer"
+        sender = (
+            raw_sender if _re.fullmatch(r"[\w.\-]+", raw_sender) else "webhook-peer"
+        )
 
         # -- Inject into REPL channel via UDS --------------------------------
         # The gateway runs in a separate process from the REPL; the in-process
@@ -572,7 +592,8 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
                         delivered += 1
                 logger.info(
                     "webhook_a2a: injected into %d/%d REPL session(s)",
-                    delivered, len(peers),
+                    delivered,
+                    len(peers),
                 )
             else:
                 logger.debug("webhook_a2a: no active REPL sessions to inject into")
@@ -581,7 +602,9 @@ def create_gateway_app(config: GatewayConfig | None = None) -> FastAPI:
 
         logger.info(
             "webhook/a2a: received task=%s type=%s from=%s",
-            task_id, task_type, sender,
+            task_id,
+            task_type,
+            sender,
         )
         return JSONResponse({"ok": True, "task_id": task_id})
 

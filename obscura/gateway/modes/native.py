@@ -31,7 +31,9 @@ class NativeMode(BaseMode):
     async def start(self) -> None:
         """Start native mode."""
         self.running = True
-        logger.info(f"Native mode started on {self.config.native.host}:{self.config.native.port}")
+        logger.info(
+            f"Native mode started on {self.config.native.host}:{self.config.native.port}"
+        )
 
         # Lazily build the agent runner — deferred so NativeMode has no hard
         # dep on the full provider stack at import time.
@@ -54,7 +56,9 @@ class NativeMode(BaseMode):
                 backend=session.backend,
                 tool_registry=session.registry,
             )
-            logger.info("NativeMode agent runner initialised (backend=%s)", backend_name)
+            logger.info(
+                "NativeMode agent runner initialised (backend=%s)", backend_name
+            )
         except ImportError:
             logger.warning(
                 "Agent runner deps unavailable — spawn_agent will return an error; "
@@ -82,7 +86,9 @@ class NativeMode(BaseMode):
             prompt: str = kwargs.get("prompt", args[0] if args else "")
             context: list[dict[str, str]] = kwargs.get("context", [])
             session_id: str = kwargs.get("session_id") or "native-session"
-            system_prompt: str = kwargs.get("system_prompt", "You are a helpful assistant.")
+            system_prompt: str = kwargs.get(
+                "system_prompt", "You are a helpful assistant."
+            )
             max_turns: int = kwargs.get("max_turns", 8)
 
             if self._runner is None:
