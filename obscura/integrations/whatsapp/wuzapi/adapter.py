@@ -220,22 +220,17 @@ class WuzapiAdapter:
 
         Recipient forms accepted (in order of specificity):
 
+        * ``"<anything>@<server>"`` — full JID (group, DM, LID, etc.).
+          Passed through verbatim; wuzapi's parseJID handles routing.
         * ``"group:<group_jid_digits>"`` — channel_id form for group threads.
-          Reconstructs ``<digits>@g.us`` and passes the full JID to wuzapi.
-        * ``"<digits>@g.us"`` — already a group JID; passed through.
+          Reconstructs ``<digits>@g.us``.
         * Phone number (digits, optionally ``+``-prefixed) — digit-stripped
-          and sent as a direct message.
-
-        Wuzapi's ``Phone`` field accepts both phone numbers and full JIDs;
-        its server-side ``parseJID`` routes to the right whatsmeow path.
-        Returns ``True`` on wuzapi acknowledgement, ``False`` on any
-        transport error (logged at WARNING).
+          and sent as a direct message via wuzapi's default user server.
         """
-        # Group routing — preserve the JID so wuzapi treats it as group send.
-        if recipient.startswith("group:"):
+        if "@" in recipient:
+            wire_target = recipient  # full JID — let wuzapi parseJID route it
+        elif recipient.startswith("group:"):
             wire_target = f"{recipient.removeprefix('group:')}@g.us"
-        elif recipient.endswith("@g.us"):
-            wire_target = recipient
         else:
             wire_target = re.sub(r"\D", "", recipient)
             if not wire_target:

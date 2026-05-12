@@ -60,13 +60,20 @@ def _to_channel_message(
     """Repack a platform message into the inject-queue's shape.
 
     The ``reply_fn`` closure captures the adapter so the agent's reply
-    routes back through wuzapi to the same conversation. We strip the
-    leading ``+`` from the sender JID before handing to ``adapter.send``;
-    the adapter normalises again internally.
+    routes back into the **same WhatsApp thread** the inbound came from.
+    We use the *full* Chat JID (preserved in ``metadata['jid_chat']``)
+    rather than the stripped ``sender_id`` — this correctly handles:
+
+      * DMs to a phone contact     → Chat == Sender == phone JID
+      * Group threads              → Chat == group JID (not the sender)
+      * Self-chats from your phone → Chat == your own LID/phone JID
+        (sender_id alone would be a bare LID number that wuzapi can't
+        route as a phone number)
     """
+    reply_target = str(msg.metadata.get("jid_chat") or msg.sender_id)
 
     async def reply_fn(text: str) -> bool:
-        return await adapter.send(msg.sender_id, text)
+        return await adapter.send(reply_target, text)
 
     return ChannelMessage(
         platform=msg.platform,
