@@ -295,8 +295,11 @@ class WuzapiAdapter:
                 return None
 
         text = _extract_text(msg)
-        if self._drop_non_text and not text:
-            logger.debug("wuzapi: skipping empty-text event")
+        if self._drop_non_text and not text.strip():
+            # Catches: empty string, whitespace-only, and message variants
+            # (delivery receipts, system events, etc.) whose extractable
+            # text is blank. Don't waste an agent turn on these.
+            logger.debug("wuzapi: skipping blank-text event")
             return None
 
         sender_jid = str(info.get("Sender") or "")

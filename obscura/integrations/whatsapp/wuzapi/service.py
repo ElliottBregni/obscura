@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import dataclasses
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Final
@@ -43,9 +44,76 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WEBHOOK_HOST: Final[str] = "127.0.0.1"
 DEFAULT_WEBHOOK_PORT: Final[int] = 18794
+DEFAULT_DEBOUNCE_WINDOW_S: Final[float] = 2.5
+"""Default per-sender debounce window. Bursts within this window coalesce
+into a single PlatformMessage with newline-joined text. Tuned for human
+typing cadence — under 1s feels jumpy, over 5s feels laggy."""
 
 AutoResponder = Callable[[PlatformMessage, "WuzapiAdapter"], Awaitable[None]]
 """Optional callable that produces and dispatches a reply for each inbound msg."""
+
+
+# ---------------------------------------------------------------------------
+# Per-sender debounce buffer
+# ---------------------------------------------------------------------------
+
+
+class _DebouncedDispatcher:
+    """Coalesces rapid bursts of inbound messages per sender.
+
+    Each new message resets the per-sender timer; when the timer expires
+    we dispatch a single PlatformMessage whose text is the newline-joined
+    concatenation of all buffered messages. Metadata + ids inherit from
+    the *last* message in the burst (so message_id, timestamp etc.
+    reference the most recent activity).
+
+    Single-message conversations pay the debounce_window_s latency cost
+    (default 2.5s) — that's the trade we make to handle bursts smoothly.
+    """
+
+    def __init__(
+        self,
+        on_flush: Callable[[PlatformMessage], Awaitable[None]],
+        *,
+        window_s: float = DEFAULT_DEBOUNCE_WINDOW_S,
+    ) -> None:
+        self._on_flush = on_flush
+        self._window_s = window_s
+        self._buffers: dict[str, list[PlatformMessage]] = {}
+        self._timers: dict[str, asyncio.Task[None]] = {}
+
+    async def feed(self, msg: PlatformMessage) -> None:
+        key = msg.sender_id
+        self._buffers.setdefault(key, []).append(msg)
+        existing = self._timers.get(key)
+        if existing is not None and not existing.done():
+            existing.cancel()
+        self._timers[key] = asyncio.create_task(self._wait_and_flush(key))
+
+    async def _wait_and_flush(self, key: str) -> None:
+        try:
+            await asyncio.sleep(self._window_s)
+        except asyncio.CancelledError:
+            return
+        msgs = self._buffers.pop(key, [])
+        self._timers.pop(key, None)
+        if not msgs:
+            return
+        latest = msgs[-1]
+        if len(msgs) == 1:
+            coalesced = latest
+        else:
+            combined_text = "\n".join(m.text for m in msgs if m.text.strip())
+            coalesced = dataclasses.replace(latest, text=combined_text)
+            print(
+                f"[wuzapi debounce] coalesced {len(msgs)} msgs from "
+                f"{key} into one ({len(combined_text)} chars)",
+                flush=True,
+            )
+        try:
+            await self._on_flush(coalesced)
+        except Exception:
+            logger.exception("debounce flush handler raised")
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +166,7 @@ async def wuzapi_service(
     webhook_port: int = DEFAULT_WEBHOOK_PORT,
     account_id: str = "default",
     auto_responder: AutoResponder | None = None,
+    debounce_window_s: float = DEFAULT_DEBOUNCE_WINDOW_S,
 ) -> AsyncGenerator[None]:
     """Run the inbound bridge for the lifetime of the ``async with`` block.
 
@@ -115,11 +184,7 @@ async def wuzapi_service(
     adapter = WuzapiAdapter(client, account_id=account_id)
     await adapter.start()
 
-    async def on_event(env: WuzapiWebhookEnvelope) -> None:
-        msg = adapter.handle_event(env)
-        if msg is None:
-            print(f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)", flush=True)
-            return
+    async def _flush(msg: PlatformMessage) -> None:
         delivered = push_channel_message(_to_channel_message(msg, adapter))
         print(
             f"[wuzapi → REPL] from={msg.sender_id} text={msg.text[:80]!r} delivered={delivered}",
@@ -129,11 +194,23 @@ async def wuzapi_service(
             "wuzapi → REPL: from=%s text=%r delivered=%s",
             msg.sender_id, msg.text[:80], delivered,
         )
-        # If auto-responder is configured, dispatch the LLM call as a fire-
-        # and-forget task. Failures are isolated (logged + swallowed by the
-        # _safe_dispatch wrapper above) so they never reach the webhook ACK.
         if auto_responder is not None:
             asyncio.create_task(_safe_auto_respond(auto_responder, msg, adapter))
+
+    debounced = _DebouncedDispatcher(_flush, window_s=debounce_window_s)
+
+    async def on_event(env: WuzapiWebhookEnvelope) -> None:
+        msg = adapter.handle_event(env)
+        if msg is None:
+            print(f"[wuzapi] dropped event type={env.type!r} (non-Message or echo)", flush=True)
+            return
+        # Belt-and-suspenders: the adapter already drops blank text but in
+        # case downstream parsing slips through, double-check here so we
+        # never debounce empty content.
+        if not msg.text.strip():
+            print(f"[wuzapi] dropped blank-text msg from {msg.sender_id}", flush=True)
+            return
+        await debounced.feed(msg)
 
     app = build_webhook_app(on_event=on_event)
     config = uvicorn.Config(
