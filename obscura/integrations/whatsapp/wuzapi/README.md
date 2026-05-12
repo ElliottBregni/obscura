@@ -110,6 +110,20 @@ through your WhatsApp.
   section is missing), nothing runs in Obscura's process. The wuzapi
   LaunchAgent still runs (it's separate) but Obscura doesn't bridge to
   it. The off state is truly off.
+* **REPL commands via messaging (with sender ACL)**: messages starting
+  with `/`, `$`, or `@` are routed through the REPL's normal
+  command-dispatch path instead of being treated as plain text — but
+  **only if the sender's phone number is listed in
+  `[messaging.whatsapp].command_allowlist`** in `config.toml`.
+  Default-deny: an empty / missing list denies everyone. Slash commands
+  capture their console output (Rich + ANSI codes stripped) and send it
+  back as a WhatsApp reply, truncating at 3500 chars. `/quit` and
+  `/exit` are hard-blocked from messaging channels (would tear down the
+  operator's local session). `$skill` and `@command` work the way they
+  do at the local prompt — they expand into a prompt sent to the agent,
+  and the agent's response flows back via the standard reply path.
+  Anyone NOT in the allowlist can still chat normally with the agent;
+  their command prefixes are simply routed as plain text.
 * **Typing indicator while the agent composes**: when an inbound message
   arrives, the wuzapi service sends `composing` presence to the chat
   before pushing the message into the REPL queue. A background keepalive

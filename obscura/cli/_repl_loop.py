@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -68,6 +69,7 @@ from obscura.cli.tips import TipScheduler
 from obscura.cli.tui_effects import ultrathink_banner
 from obscura.composition.repl import build_repl_session
 from obscura.composition.session import SessionConfig, SessionExtras
+from obscura.integrations.messaging.command_acl import is_command_allowed
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.deep_log import dlog
@@ -94,6 +96,69 @@ _log = logging.getLogger("obscura.cli")
 def _swallow(label: str, exc: Exception) -> None:
     """Log a swallowed exception at DEBUG level."""
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
+
+
+_CHANNEL_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_CHANNEL_REPLY_MAX_CHARS = 3500
+_CHANNEL_BLOCKED_SLASH_COMMANDS = frozenset({"quit", "exit"})
+"""Slash commands rejected when invoked via a messaging channel.
+``/quit`` and ``/exit`` would break the operator's local REPL — there
+is no legitimate reason for a remote sender to terminate the running
+session, so we hard-deny them and send a notice back."""
+
+
+async def _run_slash_command_for_channel(
+    user_input: str,
+    ctx: Any,
+    reply_fn: Any,
+) -> None:
+    """Execute a slash command for a channel-injected message.
+
+    Wraps ``handle_command`` in ``console.capture()`` so the output that
+    would normally print to the operator's terminal is buffered, ANSI
+    codes stripped, and sent back via ``reply_fn``. Blocks ``/quit`` and
+    ``/exit`` (return values that would tear down the loop).
+
+    Errors during the command run are surfaced as a reply rather than
+    propagated — the operator's local session must keep running even
+    if a remote command crashes.
+    """
+    raw = user_input.lstrip("/").strip()
+    cmd_name = raw.split(None, 1)[0].lower() if raw else ""
+    if cmd_name in _CHANNEL_BLOCKED_SLASH_COMMANDS:
+        if reply_fn is not None:
+            try:
+                await reply_fn(
+                    f"⛔ /{cmd_name} is blocked from messaging channels.",
+                )
+            except Exception:
+                _log.debug("channel slash block reply failed", exc_info=True)
+        return
+
+    try:
+        with console.capture() as cap:
+            await handle_command(user_input, ctx)
+    except Exception as exc:
+        _log.debug("channel slash command raised", exc_info=True)
+        if reply_fn is not None:
+            try:
+                await reply_fn(f"⛔ command failed: {exc!r}")
+            except Exception:
+                _log.debug("channel slash error reply failed", exc_info=True)
+        return
+
+    captured = _CHANNEL_ANSI_RE.sub("", cap.get()).strip()
+    if not captured:
+        captured = f"✓ ran {user_input.strip()}"
+    if len(captured) > _CHANNEL_REPLY_MAX_CHARS:
+        captured = (
+            captured[:_CHANNEL_REPLY_MAX_CHARS] + "\n…[truncated]"
+        )
+    if reply_fn is not None:
+        try:
+            await reply_fn(captured)
+        except Exception:
+            _log.debug("channel slash reply failed", exc_info=True)
 
 
 async def repl(
@@ -593,9 +658,27 @@ async def repl(
                             _ch_msg: _ChannelMessage = _channel_task.result()
                             _label = _ch_msg.display_name or _ch_msg.sender_id
                             _plat = _ch_msg.platform.capitalize()
-                            user_input = f"[{_plat} from {_label}]: {_ch_msg.text}"
+                            _raw_text = _ch_msg.text.strip()
+                            # If the raw text is a REPL command prefix
+                            # (/, $, @) AND the sender is allowlisted, drop
+                            # the "[Whatsapp from X]:" label so the prefix
+                            # is detected by handlers further down. Without
+                            # this, "/help" arrives as "[Whatsapp from X]:
+                            # /help" and the slash branch's startswith
+                            # check fails silently — the literal text gets
+                            # sent to the agent as a prompt instead.
+                            if (
+                                _raw_text.startswith(("/", "$", "@"))
+                                and is_command_allowed(
+                                    _ch_msg.platform, _ch_msg.sender_id,
+                                )
+                            ):
+                                user_input = _raw_text
+                            else:
+                                user_input = (
+                                    f"[{_plat} from {_label}]: {_ch_msg.text}"
+                                )
                             ctx._pending_channel_reply = _ch_msg.reply_fn  # type: ignore[attr-defined]
-                            # Mark this turn as channel-injected so slash-command path is skipped
                             _is_channel_injected = True
                         else:
                             user_input = _prompt_task.result()
@@ -694,11 +777,25 @@ async def repl(
                         _log.debug("suppressed exception in repl", exc_info=True)
 
                 # Slash command
-                if user_input.startswith("/") and not _is_channel_injected:
+                if user_input.startswith("/"):
                     if not ctx.tools_enabled:
                         loop_kwargs["tool_choice"] = ToolChoice.none()
                     else:
                         loop_kwargs.pop("tool_choice", None)
+
+                    if _is_channel_injected:
+                        # Channel-injected: capture output, send via
+                        # reply_fn. /quit and /exit are blocked inside
+                        # the helper since they'd break the operator's
+                        # local session.
+                        _captured_reply_fn = getattr(
+                            ctx, "_pending_channel_reply", None,
+                        )
+                        ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                        await _run_slash_command_for_channel(
+                            user_input, ctx, _captured_reply_fn,
+                        )
+                        continue
 
                     result = await handle_command(user_input, ctx)
                     if result == "quit":
