@@ -184,7 +184,9 @@ def save_inbound_media(
         target_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         logger.debug(
-            "media_store: failed to create dir %s", target_dir, exc_info=True,
+            "media_store: failed to create dir %s",
+            target_dir,
+            exc_info=True,
         )
         return None
     target_path = target_dir / f"{safe_stem}{ext}"
@@ -192,7 +194,9 @@ def save_inbound_media(
         target_path.write_bytes(data)
     except Exception:
         logger.debug(
-            "media_store: failed to write %s", target_path, exc_info=True,
+            "media_store: failed to write %s",
+            target_path,
+            exc_info=True,
         )
         return None
     return str(target_path)

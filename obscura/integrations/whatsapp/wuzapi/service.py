@@ -485,7 +485,9 @@ async def wuzapi_service(
                     or "",
                 )
                 saved_path = _save_inline_media(
-                    inline_b64, inline_mimetype, message_id,
+                    inline_b64,
+                    inline_mimetype,
+                    message_id,
                 )
                 if saved_path:
                     print(
@@ -502,7 +504,9 @@ async def wuzapi_service(
 
             if saved_path is None:
                 saved_path = await _download_and_save_media(
-                    client, payload_dict, message_id,
+                    client,
+                    payload_dict,
+                    message_id,
                 )
                 if saved_path:
                     print(
@@ -517,7 +521,9 @@ async def wuzapi_service(
                 if marker and marker in msg.text:
                     marker_inner = marker.strip("[]")
                     new_text = msg.text.replace(
-                        marker, f"[{marker_inner} at {saved_path}]", 1,
+                        marker,
+                        f"[{marker_inner} at {saved_path}]",
+                        1,
                     )
                     msg = dataclasses.replace(msg, text=new_text)
         # Belt-and-suspenders: the adapter already drops blank text but in
@@ -684,6 +690,7 @@ def _save_inline_media(
     fails (caller can then fall back to /chat/download*).
     """
     import base64 as _b64
+
     if not b64_data:
         return None
     try:
@@ -694,6 +701,7 @@ def _save_inline_media(
     if not data:
         return None
     from obscura.integrations.messaging.media_store import save_inbound_media
+
     return save_inbound_media(
         platform="whatsapp",
         message_id=message_id or "media",

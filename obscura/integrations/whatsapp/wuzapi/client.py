@@ -268,7 +268,8 @@ class WuzapiClient(_WuzapiBaseClient):
         import base64
 
         result = await self._request_typed(
-            "POST", path,
+            "POST",
+            path,
             response_model=WuzapiDownloadResponse,
             json_body=req,
         )
@@ -280,11 +281,13 @@ class WuzapiClient(_WuzapiBaseClient):
             return base64.b64decode(payload)
         except Exception as exc:
             raise WuzapiResponseError(
-                WuzapiDownloadResponse, result.data,
+                WuzapiDownloadResponse,
+                result.data,
             ) from exc
 
     async def download_image(
-        self, req: WuzapiDownloadMediaRequest,
+        self,
+        req: WuzapiDownloadMediaRequest,
     ) -> bytes:
         """POST /chat/downloadimage — decrypt + fetch image bytes.
 
@@ -295,7 +298,8 @@ class WuzapiClient(_WuzapiBaseClient):
         return await self._download_media("/chat/downloadimage", req)
 
     async def download_video(
-        self, req: WuzapiDownloadMediaRequest,
+        self,
+        req: WuzapiDownloadMediaRequest,
     ) -> bytes:
         """POST /chat/downloadvideo — decrypt + fetch video bytes.
 
@@ -306,7 +310,8 @@ class WuzapiClient(_WuzapiBaseClient):
         return await self._download_media("/chat/downloadvideo", req)
 
     async def download_document(
-        self, req: WuzapiDownloadMediaRequest,
+        self,
+        req: WuzapiDownloadMediaRequest,
     ) -> bytes:
         """POST /chat/downloaddocument — decrypt + fetch document bytes.
 
@@ -319,7 +324,8 @@ class WuzapiClient(_WuzapiBaseClient):
         return await self._download_media("/chat/downloaddocument", req)
 
     async def download_audio(
-        self, req: WuzapiDownloadMediaRequest,
+        self,
+        req: WuzapiDownloadMediaRequest,
     ) -> bytes:
         """POST /chat/downloadaudio — decrypt + fetch audio bytes.
 

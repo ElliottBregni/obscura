@@ -104,10 +104,10 @@ is set per Message), but the labels are surfaced to the agent as
 # `_from_media` exactly so the service-side rewriter can find and
 # replace it with "[<label> at <path>]".
 _DOWNLOADABLE_VARIANTS: tuple[tuple[str, str, str, str], ...] = (
-    ("imageMessage",    "image",    "image/jpeg",                "[image]"),
-    ("videoMessage",    "video",    "video/mp4",                 "[video]"),
-    ("documentMessage", "document", "application/octet-stream",  "[document]"),
-    ("audioMessage",    "audio",    "audio/ogg",                 "[voice note]"),
+    ("imageMessage", "image", "image/jpeg", "[image]"),
+    ("videoMessage", "video", "video/mp4", "[video]"),
+    ("documentMessage", "document", "application/octet-stream", "[document]"),
+    ("audioMessage", "audio", "audio/ogg", "[voice note]"),
 )
 
 
@@ -134,6 +134,7 @@ def _extract_downloadable_media(message: dict[str, Any]) -> dict[str, Any] | Non
     Searches inside ephemeral / view-once wrappers too — the
     download-fields live on the nested media payload there.
     """
+
     def _from(inner: Any) -> dict[str, Any] | None:
         if not isinstance(inner, dict):
             return None

@@ -167,7 +167,8 @@ def test_text_takes_precedence_over_media() -> None:
     ],
 )
 def test_all_media_variants_produce_a_marker(
-    media_key: str, expected_label: str,
+    media_key: str,
+    expected_label: str,
 ) -> None:
     """Every media variant the adapter recognizes produces a non-empty
     marker so the message survives the blank-text filter."""
