@@ -312,6 +312,9 @@ class ToolSpec:
     retries: int = 0
     examples: tuple[dict[str, Any], ...] = field(default_factory=lambda: ())
     capability: str = ""  # capability group ID (e.g. "git.ops")
+    is_shadow: bool = (
+        False  # True for MCP shadow specs — discoverable but not listed in the prompt
+    )
 
     def __post_init__(self) -> None:
         # Coerce loose string ``side_effects`` from legacy callers (and

@@ -1,30 +1,38 @@
 """obscura.cli.tui.layout — full-screen :mod:`prompt_toolkit` layout.
 
-Opencode-style three-row shell: status header, scrolling transcript,
-input + hint footer. Banner and notifications appear as conditional
-floats (top-anchored) so they never push the input around. Modal
-overlays attach as centered :class:`Float`s on the
-:class:`FloatContainer` root.
+Opencode-style shell with the status header pinned to the BOTTOM as a
+footer. The live region (agent "thinking" / spinner) sits directly
+above the input area so the user always sees activity in their
+peripheral vision while typing — never below the prompt where it gets
+hidden by the toolbar. Banner and notifications attach as conditional
+:class:`Float`s anchored to the top of the screen so they stack above
+the transcript without pushing the input around. Modal overlays are
+centered :class:`Float`s on the :class:`FloatContainer` root.
 
-Top-to-bottom shape (ALL widgets pinned by exact :class:`Dimension` so
-no row gets unintended weight)::
+Top-to-bottom shape (ALL fixed widgets pinned by exact
+:class:`Dimension` so the transcript can't overflow into them)::
 
     ┌─────────────────────────────────────────────┐
-    │ header_window (1 row, exact)                │
-    ├─────────────────────────────────────────────┤
     │ transcript_window (weight=1, scrolls)       │
     │                                             │
     ├─────────────────────────────────────────────┤
-    │ live_region_window (cond, 1 row when active)│
+    │ live_region_window (cond, 1 row when active)│  ← thinking
     ├─────────────────────────────────────────────┤
     │ input_area (1..6 rows, multiline)           │
     ├─────────────────────────────────────────────┤
-    │ toolbar_window (1 row, exact)               │
+    │ toolbar_window (1 row, exact)               │  ← hotkeys
+    ├─────────────────────────────────────────────┤
+    │ header_separator (1 row, "─")               │
+    ├─────────────────────────────────────────────┤
+    │ header_window (1 row, exact)                │  ← footer
     └─────────────────────────────────────────────┘
 
-Banner / notification stacks float on top of the body via
-:class:`Float`s configured with ``top``/``right`` anchors so they don't
-displace the input.
+The transcript uses ``Dimension(weight=1, min=1)``; everything else is
+fixed-height, so chat output cannot push the input, toolbar, or footer
+off-screen no matter how long the conversation gets. Banner /
+notification stacks float on top of the body via :class:`Float`s
+configured with ``top``/``right`` anchors so they don't displace any
+fixed widget.
 """
 
 from __future__ import annotations
@@ -111,12 +119,19 @@ def _make_text_window(
     height: Dimension | int | None = None,
     style: str = "",
     always_hide_cursor: bool = True,
+    wrap_lines: bool = True,
 ) -> Window:
     """Build a :class:`Window` whose content is recomputed every frame.
 
     ``get_text`` is wrapped in a :class:`FormattedTextControl` so
     prompt-toolkit re-invokes it on each redraw; this is what lets
     :class:`TUIState` mutations show up live.
+
+    ``wrap_lines`` defaults to ``True`` for the transcript, but
+    single-row widgets (toolbar, footer, live region, separator) pass
+    ``wrap_lines=False`` so a line that overflows the terminal width
+    gets clipped horizontally rather than wrapping into a second row
+    that would push fixed-height neighbours off-screen.
     """
     control = FormattedTextControl(
         text=get_text,
@@ -128,7 +143,7 @@ def _make_text_window(
         height=height,
         style=style,
         always_hide_cursor=always_hide_cursor,
-        wrap_lines=True,
+        wrap_lines=wrap_lines,
     )
 
 
@@ -186,10 +201,14 @@ def build_layout(
     """
 
     # ---- Header (top, 1 row) + thin rule ---------------------------------
+    # ``wrap_lines=False`` so a long session title or model name gets
+    # clipped horizontally instead of wrapping into a second row that
+    # would push the transcript off-screen.
     header_window = _make_text_window(
         lambda: header_text(state),
         height=Dimension.exact(1),
         style="class:tui.header",
+        wrap_lines=False,
     )
     # Single-row separator under the header so the transcript doesn't
     # butt directly into the session/model line. ``Window(char=...)``
@@ -202,39 +221,10 @@ def build_layout(
     )
 
     # ---- Transcript (weight=1, auto-scroll) ------------------------------
-    # Anchor cursor at the LAST rendered line so prompt-toolkit's render
-    # loop never indexes past content. An out-of-range cursor y crashes
-    # with ``IndexError: list index out of range`` from
-    # ``fragment_lines[lineno]`` in controls.py.
-    def _last_line_index() -> int:
-        # FormattedText's element shape is OneStyleAndTextTuple — at
-        # runtime always a 2- or 3-tuple where index 1 is the text.
-        # Pyright's stubs widen it past simple unpacking, so iterate
-        # by index instead and let pyright stay happy.
-        nl = 0
-        for tup in transcript_text(state):
-            text = tup[1] if len(tup) > 1 else ""
-            # ``text`` is typed as ``str`` here but
-            # OneStyleAndTextTuple is a positional alias whose middle
-            # field can technically be a callable in some
-            # prompt-toolkit versions; the guard keeps us safe.
-            if isinstance(text, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-                nl += text.count("\n")
-        return max(0, nl)
-
-    # The cursor must move with the scroll offset, otherwise prompt_toolkit
-    # auto-scrolls the window to keep the cursor on screen and our manual
-    # offset gets reset every frame. Anchoring the cursor at
-    # (last_line - offset) tells prompt_toolkit "this is the visible line",
-    # so it scrolls there. ``always_hide_cursor`` keeps it invisible.
-    def _cursor_y() -> int:
-        return max(0, _last_line_index() - max(0, state.transcript_scroll_offset))
-
     transcript_control = FormattedTextControl(
         text=lambda: transcript_text(state),
         focusable=False,
         show_cursor=False,
-        get_cursor_position=lambda: Point(x=0, y=_cursor_y()),
     )
     transcript_window = Window(
         content=transcript_control,
@@ -246,6 +236,14 @@ def build_layout(
         ),
         allow_scroll_beyond_bottom=False,
         style="class:tui.transcript",
+    )
+    # Cursor must track visual rows (not logical \n-count) so prompt_toolkit's
+    # cursor-visibility pass never overrides our manual scroll offset.
+    # Using the same value as get_vertical_scroll keeps cursor at viewport-top,
+    # which is always in-frame — no conflict.
+    transcript_control.get_cursor_position = lambda: Point(
+        x=0,
+        y=_scroll_to_bottom(transcript_window, state.transcript_scroll_offset),
     )
 
     # ---- Agent side panel (collapsible, right column) --------------------
@@ -287,10 +285,15 @@ def build_layout(
     )
 
     # ---- Live region (1 row, conditional) --------------------------------
+    # ``wrap_lines=False`` is critical: the live region label shows the
+    # tool name + truncated preview + elapsed timer on one row. Without
+    # this guard, a long preview would wrap onto a second row and the
+    # toolbar / footer would be pushed off-screen.
     live_region_window = _make_text_window(
         lambda: live_region_text(state),
         height=Dimension.exact(1),
         style="class:tui.live",
+        wrap_lines=False,
     )
     live_region_container = ConditionalContainer(
         content=live_region_window,
@@ -368,10 +371,13 @@ def build_layout(
     input_area.window.height = _input_height
 
     # ---- Toolbar (1 row, exact) ------------------------------------------
+    # ``wrap_lines=False`` so a wide toolbar (lots of hotkeys + agent
+    # counter) gets clipped instead of wrapping and hiding the footer.
     toolbar_window = _make_text_window(
         lambda: toolbar_text(state),
         height=Dimension.exact(1),
         style="class:tui.toolbar",
+        wrap_lines=False,
     )
 
     # ---- Banner / notification windows kept for return value -------------
@@ -390,29 +396,41 @@ def build_layout(
     )
 
     # ---- Compose ---------------------------------------------------------
-    # The live region (tool spinner / streaming label) sits BELOW the input
-    # so "running shell_exec..." appears under the prompt the user is
-    # interacting with rather than above it. Toolbar stays at the very
-    # bottom.
+    # Layout order (top → bottom):
+    #
+    #   * transcript_row — chat output, weight=1 with min=1, scrolls. The
+    #     ``weight=1`` means it absorbs any spare rows, so it cannot push
+    #     fixed-height widgets off-screen.
+    #   * live_region_container — agent "thinking" spinner / streaming
+    #     activity label. Conditional, 1 row when active. Sits ABOVE the
+    #     input so the user sees activity in their peripheral vision
+    #     while composing the next message.
+    #   * input_area — 1..6 rows, the prompt the user types into.
+    #   * toolbar_window — hotkey hints, 1 row.
+    #   * header_separator_window — thin rule above the footer.
+    #   * header_window — session/model/status, 1 row. Pinned at the
+    #     very bottom of the screen as a footer.
     body = HSplit(
         [
-            header_window,
-            header_separator_window,
             transcript_row,
-            input_area,
             live_region_container,
+            input_area,
             toolbar_window,
+            header_separator_window,
+            header_window,
         ],
     )
 
     # Banner and notification stacks as conditional floats — top-anchored
-    # so they appear above the transcript without pushing the input.
+    # so they appear above the transcript without pushing fixed widgets.
+    # ``top=0`` is fine now that the header lives at the bottom; nothing
+    # owns row 0 by default, so floats can fully claim it.
     banner_float = Float(
         content=ConditionalContainer(
             content=banner_window,
             filter=Condition(lambda: state.banner is not None),
         ),
-        top=1,
+        top=0,
         left=0,
         right=0,
     )
@@ -421,7 +439,7 @@ def build_layout(
             content=notification_window,
             filter=Condition(lambda: bool(state.notifications)),
         ),
-        top=2,
+        top=1,
         right=2,
         width=48,
     )

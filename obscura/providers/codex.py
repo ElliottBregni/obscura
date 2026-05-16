@@ -9,17 +9,15 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import json
+import logging
 import os
-import re
 import shutil
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from obscura.core.enums.agent import Backend, ChunkKind, HookPoint, Role
-from obscura.core.sessions import SessionStore
-from obscura.core.models.content import TextBlock, ThinkingBlock, ToolUseBlock
+from obscura.core.stream_guards import bind_stream_log
 from obscura.core.types import (
     BackendCapabilities,
     HookContext,
@@ -29,12 +27,22 @@ from obscura.core.types import (
     StreamChunk,
     StreamMetadata,
 )
-from obscura.core.stream_guards import bind_stream_log
+from obscura.core.sessions import SessionStore
 from obscura.integrations.mcp.discovery import register_external_mcp_tools
 from obscura.plugins.capabilities import build_capability_map_section
+from obscura.providers._codex_mcp_config import (
+    mcp_servers_to_config_overrides as _mcp_servers_to_config_overrides,
+)
+from obscura.providers._codex_sdk_compat import relax_strict_response_models
+from obscura.providers._codex_stream_adapter import (
+    items_to_content_blocks,
+    map_notification_to_chunks,
+    sanitize_tool_name,
+    summarize_file_changes,
+    unwrap_item,
+)
 from obscura.providers._tool_host import BackendToolHostMixin
 from obscura.providers.registry import ModelInfo as RegistryModelInfo
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -48,200 +56,7 @@ if TYPE_CHECKING:
 _SDK_MODULE = "codex_app_server"
 
 
-# ---------------------------------------------------------------------------
-# SDK ↔ CLI version-skew tolerance
-# ---------------------------------------------------------------------------
-#
-# The pinned ``codex_app_server`` SDK declares some response fields as
-# required that newer ``codex`` CLI binaries no longer emit (and vice
-# versa). Notable cases:
-#
-#   * ``ThreadStartResponse.approvalsReviewer`` — added in the SDK after
-#     it landed in CLI responses.
-#   * ``Thread.ephemeral`` — present in the SDK's model but absent from
-#     responses produced by ``codex-cli`` 0.106.x and earlier.
-#   * ``Thread.status`` — same situation: SDK requires it, current CLI
-#     responses omit it.
-#
-# We don't read these fields ourselves (we only need ``thread.id``), so
-# we relax them to optional at SDK-import time. This is forward- and
-# backward-compatible: when the CLI catches up, the field is populated
-# normally; otherwise it defaults to ``None``.
-
-_OPTIONAL_RELAXATIONS: dict[str, tuple[str, ...]] = {
-    "ThreadStartResponse": ("approvals_reviewer",),
-    "ThreadResumeResponse": ("approvals_reviewer",),
-    "Thread": ("ephemeral", "status"),
-}
-
-# Models that embed ``Thread`` (or another relaxed model) as a nested field.
-# Pydantic v2 caches an inner-validator schema for nested models when the
-# outer model is first built, so relaxing + rebuilding the inner class alone
-# isn't enough — the parent keeps validating against the pre-relaxation
-# child schema. Force-rebuilding the parents pulls in the relaxed child.
-_RELAX_PARENT_REBUILDS: tuple[str, ...] = (
-    "ThreadStartResponse",
-    "ThreadResumeResponse",
-    "ThreadForkResponse",
-    "ThreadReadResponse",
-    "ThreadUnarchiveResponse",
-)
-
-
-def _relax_strict_response_models(mod: Any) -> None:
-    """Make selected SDK response fields optional to tolerate version skew.
-
-    Scans the SDK's submodules for the model classes named in
-    :data:`_OPTIONAL_RELAXATIONS` and downgrades the listed fields to
-    ``default=None``. Silently no-ops on missing classes or fields so a
-    future SDK rename doesn't blow up at startup.
-    """
-    candidates: list[Any] = [mod]
-    generated = getattr(mod, "generated", None)
-    if generated is not None:
-        candidates.append(generated)
-        v2 = getattr(generated, "v2_all", None)
-        if v2 is not None:
-            candidates.append(v2)
-
-    def _resolve(model_name: str) -> Any:
-        return next(
-            (
-                getattr(c, model_name)
-                for c in candidates
-                if hasattr(c, model_name)
-                and hasattr(getattr(c, model_name), "model_fields")
-            ),
-            None,
-        )
-
-    any_changed = False
-    for model_name, field_names in _OPTIONAL_RELAXATIONS.items():
-        cls = _resolve(model_name)
-        if cls is None:
-            continue
-        changed = False
-        for fname in field_names:
-            field = cls.model_fields.get(fname)
-            if field is None or not field.is_required():
-                continue
-            field.default = None
-            changed = True
-        if changed:
-            any_changed = True
-            try:
-                cls.model_rebuild(force=True)
-            except Exception:
-                logger.debug(
-                    "suppressed exception in _relax_strict_response_models",
-                    exc_info=True,
-                )
-
-    if any_changed:
-        for parent_name in _RELAX_PARENT_REBUILDS:
-            parent = _resolve(parent_name)
-            if parent is None:
-                continue
-            try:
-                parent.model_rebuild(force=True)
-            except Exception:
-                logger.debug(
-                    "suppressed exception in _relax_strict_response_models",
-                    exc_info=True,
-                )
-
-
-# ---------------------------------------------------------------------------
-# MCP server → Codex config override translation
-# ---------------------------------------------------------------------------
-#
-# The Codex CLI reads its MCP configuration from ``~/.codex/config.toml``
-# (``[mcp_servers.<name>]`` tables). The ``codex_app_server`` SDK's
-# ``AppServerConfig.config_overrides`` accepts an array of ``key.path=value``
-# strings equivalent to ``codex -c key.path=value`` on the CLI, where each
-# ``value`` is parsed as TOML (falling back to a raw string literal on
-# parse failure).
-#
-# Obscura carries MCP server configs as a list of dicts; this helper
-# translates that list into the override tuple Codex expects, so the
-# backend can forward MCP servers that the CLI would otherwise only see
-# from the on-disk config file. Used by :meth:`CodexBackend._build_sdk_client`.
-
-
-def _mcp_servers_to_config_overrides(
-    servers: list[dict[str, Any]],
-) -> tuple[str, ...]:
-    """Map Obscura's ``mcp_servers`` list to Codex ``-c`` override strings.
-
-    Each server dict must carry a ``name``. Streamable-HTTP servers use
-    ``url`` (and optionally ``bearer_token_env_var``); stdio servers use
-    ``command`` (and optionally ``args``, ``env``). Entries missing a
-    usable name are skipped.
-    """
-    overrides: list[str] = []
-    for server in servers:
-        name = str(server.get("name") or "").strip()
-        if not name:
-            continue
-        key = _codex_config_key(name)
-
-        url = server.get("url")
-        if isinstance(url, str) and url:
-            overrides.append(f"mcp_servers.{key}.url={_toml_str(url)}")
-            bearer = server.get("bearer_token_env_var") or server.get(
-                "bearer_token_env",
-            )
-            if isinstance(bearer, str) and bearer:
-                overrides.append(
-                    f"mcp_servers.{key}.bearer_token_env_var={_toml_str(bearer)}",
-                )
-            continue
-
-        command = server.get("command")
-        if isinstance(command, str) and command:
-            overrides.append(f"mcp_servers.{key}.command={_toml_str(command)}")
-            raw_args: Any = server.get("args")
-            if isinstance(raw_args, list) and raw_args:
-                args: list[Any] = cast("list[Any]", raw_args)
-                overrides.append(
-                    f"mcp_servers.{key}.args={_toml_string_array(args)}",
-                )
-            raw_env: Any = server.get("env")
-            if isinstance(raw_env, dict) and raw_env:
-                env_map: dict[str, Any] = cast("dict[str, Any]", raw_env)
-                overrides.append(
-                    f"mcp_servers.{key}.env={_toml_inline_table(env_map)}",
-                )
-    return tuple(overrides)
-
-
-def _codex_config_key(name: str) -> str:
-    """Sanitize a server name for use as a TOML dotted-path key.
-
-    Dashes are legal in TOML bare keys but we normalize them to
-    underscores so a single stable form reaches Codex regardless of how
-    the caller wrote the name.
-    """
-    return re.sub(r"[^A-Za-z0-9_]", "_", name)
-
-
-def _toml_str(value: str) -> str:
-    """Serialize a Python string as a TOML basic string literal."""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def _toml_string_array(items: list[Any]) -> str:
-    """Serialize a Python list as a TOML array of strings."""
-    return "[" + ", ".join(_toml_str(str(x)) for x in items) + "]"
-
-
-def _toml_inline_table(mapping: dict[str, Any]) -> str:
-    """Serialize a Python dict as a TOML inline table of string values."""
-    pairs = [
-        f"{_codex_config_key(str(k))} = {_toml_str(str(v))}" for k, v in mapping.items()
-    ]
-    return "{ " + ", ".join(pairs) + " }"
+_relax_strict_response_models = relax_strict_response_models
 
 
 class CodexBackend(BackendToolHostMixin):
@@ -338,6 +153,7 @@ class CodexBackend(BackendToolHostMixin):
 
     async def start(self) -> None:
         await register_external_mcp_tools(self, self._mcp_servers)
+        await self._init_openclaw_bridge()
 
         sdk_cls = self._import_sdk_class()
         self._sdk_client = await self._build_sdk_client(sdk_cls)
@@ -536,37 +352,36 @@ class CodexBackend(BackendToolHostMixin):
 
     @staticmethod
     def _sanitize_tool_name(name: str) -> str:
-        """Sanitize tool name to match API pattern ^[a-zA-Z0-9_-]{1,128}$."""
-        return re.sub(r"[^a-zA-Z0-9_-]", "_", name)[:128]
+        return sanitize_tool_name(name)
 
     @staticmethod
     def _unwrap_item(item: Any) -> Any:
-        """Unwrap a pydantic RootModel wrapper (``ThreadItem.root``) if present."""
-        if item is None:
-            return None
-        root = getattr(item, "root", None)
-        return root if root is not None else item
+        return unwrap_item(item)
 
     @staticmethod
     def _summarize_file_changes(item: Any) -> str:
-        """Render a ``fileChange`` item's changes as a short comma-separated string."""
-        raw: Any = getattr(item, "changes", None) or []
-        parts: list[str] = []
-        for change in raw:
-            c: Any = change
-            kind = getattr(c, "kind", None) or getattr(c, "type", "?")
-            path = getattr(c, "path", "?")
-            parts.append(f"{kind}:{path}")
-        return ", ".join(parts)
+        return summarize_file_changes(item)
 
     def _build_tool_listing(self) -> str:
-        """Build a human-readable tool listing for the system prompt."""
+        """Build a human-readable tool listing for the system prompt.
+
+        Core tools (those in CORE_TOOL_NAMES or passing is_core()) appear with
+        full descriptions. Non-core and shadow tools are deferred — they get a
+        single compact line directing the model to use ``tool_search`` first.
+        """
+        from obscura.core.tool_tiering import deferred_listing, split_by_tier
+
+        # Shadow specs (MCP shadows) are never listed in the prompt — they are
+        # discoverable via tool_search but bloat the system prompt otherwise.
+        visible_tools = [s for s in self._tools if not getattr(s, "is_shadow", False)]
+        core_tools, deferred_tools = split_by_tier(visible_tools)
+
         lines = ["## Available Tools", ""]
         lines.append(
             "You have the following tools. Use these EXACT names when calling tools:",
         )
         lines.append("")
-        for spec in self._tools:
+        for spec in core_tools:
             desc = (spec.description or "").split("\n")[0][:120]
             cap_tag = f" [{spec.capability}]" if getattr(spec, "capability", "") else ""
             lines.append(
@@ -577,12 +392,19 @@ class CodexBackend(BackendToolHostMixin):
             "Do NOT invent tool names. If none of these tools fit, tell the user.",
         )
         try:
-            cap_section = build_capability_map_section(self._tools)
+            cap_section = build_capability_map_section(core_tools)
             if cap_section:
                 lines.append("")
                 lines.append(cap_section)
         except Exception:
             logger.debug("suppressed exception in _build_tool_listing", exc_info=True)
+
+        if deferred_tools:
+            deferred_section = deferred_listing(deferred_tools)
+            if deferred_section:
+                lines.append("")
+                lines.append(deferred_section)
+
         return "\n".join(lines)
 
     def _build_system_prompt(self) -> str:
@@ -701,222 +523,7 @@ class CodexBackend(BackendToolHostMixin):
         method: str,
         payload: Any,
     ) -> list[StreamChunk]:
-        """Map a Codex app-server notification to zero or more StreamChunks."""
-        if payload is None:
-            return []
-
-        if method == "item/agentMessage/delta":
-            delta = getattr(payload, "delta", "")
-            if not delta:
-                return []
-            return [StreamChunk(kind=ChunkKind.TEXT_DELTA, text=delta, raw=payload)]
-
-        if method in (
-            "item/reasoning/textDelta",
-            "item/reasoning/summaryTextDelta",
-        ):
-            delta = getattr(payload, "delta", "")
-            if not delta:
-                return []
-            return [
-                StreamChunk(kind=ChunkKind.THINKING_DELTA, text=delta, raw=payload),
-            ]
-
-        if method in ("item/started", "item/completed"):
-            item = self._unwrap_item(getattr(payload, "item", None))
-            if item is None:
-                return []
-            started = method == "item/started"
-            item_type = getattr(item, "type", "")
-            if item_type == "commandExecution":
-                return self._command_execution_chunks(item, started=started)
-            if item_type == "mcpToolCall":
-                return self._mcp_tool_call_chunks(item, started=started)
-            if item_type == "fileChange" and not started:
-                return self._file_change_chunks(item)
-            if item_type == "webSearch":
-                return self._web_search_chunks(item, started=started)
-            return []
-
-        if method == "error":
-            err = getattr(payload, "error", None)
-            msg = getattr(err, "message", None) or "Unknown error"
-            return [StreamChunk(kind=ChunkKind.ERROR, text=msg, raw=payload)]
-
-        return []
-
-    def _command_execution_chunks(
-        self,
-        item: Any,
-        *,
-        started: bool,
-    ) -> list[StreamChunk]:
-        item_id = getattr(item, "id", "") or ""
-        if started:
-            chunks = [
-                StreamChunk(
-                    kind=ChunkKind.TOOL_USE_START,
-                    tool_name="shell_command",
-                    tool_use_id=item_id,
-                    raw=item,
-                ),
-            ]
-            cmd = getattr(item, "command", "")
-            if cmd:
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_DELTA,
-                        tool_input_delta=json.dumps({"command": cmd}),
-                        raw=item,
-                    ),
-                )
-            return chunks
-
-        output = getattr(item, "aggregated_output", "") or ""
-        exit_code = getattr(item, "exit_code", None)
-        text = output[:4096]
-        if exit_code is not None:
-            text = f"{text}\n[exit_code: {exit_code}]"
-        return [
-            StreamChunk(
-                kind=ChunkKind.TOOL_RESULT,
-                text=text,
-                tool_use_id=item_id,
-                raw=item,
-            ),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_END,
-                tool_name="shell_command",
-                tool_use_id=item_id,
-                raw=item,
-            ),
-        ]
-
-    def _mcp_tool_call_chunks(
-        self,
-        item: Any,
-        *,
-        started: bool,
-    ) -> list[StreamChunk]:
-        item_id = getattr(item, "id", "") or ""
-        server = getattr(item, "server", "") or ""
-        tool = getattr(item, "tool", "") or ""
-        name = self._sanitize_tool_name(f"{server}_{tool}")
-        if started:
-            chunks: list[StreamChunk] = [
-                StreamChunk(
-                    kind=ChunkKind.TOOL_USE_START,
-                    tool_name=name,
-                    tool_use_id=item_id,
-                    raw=item,
-                ),
-            ]
-            args = getattr(item, "arguments", None)
-            if args is not None:
-                try:
-                    args_str = args if isinstance(args, str) else json.dumps(args)
-                except (TypeError, ValueError):
-                    logger.debug(
-                        "suppressed exception in _mcp_tool_call_chunks", exc_info=True
-                    )
-                    args_str = str(args)
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_DELTA,
-                        tool_input_delta=args_str,
-                        raw=item,
-                    ),
-                )
-            return chunks
-
-        error = getattr(item, "error", None)
-        result_obj = getattr(item, "result", None)
-        if error is not None:
-            text = f"Error: {getattr(error, 'message', None) or error}"
-        elif result_obj is not None:
-            content = getattr(result_obj, "content", None)
-            try:
-                text = json.dumps(content) if content is not None else ""
-            except (TypeError, ValueError):
-                logger.debug(
-                    "suppressed exception in _mcp_tool_call_chunks", exc_info=True
-                )
-                text = str(content)
-        else:
-            text = ""
-        return [
-            StreamChunk(
-                kind=ChunkKind.TOOL_RESULT,
-                text=text[:4096],
-                tool_use_id=item_id,
-                raw=item,
-            ),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_END,
-                tool_name=name,
-                tool_use_id=item_id,
-                raw=item,
-            ),
-        ]
-
-    def _file_change_chunks(self, item: Any) -> list[StreamChunk]:
-        item_id = getattr(item, "id", "") or ""
-        summary = self._summarize_file_changes(item)
-        return [
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_START,
-                tool_name="file_change",
-                tool_use_id=item_id,
-                raw=item,
-            ),
-            StreamChunk(
-                kind=ChunkKind.TOOL_RESULT,
-                text=summary,
-                tool_use_id=item_id,
-                raw=item,
-            ),
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_END,
-                tool_name="file_change",
-                tool_use_id=item_id,
-                raw=item,
-            ),
-        ]
-
-    def _web_search_chunks(
-        self,
-        item: Any,
-        *,
-        started: bool,
-    ) -> list[StreamChunk]:
-        item_id = getattr(item, "id", "") or ""
-        query = getattr(item, "query", "")
-        if started:
-            chunks = [
-                StreamChunk(
-                    kind=ChunkKind.TOOL_USE_START,
-                    tool_name="web_search",
-                    tool_use_id=item_id,
-                    raw=item,
-                ),
-            ]
-            if query:
-                chunks.append(
-                    StreamChunk(
-                        kind=ChunkKind.TOOL_USE_DELTA,
-                        tool_input_delta=json.dumps({"query": query}),
-                        raw=item,
-                    ),
-                )
-            return chunks
-        return [
-            StreamChunk(
-                kind=ChunkKind.TOOL_USE_END,
-                tool_name="web_search",
-                tool_use_id=item_id,
-                raw=item,
-            ),
-        ]
+        return map_notification_to_chunks(method, payload)
 
     # -- Content block helpers -----------------------------------------------
 
@@ -925,62 +532,7 @@ class CodexBackend(BackendToolHostMixin):
         items: list[Any],
         final_text: str,
     ) -> list[Any]:
-        """Convert Codex thread items into Obscura content blocks."""
-        blocks: list[Any] = []
-        has_text = False
-
-        for raw in items:
-            item = self._unwrap_item(raw)
-            if item is None:
-                continue
-            item_type = getattr(item, "type", "")
-
-            if item_type == "agentMessage":
-                blocks.append(
-                    TextBlock(text=getattr(item, "text", "") or ""),
-                )
-                has_text = True
-
-            elif item_type == "reasoning":
-                content = list(getattr(item, "content", None) or [])
-                summary = list(getattr(item, "summary", None) or [])
-                text = "\n".join(str(s) for s in content + summary)
-                if text:
-                    blocks.append(ThinkingBlock(text=text))
-
-            elif item_type == "commandExecution":
-                blocks.append(
-                    ToolUseBlock(
-                        tool_name="shell_command",
-                        args={"command": getattr(item, "command", "") or ""},
-                        tool_use_id=getattr(item, "id", "") or "",
-                    ),
-                )
-
-            elif item_type == "mcpToolCall":
-                server = getattr(item, "server", "") or ""
-                tool = getattr(item, "tool", "") or ""
-                blocks.append(
-                    ToolUseBlock(
-                        tool_name=self._sanitize_tool_name(f"{server}_{tool}"),
-                        args=getattr(item, "arguments", None) or {},
-                        tool_use_id=getattr(item, "id", "") or "",
-                    ),
-                )
-
-            elif item_type == "fileChange":
-                blocks.append(
-                    ToolUseBlock(
-                        tool_name="file_change",
-                        args={"changes": self._summarize_file_changes(item)},
-                        tool_use_id=getattr(item, "id", "") or "",
-                    ),
-                )
-
-        if not has_text:
-            blocks.insert(0, TextBlock(text=final_text))
-
-        return blocks
+        return items_to_content_blocks(items, final_text)
 
     # -- SDK bootstrapping ---------------------------------------------------
 

@@ -62,6 +62,40 @@ async def install_session_registration(
 
     sid = session.session_id
 
+    # Mirror the cross-process session registration into the SQLite /
+    # Postgres event store so session listings and turn persistence are
+    # looking at the same logical session id.
+    try:
+        from obscura.core.db_factory import DatabaseFactory
+
+        store = DatabaseFactory.create_event_store()
+        existing = await store.get_session(sid)
+        if existing is None:
+            await store.create_session(
+                sid,
+                agent="repl",
+                backend=session.config.backend,
+                model=session.config.model or "",
+                source="live",
+                metadata={"surface": session.surface},
+            )
+            logger.info(
+                "install_session_registration: event store session created sid=%s",
+                sid[:12],
+            )
+        else:
+            logger.info(
+                "install_session_registration: event store session exists sid=%s status=%s",
+                sid[:12],
+                existing.status.value,
+            )
+        store.close()
+    except Exception:
+        logger.debug(
+            "install_session_registration: event store session registration failed",
+            exc_info=True,
+        )
+
     try:
         register_session(
             sid,

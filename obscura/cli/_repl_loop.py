@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -68,6 +69,7 @@ from obscura.cli.tips import TipScheduler
 from obscura.cli.tui_effects import ultrathink_banner
 from obscura.composition.repl import build_repl_session
 from obscura.composition.session import SessionConfig, SessionExtras
+from obscura.integrations.messaging.command_acl import is_command_allowed
 from obscura.core.cleanup import cleanup_stale_files, register_cleanup, run_cleanup
 from obscura.core.commit_attribution import get_attribution_tracker
 from obscura.core.deep_log import dlog
@@ -96,6 +98,130 @@ def _swallow(label: str, exc: Exception) -> None:
     _log.debug("%s: %s: %s", label, type(exc).__name__, exc)
 
 
+_CHANNEL_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_CHANNEL_REPLY_MAX_CHARS = 3500
+_CHANNEL_BLOCKED_SLASH_COMMANDS = frozenset({"quit", "exit"})
+"""Slash commands rejected when invoked via a messaging channel.
+``/quit`` and ``/exit`` would break the operator's local REPL — there
+is no legitimate reason for a remote sender to terminate the running
+session, so we hard-deny them and send a notice back."""
+
+_CHANNEL_PROGRESS_INITIAL_DELAY_S = 15.0
+"""Wait this long before the first 'still working' ping. Most turns
+finish well under this; the delay keeps us silent for short tasks."""
+_CHANNEL_PROGRESS_INTERVAL_S = 30.0
+"""Send a progress ping every N seconds after the initial delay."""
+_CHANNEL_PROGRESS_MESSAGES = (
+    "⏳ still working on it...",
+    "⏳ still processing, hang tight...",
+    "⏳ thinking through this one...",
+    "⏳ almost there...",
+    "⏳ on it, just a moment more...",
+)
+"""Rotated to avoid feeling robotic when several pings fire."""
+
+
+async def _channel_progress_pinger(
+    progress_fn: Any,
+    done_event: asyncio.Event,
+) -> None:
+    """Send periodic 'still working' pings via ``progress_fn`` until done.
+
+    Behavior:
+    * Waits :data:`_CHANNEL_PROGRESS_INITIAL_DELAY_S` before the first
+      ping — quiet for short turns (≤15s, which is most turns).
+    * After that, pings every :data:`_CHANNEL_PROGRESS_INTERVAL_S` seconds.
+    * ``done_event.set()`` ends the loop cleanly. Cancellation also
+      exits cleanly (caught around the sleeps).
+    * Ping failures are swallowed: a transient send error must not
+      kill the pinger or affect the final reply path.
+
+    ``progress_fn`` must already bypass any rate limit on the channel
+    — otherwise the hourly budget reserved for the final reply could
+    be exhausted by progress pings on a long-running turn.
+    """
+    try:
+        try:
+            await asyncio.wait_for(
+                done_event.wait(),
+                timeout=_CHANNEL_PROGRESS_INITIAL_DELAY_S,
+            )
+            return
+        except TimeoutError:
+            pass
+
+        idx = 0
+        while not done_event.is_set():
+            msg = _CHANNEL_PROGRESS_MESSAGES[idx % len(_CHANNEL_PROGRESS_MESSAGES)]
+            try:
+                await progress_fn(msg)
+            except Exception:
+                _log.debug("channel progress ping failed", exc_info=True)
+            idx += 1
+            try:
+                await asyncio.wait_for(
+                    done_event.wait(),
+                    timeout=_CHANNEL_PROGRESS_INTERVAL_S,
+                )
+                return
+            except TimeoutError:
+                continue
+    except asyncio.CancelledError:
+        return
+
+
+async def _run_slash_command_for_channel(
+    user_input: str,
+    ctx: Any,
+    reply_fn: Any,
+) -> None:
+    """Execute a slash command for a channel-injected message.
+
+    Wraps ``handle_command`` in ``console.capture()`` so the output that
+    would normally print to the operator's terminal is buffered, ANSI
+    codes stripped, and sent back via ``reply_fn``. Blocks ``/quit`` and
+    ``/exit`` (return values that would tear down the loop).
+
+    Errors during the command run are surfaced as a reply rather than
+    propagated — the operator's local session must keep running even
+    if a remote command crashes.
+    """
+    raw = user_input.lstrip("/").strip()
+    cmd_name = raw.split(None, 1)[0].lower() if raw else ""
+    if cmd_name in _CHANNEL_BLOCKED_SLASH_COMMANDS:
+        if reply_fn is not None:
+            try:
+                await reply_fn(
+                    f"⛔ /{cmd_name} is blocked from messaging channels.",
+                )
+            except Exception:
+                _log.debug("channel slash block reply failed", exc_info=True)
+        return
+
+    try:
+        with console.capture() as cap:
+            await handle_command(user_input, ctx)
+    except Exception as exc:
+        _log.debug("channel slash command raised", exc_info=True)
+        if reply_fn is not None:
+            try:
+                await reply_fn(f"⛔ command failed: {exc!r}")
+            except Exception:
+                _log.debug("channel slash error reply failed", exc_info=True)
+        return
+
+    captured = _CHANNEL_ANSI_RE.sub("", cap.get()).strip()
+    if not captured:
+        captured = f"✓ ran {user_input.strip()}"
+    if len(captured) > _CHANNEL_REPLY_MAX_CHARS:
+        captured = captured[:_CHANNEL_REPLY_MAX_CHARS] + "\n…[truncated]"
+    if reply_fn is not None:
+        try:
+            await reply_fn(captured)
+        except Exception:
+            _log.debug("channel slash reply failed", exc_info=True)
+
+
 async def repl(
     backend: str,
     model: str | None,
@@ -109,6 +235,7 @@ async def repl(
     *,
     supervise: bool = True,
     compiled_ws: Any | None = None,
+    tui_display_mode: str = "normal",
 ) -> None:
     """Core async loop -- runs the interactive REPL or single-shot."""
     # Event store — backend chosen via OBSCURA_DB_TYPE.
@@ -252,6 +379,7 @@ async def repl(
             vector_store=_session.vector_store,
             context_router=_session.context_router,
             turn_classifier=_session.turn_classifier,
+            tui_display_mode=tui_display_mode,
         )
 
         # --- Single-shot mode ---
@@ -563,7 +691,80 @@ async def repl(
                                 )
                                 daemon_task = None
                     _refresh_prompt_status()
-                    user_input = await bordered_prompt(session, status=prompt_status)
+                    # --- Channel inject: race prompt vs incoming platform messages ---
+                    try:
+                        from obscura.integrations.messaging.channel_inject import (
+                            ChannelMessage as _ChannelMessage,
+                            get_channel_queue,
+                        )
+
+                        _ch_queue = get_channel_queue()
+                        _prompt_coro = bordered_prompt(session, status=prompt_status)
+                        _prompt_task: asyncio.Task[str] = asyncio.ensure_future(
+                            _prompt_coro
+                        )
+                        _channel_task: asyncio.Task[_ChannelMessage] = (
+                            asyncio.ensure_future(_ch_queue.get())
+                        )
+                        _done, _pending = await asyncio.wait(
+                            {_prompt_task, _channel_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        for _t in _pending:
+                            _t.cancel()
+                            with contextlib.suppress(asyncio.CancelledError, Exception):
+                                await _t
+                        # If a channel message arrived just as we cancelled, put it back
+                        if _channel_task in _pending and not _channel_task.cancelled():
+                            with contextlib.suppress(Exception):
+                                _stray = _channel_task.result()
+                                get_channel_queue().put_nowait(_stray)
+                        _is_channel_injected = False
+                        if _channel_task in _done and not _channel_task.cancelled():
+                            _ch_msg: _ChannelMessage = _channel_task.result()
+                            _label = _ch_msg.display_name or _ch_msg.sender_id
+                            _plat = _ch_msg.platform.capitalize()
+                            _raw_text = _ch_msg.text.strip()
+                            # If the raw text is a REPL command prefix
+                            # (/, $, @) AND the sender is allowlisted, drop
+                            # the "[Whatsapp from X]:" label so the prefix
+                            # is detected by handlers further down. Without
+                            # this, "/help" arrives as "[Whatsapp from X]:
+                            # /help" and the slash branch's startswith
+                            # check fails silently — the literal text gets
+                            # sent to the agent as a prompt instead.
+                            if _raw_text.startswith(
+                                ("/", "$", "@")
+                            ) and is_command_allowed(
+                                _ch_msg.platform,
+                                _ch_msg.sender_id,
+                            ):
+                                user_input = _raw_text
+                            else:
+                                user_input = f"[{_plat} from {_label}]: {_ch_msg.text}"
+                            ctx._pending_channel_reply = _ch_msg.reply_fn  # type: ignore[attr-defined]
+                            # progress_fn (if the platform provides one)
+                            # carries "still working" pings during long
+                            # turns; bypass-rate-limit so it doesn't
+                            # eat the hourly budget reserved for the
+                            # final reply.
+                            ctx._pending_channel_progress = _ch_msg.progress_fn  # type: ignore[attr-defined]
+                            _is_channel_injected = True
+                        else:
+                            user_input = _prompt_task.result()
+                            ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                            ctx._pending_channel_progress = None  # type: ignore[attr-defined]
+                    except Exception:
+                        _log.debug(
+                            "channel inject race failed, falling back to plain prompt",
+                            exc_info=True,
+                        )
+                        user_input = await bordered_prompt(
+                            session, status=prompt_status
+                        )
+                        ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                        ctx._pending_channel_progress = None  # type: ignore[attr-defined]
+                        _is_channel_injected = False
                 except (EOFError, KeyboardInterrupt):
                     _log.debug("suppressed exception in repl", exc_info=True)
                     console.print()
@@ -658,6 +859,24 @@ async def repl(
                         loop_kwargs["tool_choice"] = ToolChoice.none()
                     else:
                         loop_kwargs.pop("tool_choice", None)
+
+                    if _is_channel_injected:
+                        # Channel-injected: capture output, send via
+                        # reply_fn. /quit and /exit are blocked inside
+                        # the helper since they'd break the operator's
+                        # local session.
+                        _captured_reply_fn = getattr(
+                            ctx,
+                            "_pending_channel_reply",
+                            None,
+                        )
+                        ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                        await _run_slash_command_for_channel(
+                            user_input,
+                            ctx,
+                            _captured_reply_fn,
+                        )
+                        continue
 
                     result = await handle_command(user_input, ctx)
                     if result == "quit":
@@ -982,9 +1201,48 @@ async def repl(
                 )
                 background_tasks.add(task)
 
-                def _on_done(t: asyncio.Task[str]) -> None:
+                # Capture the channel reply_fn at task-creation time so that
+                # concurrent loop iterations don't overwrite ctx._pending_channel_reply
+                # before _on_done fires.
+                _captured_reply_fn = getattr(ctx, "_pending_channel_reply", None)
+                _captured_progress_fn = getattr(ctx, "_pending_channel_progress", None)
+                ctx._pending_channel_reply = None  # type: ignore[attr-defined]
+                ctx._pending_channel_progress = None  # type: ignore[attr-defined]
+
+                # If this is a channel-injected turn AND the platform
+                # provided a non-rate-limited progress_fn, start a
+                # pinger that sends "still working" updates so the
+                # remote user knows we're alive on a long turn.
+                _pinger_done_event: asyncio.Event | None = None
+                _pinger_task: asyncio.Task[None] | None = None
+                if _captured_progress_fn is not None:
+                    _pinger_done_event = asyncio.Event()
+                    _pinger_task = asyncio.create_task(
+                        _channel_progress_pinger(
+                            _captured_progress_fn,
+                            _pinger_done_event,
+                        ),
+                        name="channel-progress-pinger",
+                    )
+                    background_tasks.add(_pinger_task)
+
+                def _on_done(
+                    t: asyncio.Task[str],
+                    _reply_fn: object = _captured_reply_fn,
+                    _pinger_done: asyncio.Event | None = _pinger_done_event,
+                    _pinger_t: asyncio.Task[None] | None = _pinger_task,
+                ) -> None:
                     background_tasks.discard(t)
                     ss.reset()
+                    # Stop the progress pinger first — set the event for a
+                    # clean exit, then cancel as a belt-and-suspenders backup
+                    # in case the pinger is mid-`progress_fn(...)` and not
+                    # at a sleep checkpoint.
+                    if _pinger_done is not None:
+                        _pinger_done.set()
+                    if _pinger_t is not None and not _pinger_t.done():
+                        _pinger_t.cancel()
+                        background_tasks.discard(_pinger_t)
                     if t.cancelled():
                         return
                     try:
@@ -996,6 +1254,25 @@ async def repl(
                         return
                     if exc is not None:
                         _log.error("chat turn failed", exc_info=exc)
+                        return
+                    # Send reply back to originating platform if this was an injected message
+                    if _reply_fn is not None:
+                        try:
+                            resp_text: str = t.result() or ""
+                            if resp_text:
+                                import asyncio as _asyncio
+                                import collections.abc as _abc
+
+                                if callable(_reply_fn) and isinstance(
+                                    _reply_fn, _abc.Callable
+                                ):
+                                    _asyncio.get_running_loop().create_task(
+                                        _reply_fn(resp_text)  # type: ignore[arg-type]
+                                    )
+                        except Exception:
+                            _log.debug(
+                                "channel inject: reply dispatch failed", exc_info=True
+                            )
 
                 task.add_done_callback(_on_done)
 

@@ -218,6 +218,15 @@ class ToolRegistry:
             "token_usage": "context_window_status",
             "tokens": "context_window_status",
             "window_status": "context_window_status",
+            # clock / time
+            "clock": "current_time",
+            "time": "current_time",
+            "date": "current_time",
+            "now": "current_time",
+            "today": "current_time",
+            "currenttime": "current_time",
+            "current_date": "current_time",
+            "currentdate": "current_time",
             # sandbox
             "sandbox": "code_sandbox",
             "execute": "code_sandbox",
@@ -279,8 +288,16 @@ class ToolRegistry:
             "ask_user_question": "user_ask",
             "request_user_input": "user_ask",
             "prompt_user": "user_ask",
-            "agent": "task",
-            "skill": "task",
+            # NOTE: "agent" → "task" and "skill" → "task" used to live
+            # here as name aliases so LLMs emitting Claude SDK
+            # Agent({...})/Skill({...}) calls would route to obscura's
+            # task() tool. They were removed because the parameter
+            # schemas don't line up — Agent({description, prompt,
+            # subagent_type}) and Skill({skill, args}) crash task() with
+            # TypeError("unexpected keyword argument"). A proper bridge
+            # would need parameter remapping, not just name aliasing.
+            # Until that lands, "unknown tool" is a cleaner failure than
+            # a swallowed TypeError that confuses the agent's reasoning.
             "enterplanmode": "enter_plan_mode",
             "exitplanmode": "exit_plan_mode",
             "enterworktree": "enter_worktree",

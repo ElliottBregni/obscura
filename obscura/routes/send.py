@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-from typing import TYPE_CHECKING, Annotated
+from dataclasses import asdict
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
@@ -14,6 +15,7 @@ from obscura.core.enums.agent import Backend, ExecutionMode
 from obscura.core.types import (
     ProviderNativeRequest,
     SessionRef,
+    StreamChunk,
     UnifiedRequest,
 )
 from obscura.deps import ClientFactory, audit, get_oauth_github_token
@@ -26,6 +28,21 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
 router = APIRouter(prefix="/api/v1", tags=["agent"])
+
+
+def _stream_chunk_event(chunk: StreamChunk) -> dict[str, str]:
+    payload: dict[str, Any] = {"kind": chunk.kind.value}
+    if chunk.text:
+        payload["text"] = chunk.text
+    if chunk.tool_name:
+        payload["tool_name"] = chunk.tool_name
+    if chunk.tool_input_delta:
+        payload["tool_input_delta"] = chunk.tool_input_delta
+    if chunk.tool_use_id:
+        payload["tool_use_id"] = chunk.tool_use_id
+    if chunk.metadata:
+        payload["metadata"] = asdict(chunk.metadata)
+    return {"event": chunk.kind.value, "data": json.dumps(payload)}
 
 
 @router.post("/send", response_model=SendResponse)
@@ -211,29 +228,9 @@ async def stream(
                 native=body.native,
                 request=unified_req,
             ):
-                payload: dict[str, str] = {}
-                if chunk.text:
-                    payload["text"] = chunk.text
-                    if chunk.kind.value == "text_delta":
-                        response_text_parts.append(chunk.text)
-                if chunk.tool_name:
-                    payload["tool_name"] = chunk.tool_name
-                if chunk.tool_input_delta:
-                    payload["tool_input_delta"] = chunk.tool_input_delta
-                if chunk.tool_use_id:
-                    payload["tool_use_id"] = chunk.tool_use_id
-                if chunk.metadata:
-                    payload["metadata"] = json.dumps(
-                        {
-                            "finish_reason": chunk.metadata.finish_reason,
-                            "model_id": chunk.metadata.model_id,
-                            "usage": chunk.metadata.usage,
-                        },
-                    )
-                yield {
-                    "event": chunk.kind.value,
-                    "data": json.dumps(payload),
-                }
+                if chunk.kind.value == "text_delta" and chunk.text:
+                    response_text_parts.append(chunk.text)
+                yield _stream_chunk_event(chunk)
             if body.session_id:
                 with contextlib.suppress(Exception):
                     sync_session_turn(

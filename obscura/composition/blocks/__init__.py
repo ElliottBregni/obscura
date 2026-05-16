@@ -30,6 +30,7 @@ from obscura.composition.blocks.system_tools import install_system_tools
 from obscura.composition.blocks.tool_router import install_tool_router
 from obscura.composition.blocks.uds_inbox import install_uds_inbox
 from obscura.composition.blocks.vector_memory import install_vector_memory
+from obscura.composition.blocks.wuzapi_daemon import install_wuzapi_daemon
 
 __all__ = [
     "install_a2a_input_bridge",
@@ -49,4 +50,5 @@ __all__ = [
     "install_tool_router",
     "install_uds_inbox",
     "install_vector_memory",
+    "install_wuzapi_daemon",
 ]

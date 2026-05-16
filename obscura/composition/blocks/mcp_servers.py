@@ -51,7 +51,9 @@ async def install_mcp_servers(
         session.mcp_status = []
         return
 
-    if (config.backend or "").lower() == "codex":
+    from obscura.core.backend_features import backend_routes_mcp_natively
+
+    if backend_routes_mcp_natively(config.backend):
         # Codex routes MCP via its own SDK config; don't double-bind.
         # Mark configured servers as "unknown" so the UI shows them
         # without claiming they're connected through us.

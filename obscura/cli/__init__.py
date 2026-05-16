@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Literal, cast
 
 import click
@@ -195,6 +196,13 @@ class _SubcommandAwareGroup(click.Group):
     default=True,
     help="Launch the agent fleet from agents.yaml (default: on).",
 )
+@click.option(
+    "--debug-tui",
+    "debug_tui",
+    is_flag=True,
+    default=False,
+    help="Start the TUI in debug display mode (raw payloads + traces).",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -212,6 +220,7 @@ def main(
     workspace_name: str | None = None,
     log_level: str = "WARNING",
     supervise: bool = True,
+    debug_tui: bool = False,
 ) -> None:
     """Obscura -- AI agent REPL."""
     # If a subcommand was invoked, let Click handle it
@@ -278,6 +287,13 @@ def main(
         except Exception:
             _log.debug("suppressed exception in main", exc_info=True)
 
+    # --debug-tui beats env, env beats default.
+    tui_mode = (
+        "debug"
+        if (debug_tui or os.environ.get("OBSCURA_TUI_DEBUG", "").strip().lower() == "1")
+        else "normal"
+    )
+
     try:
         asyncio.run(
             repl(
@@ -292,6 +308,7 @@ def main(
                 no_default_prompt,
                 supervise=supervise,
                 compiled_ws=compiled_ws,
+                tui_display_mode=tui_mode,
             ),
         )
     except KeyboardInterrupt:
@@ -556,6 +573,15 @@ main.add_command(_kairos_group)
 
 
 # ---------------------------------------------------------------------------
+# WhatsApp (wuzapi) CLI -- registered as `obscura whatsapp <subcommand>`
+# ---------------------------------------------------------------------------
+
+from obscura.cli.whatsapp_commands import whatsapp_group as _whatsapp_group  # noqa: E402
+
+main.add_command(_whatsapp_group)
+
+
+# ---------------------------------------------------------------------------
 # Full-screen TUI subcommand — `obscura tui`
 # ---------------------------------------------------------------------------
 
@@ -665,6 +691,108 @@ def tui(  # noqa: PLR0913 — Click options are individual params on purpose.
         _log.debug("tui interrupted by SIGINT", exc_info=True)
         exit_code = 130
     raise SystemExit(exit_code)
+
+
+# ---------------------------------------------------------------------------
+# Network gateway subcommand — `obscura gateway`
+# ---------------------------------------------------------------------------
+
+
+@main.command(name="gateway")
+@click.option("--host", default=None, help="Bind address (default from config).")
+@click.option(
+    "--port", default=None, type=int, help="Listen port (default from config)."
+)
+@click.option(
+    "--backend",
+    default=None,
+    help="LLM backend to use for gateway sessions (default from config).",
+)
+@click.option(
+    "--token", default=None, help="Bearer token override (default: auto-loaded)."
+)
+@click.option(
+    "--reload",
+    is_flag=True,
+    default=False,
+    help="Enable uvicorn auto-reload (development mode).",
+)
+def gateway(
+    host: str | None,
+    port: int | None,
+    backend: str | None,
+    token: str | None,
+    reload: bool,
+) -> None:
+    """Start the Obscura network gateway.
+
+    Exposes an HTTP agent endpoint on the network so remote clients can
+    connect to Obscura over the wire.  Token auth is required; the token
+    is printed at startup (masked) so you can hand it to callers.
+
+    Analogous to OpenClaw's gateway on port 18789, but for Obscura.
+    """
+    import uvicorn
+
+    from obscura.core.config import ObscuraConfig
+    from obscura.integrations.a2a.token_manager import A2ATokenManager
+
+    cfg = ObscuraConfig.load()
+
+    _host = host or cfg.network_gateway_host
+    _port = port or cfg.network_gateway_port
+    _backend = backend or cfg.network_gateway_backend
+
+    # Resolve token: CLI flag > env/file auto-load
+    if token:
+        _token = token
+    elif cfg.network_gateway_token:
+        _token = cfg.network_gateway_token
+    else:
+        _token = A2ATokenManager().load_network_gateway_token()
+
+    # Masked token display: first 8 chars + ***
+    masked = _token[:8] + "***" if len(_token) >= 8 else "***"
+
+    click.echo(f"Obscura Network Gateway listening on http://{_host}:{_port}")
+    click.echo(f"  Backend : {_backend}")
+    click.echo(f"  Token   : {masked}")
+    click.echo(
+        "  Connect : Authorization: Bearer <token>  "
+        "(set OBSCURA_NETWORK_TOKEN or use ~/.obscura/network-gateway.token)"
+    )
+
+    try:
+        from obscura.integrations.network_gateway import create_gateway_app
+        from obscura.integrations.network_gateway.config import GatewayConfig
+
+        # Start from full config (picks up standalone_agent_*, tailscale, etc.)
+        # then apply CLI flag overrides on top.
+        gw_cfg = GatewayConfig.from_obscura_config()
+        gw_cfg = GatewayConfig(
+            **{
+                **gw_cfg.__dict__,
+                "host": _host,
+                "port": _port,
+                "agent_backend": _backend,
+                "token": _token,
+            }
+        )
+        app = create_gateway_app(gw_cfg)
+    except ImportError:
+        click.echo(
+            "network_gateway module not yet available — "
+            "run with --reload once the module is installed.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    uvicorn.run(
+        app,
+        host=_host,
+        port=_port,
+        reload=reload,
+    )
 
 
 # Backwards-compat aliases added by test harness

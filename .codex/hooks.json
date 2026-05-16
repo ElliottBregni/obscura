@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/elliottbregni/dev/obscura-main/.claude/vulture-status.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

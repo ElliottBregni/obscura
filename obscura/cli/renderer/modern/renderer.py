@@ -50,6 +50,12 @@ from obscura.cli.renderer.modern.theme import (
     TOOL_COLOR,
     Style,
 )
+from obscura.cli.renderer.normalizer import SignalNormalizer
+from obscura.cli.renderer.ui_event import (
+    DisplayMode,
+    UiEvent,
+    UiEventKind,
+)
 from obscura.core.enums.agent import AgentEventKind
 from obscura.core.enums.ui import BorderStyle
 from obscura.core.types import AgentEvent
@@ -229,10 +235,35 @@ class ModernRenderer:
 
     FRAME_INTERVAL_S: float = 1.0 / 30  # 30 FPS
 
-    def __init__(self, streaming_status: object | None = None) -> None:
+    def __init__(
+        self,
+        streaming_status: object | None = None,
+        *,
+        display_mode: DisplayMode | str = DisplayMode.NORMAL,
+        normalizer: SignalNormalizer | None = None,
+    ) -> None:
         self._ss = streaming_status
         self._out = sys.stdout
         self._width = shutil.get_terminal_size((80, 24)).columns
+        # Display mode + signal normalizer.
+        # - The normalizer translates AgentEvent → UiEvent and applies
+        #   visibility / dedup / collapse policies (see
+        #   :mod:`obscura.cli.renderer.normalizer`).
+        # - The renderer's own dispatch uses the original AgentEvent
+        #   for backwards-compatible rendering. The UiEvent stream
+        #   exists alongside it for visibility filtering and debug
+        #   surface.
+        # DisplayMode is a StrEnum, so a plain string ("normal", "debug")
+        # also satisfies the runtime check. ``DisplayMode(...)`` validates
+        # and normalises both the enum and the string forms.
+        self._display_mode: DisplayMode = (
+            display_mode
+            if isinstance(display_mode, DisplayMode)
+            else DisplayMode(display_mode)
+        )
+        self._normalizer: SignalNormalizer = normalizer or SignalNormalizer(
+            mode=self._display_mode,
+        )
 
         # Committed output tracking
         self._text_accum: list[str] = []
@@ -397,7 +428,33 @@ class ModernRenderer:
 
         Split out from :meth:`handle` so the flush-deferral queue can
         replay queued events without re-entering the queueing logic.
+
+        Flow:
+            1. The normalizer projects the AgentEvent onto zero or
+               more UiEvents (mode-aware; dedup; collapsing).
+            2. We iterate the UiEvents to apply visibility filtering
+               and surface debug-only output.
+            3. The original AgentEvent still drives the layout-bound
+               handlers (TURN_*, AGENT_DONE, banners) — those need
+               unconditional access to the AgentEvent's exact shape
+               for the existing live-region machinery.
+
+        If the normalizer drops every UiEvent (e.g., a duplicate
+        status that was deduped), the AgentEvent-side handlers still
+        run for layout but no transcript/debug line is produced.
         """
+        ui_events = self._normalizer.normalize(event)
+        # Surface debug/trace UiEvents — only visible in debug mode.
+        # Visibility filtering for non-debug kinds is handled by the
+        # normalizer (returns nothing for HIDDEN/DEBUG_ONLY in normal
+        # mode) so the loop only sees events worth rendering.
+        for ui in ui_events:
+            if ui.kind in (UiEventKind.DEBUG, UiEventKind.TRACE):
+                self._render_debug(ui)
+
+        # Layout / transcript dispatch — unchanged. Uses AgentEvent
+        # directly because the existing handlers know how to drive
+        # the live region from its exact field shape.
         match event.kind:
             case AgentEventKind.TURN_START:
                 self._handle_turn_start()
@@ -519,6 +576,53 @@ class ModernRenderer:
         if ctx_pct:
             self._session_ctx_pct = ctx_pct
         self._dirty = True
+
+    # ── Display mode (normal / debug) ────────────────────────────────────
+
+    @property
+    def display_mode(self) -> DisplayMode:
+        return self._display_mode
+
+    def set_display_mode(self, mode: DisplayMode | str) -> None:
+        """Switch normal/debug mode at runtime.
+
+        Forwards to the underlying :class:`SignalNormalizer` so the
+        next event's visibility decisions reflect the new mode.
+        """
+        coerced = mode if isinstance(mode, DisplayMode) else DisplayMode(mode)
+        self._display_mode = coerced
+        self._normalizer.set_mode(coerced)
+
+    def _render_debug(self, ui: UiEvent) -> None:
+        """Print a debug/trace line above the live region.
+
+        Only called in debug mode (the normalizer drops these events
+        in normal mode). Format is intentionally low-noise: dim grey
+        prefix, source/title, optional content snippet.
+        """
+        if self._display_mode != DisplayMode.DEBUG:
+            return
+        source = ui.source.value
+        title = ui.title or ""
+        prefix = _styled(f"  · {source}", STYLE_DIM)
+        body_parts: list[str] = []
+        if title:
+            body_parts.append(_styled(title, STYLE_DIM))
+        if ui.content:
+            content_str = (
+                ui.content if isinstance(ui.content, str) else repr(ui.content)
+            )
+            snippet = _sanitize(content_str)
+            if len(snippet) > 200:
+                snippet = snippet[:200] + "…"
+            if snippet:
+                body_parts.append(_styled(snippet, STYLE_DIM))
+        if ui.tool_name:
+            body_parts.append(_styled(f"[{ui.tool_name}]", STYLE_DIM))
+        if ui.correlation_id:
+            body_parts.append(_styled(f"({ui.correlation_id[:8]})", STYLE_DIM))
+        line = prefix + " " + " · ".join(body_parts) if body_parts else prefix
+        self._commit_lines([line])
 
     # ── Event handlers ────────────────────────────────────────────────────
 

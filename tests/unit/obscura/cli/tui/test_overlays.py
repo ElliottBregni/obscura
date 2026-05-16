@@ -108,6 +108,16 @@ async def test_command_palette_request_resolves_to_chosen_command() -> None:
     assert palette.visible is False
 
 
+def test_command_palette_renders_slash_prefixed_items() -> None:
+    state = _make_state()
+    overlays = build_overlays(state, command_names=lambda: ["help", "quit"])
+    palette = overlays.command_palette
+    palette.open()
+    rendered = "".join(text for _, text in palette._render_list())  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    assert "/help" in rendered
+    assert "Enter run" in rendered
+
+
 async def test_ask_user_overlay_returns_typed_text() -> None:
     state = _make_state()
     overlays = build_overlays(state, command_names=lambda: [])
@@ -125,6 +135,23 @@ async def test_ask_user_overlay_returns_typed_text() -> None:
 
     assert result == "yes please"
     assert ask.visible is False
+
+
+def test_tool_approval_overlay_renders_summary_and_scope() -> None:
+    state = _make_state()
+    overlays = build_overlays(state, command_names=lambda: [])
+    state.pending_approval = ToolApprovalRequest(
+        tool_use_id="tu1",
+        tool_name="run_command",
+        tool_input={"command": "git status"},
+    )
+    rendered = "".join(
+        text
+        for _, text in overlays.tool_approval._render_text()  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
+    )
+    assert "action:" in rendered
+    assert "scope:" in rendered
+    assert "git status" in rendered
 
 
 async def test_plan_approval_resolves_true_on_y_keypress() -> None:

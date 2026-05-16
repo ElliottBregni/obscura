@@ -37,11 +37,14 @@ Design notes
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 import time
 from collections.abc import Callable
 from io import StringIO
+from typing import Any
 
 from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 from rich.console import Console as RichConsole
@@ -56,6 +59,7 @@ from obscura.cli.renderer.channels import (
     TranscriptEvent,
     from_agent_event,
 )
+from obscura.cli.tool_summaries import classify_tool, summarize_tool_call
 from obscura.cli.tui.formatter import format_slash_output
 from obscura.cli.tui.state import (
     BannerState,
@@ -90,6 +94,12 @@ _STYLE_SYSTEM = "class:transcript.system"
 _STYLE_ERROR = "class:transcript.error"
 _STYLE_SLASH = "class:transcript.slash"
 
+# Hex used by ``_format_tool_result_runs`` for the ``… (N more lines)``
+# truncation hint. Pulled inline rather than imported from theme so
+# the formatter is callable from tests without touching the theme
+# module's lazy imports.
+_OVERLAY_FOR_TRUNCATION = "#6c7086"
+
 
 # ---------------------------------------------------------------------------
 # Banner-kind ↔ TUI banner-kind table
@@ -119,6 +129,206 @@ def _extract_overflow_path(text: str) -> str:
     if match is None:
         return ""
     return match.group(1).strip()
+
+
+# ANSI escape sequence stripper — same shape as the modern renderer's
+# ``_sanitize`` helper. Tool output coming from shells / MCP servers
+# may include colour codes that prompt-toolkit will treat as literal
+# characters in the transcript window; strip them before display.
+_ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+_ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0B-\x1F\x7F]+")
+
+
+def _sanitize(text: str) -> str:
+    """Strip ANSI escapes and control characters from ``text``."""
+    if not text:
+        return ""
+    cleaned = _ANSI_CSI_RE.sub("", text)
+    cleaned = _ANSI_OSC_RE.sub("", cleaned)
+    cleaned = re.sub(r"\x1B[@-Z\\-_]", "", cleaned)
+    cleaned = re.sub(r"\x1B", "", cleaned)
+    return _CONTROL_CHARS_RE.sub("", cleaned)
+
+
+# Default cap for tool result lines in the transcript. Mirrors the
+# modern renderer's ``OBSCURA_TOOL_OUTPUT_MAX_LINES`` so behaviour
+# stays consistent across the two surfaces.
+_DEFAULT_TOOL_OUTPUT_MAX_LINES = 80
+
+
+def _tool_output_line_cap() -> int:
+    raw = os.environ.get("OBSCURA_TOOL_OUTPUT_MAX_LINES", "")
+    if not raw:
+        return _DEFAULT_TOOL_OUTPUT_MAX_LINES
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _DEFAULT_TOOL_OUTPUT_MAX_LINES
+
+
+def _try_parse_json(raw: str) -> Any | None:
+    """Parse ``raw`` as JSON, or return ``None`` if it isn't JSON.
+
+    Tool results from MCP / system tools commonly return a JSON-encoded
+    dict like ``{"ok": true, "stdout": "...", "stderr": ""}``. Showing
+    that verbatim in the transcript creates the unreadable
+    ``↳ {"ok": true, …}`` lines the user complained about. Parsing it
+    here lets the formatter pull out the readable parts (``stdout``,
+    ``message``, ``result``, etc.) and drop the structural noise.
+    """
+    raw = raw.strip()
+    if not raw or raw[0] not in "{[":
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+# Keys that carry the human-readable payload of a JSON tool result.
+# Order matters: a successful shell call's body lives in ``stdout``;
+# a failed call's body lives in ``stderr``. Generic tools use
+# ``output`` / ``message`` / ``result`` / ``content``. We pick the
+# first key with a non-empty string value.
+_TOOL_RESULT_BODY_KEYS: tuple[str, ...] = (
+    "stdout",
+    "stderr",
+    "output",
+    "message",
+    "result",
+    "content",
+    "text",
+    "value",
+)
+
+
+def _summarize_json_result(parsed: Any) -> str:
+    """Render a parsed JSON tool result as a short human-readable string.
+
+    Falls back to a one-line ``key=value`` summary for small dicts and
+    a single ``str(parsed)`` for anything else. Never raises.
+    """
+    if isinstance(parsed, str):
+        return parsed
+    if isinstance(parsed, list):
+        items: list[Any] = parsed  # type: ignore[reportUnknownVariableType]
+        return f"({len(items)} items)"
+    if not isinstance(parsed, dict):
+        return str(parsed)
+
+    parsed_dict: dict[str, Any] = parsed  # type: ignore[reportUnknownVariableType]
+
+    # Prefer a recognised body field — that's the human-readable part.
+    for key in _TOOL_RESULT_BODY_KEYS:
+        value: Any = parsed_dict.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+        if isinstance(value, (int, float, bool)) and key not in ("ok",):
+            return f"{key}: {value}"
+
+    # No recognised body field — show a short ``k: v`` summary of the
+    # interesting (non-status) keys, preserving order. Skips noise
+    # like ``ok`` / ``status`` so the line surfaces actual data.
+    skip = {"ok", "status", "code", "exit_code"}
+    parts: list[str] = []
+    for k, v in parsed_dict.items():
+        if k in skip:
+            continue
+        text = str(v)
+        if len(text) > 60:
+            text = text[:57] + "…"
+        parts.append(f"{k}: {text}")
+        if len(parts) >= 4:
+            break
+    if parts:
+        return " · ".join(parts)
+    # Pure-status dict like ``{"ok": true}``: keep the OK / fail signal.
+    if "ok" in parsed_dict:
+        return "ok" if parsed_dict["ok"] else "failed"
+    return ""
+
+
+def _format_tool_result_runs(
+    event: AgentEvent,
+    *,
+    error_style: str,
+    success_style: str,
+    detail_style: str,
+    muted_style: str,
+) -> list[StyledRun]:
+    """Convert ``event.tool_result`` into a styled multi-line list.
+
+    Mirrors the modern renderer's ``_handle_tool_result``: sanitise
+    ANSI, JSON-decode dict-shaped output, line-split, cap line count,
+    and indent continuation lines. The first row gets a ``✓``/``✗``
+    severity glyph; subsequent rows align under it.
+    """
+    raw = (event.tool_result or "").rstrip()
+    is_error = bool(event.is_error)
+
+    # Strip ANSI before any further parsing — colours from a shell
+    # tool would otherwise survive into the transcript as literal
+    # escape sequences.
+    cleaned = _sanitize(raw)
+
+    # If the result is a JSON dict, surface the human-readable body
+    # (stdout / message / result / etc.) so the transcript shows
+    # something a reader can scan at a glance instead of the literal
+    # ``{"ok": true, "stdout": "…"}`` envelope.
+    parsed: Any = _try_parse_json(cleaned)
+    if parsed is not None:
+        summary = _summarize_json_result(parsed)
+        if summary:
+            cleaned = summary
+            # When the dict carries an explicit failure signal, prefer
+            # the error style even if ``event.is_error`` was unset.
+            if isinstance(parsed, dict) and not is_error:
+                parsed_d: dict[str, Any] = parsed  # type: ignore[reportUnknownVariableType]
+                exit_code: Any = parsed_d.get("exit_code")
+                if (
+                    parsed_d.get("ok") is False
+                    or (isinstance(exit_code, int) and exit_code != 0)
+                    or parsed_d.get("status") in ("error", "failed")
+                ):
+                    is_error = True
+        elif isinstance(parsed, dict) and not parsed:
+            cleaned = "(empty result)"
+
+    if not cleaned.strip():
+        cleaned = "(empty result)"
+
+    glyph_style = error_style if is_error else success_style
+    body_style = error_style if is_error else detail_style
+    glyph = "✗" if is_error else "✓"
+
+    lines = cleaned.split("\n")
+    cap = _tool_output_line_cap()
+    truncated = len(lines) > cap
+    if truncated:
+        lines = lines[:cap]
+
+    tool_name = (event.tool_name or "tool").strip()
+    runs: list[StyledRun] = []
+    if tool_name:
+        runs.append(StyledRun(text=tool_name, style=f"{success_style} bold"))
+        runs.append(StyledRun(text="  ", style=""))
+    runs.append(StyledRun(text=f"{glyph} ", style=f"{glyph_style} bold"))
+    runs.append(StyledRun(text=lines[0], style=body_style))
+    for ln in lines[1:]:
+        runs.append(StyledRun(text="\n    "))
+        runs.append(StyledRun(text=ln, style=body_style))
+    if truncated:
+        all_lines = cleaned.split("\n")
+        more = len(all_lines) - cap
+        runs.append(StyledRun(text="\n    "))
+        runs.append(
+            StyledRun(
+                text=f"… ({more} more lines)",
+                style=muted_style,
+            ),
+        )
+    return runs
 
 
 _MARKDOWN_RENDER_WIDTH = 100
@@ -197,6 +407,11 @@ class TUIRenderer:
         self._all_text: list[str] = []
         self._thinking_blocks: list[str] = []
         self._in_thinking: bool = False
+        # Live transcript entry for the current thinking block. Created on
+        # the first THINKING_DELTA and updated in place each subsequent delta
+        # so thinking streams into the transcript as it arrives rather than
+        # appearing all at once when the block ends.
+        self._thinking_entry: TranscriptEntry | None = None
 
         # Reveal-aware flush queue — same shape as the bordered REPL.
         # Events whose handler commits ``_text_buf`` to the transcript
@@ -429,6 +644,18 @@ class TUIRenderer:
         self._state.append_transcript(entry)
         self._fire_invalidate()
 
+    def push_slash_command(self, text: str) -> None:
+        """Append a submitted slash command as a USER transcript entry."""
+        if not text:
+            return
+        entry = TranscriptEntry(
+            kind=TranscriptKind.USER,
+            runs=[StyledRun(text=text, style=f"{_STYLE_USER} italic")],
+            metadata={"raw_text": text, "is_slash_command": True},
+        )
+        self._state.append_transcript(entry)
+        self._fire_invalidate()
+
     def push_slash_output(self, captured_rich_text: str) -> None:
         """Append a SLASH_OUTPUT transcript entry.
 
@@ -466,6 +693,7 @@ class TUIRenderer:
             # Begin a fresh turn — clamp leftover state. ``finish`` already
             # ran on the previous turn, but a defensive reset costs nothing.
             self._in_thinking = False
+            self._thinking_entry = None
             self._state.live.kind = LiveRegionKind.THINKING
             self._state.live.label = "thinking"
             self._state.live.preview = ""
@@ -479,7 +707,26 @@ class TUIRenderer:
             if not self._in_thinking:
                 self._flush_text()
                 self._in_thinking = True
+                # Create a live transcript entry immediately so thinking
+                # streams delta-by-delta into the transcript rather than
+                # appearing all at once when the block ends.
+                entry = TranscriptEntry(
+                    kind=TranscriptKind.THINKING,
+                    runs=[StyledRun(text="", style=_STYLE_THINKING)],
+                )
+                self._thinking_entry = entry
+                self._state.append_transcript(entry)
             self._thinking_buf.append(event.text)
+            # Update the live entry's runs in place — TranscriptEntry is
+            # not frozen so this is safe; StyledRun is frozen so we replace
+            # the list rather than mutating a run.
+            if self._thinking_entry is not None:
+                self._thinking_entry.runs = [
+                    StyledRun(
+                        text="".join(self._thinking_buf),
+                        style=_STYLE_THINKING,
+                    )
+                ]
             self._update_live_thinking()
             return
 
@@ -592,21 +839,27 @@ class TUIRenderer:
         self._state.append_transcript(entry)
 
     def _flush_thinking(self) -> None:
-        """Flush ``_thinking_buf`` as a single THINKING transcript entry."""
+        """Finalise the live THINKING transcript entry and reset thinking state.
+
+        The transcript entry was created on the first THINKING_DELTA and
+        updated in place on each subsequent delta, so there is nothing left
+        to append here. We just record the completed block in
+        ``_thinking_blocks`` for context-window compaction and clear all
+        accumulators.
+        """
         if not self._thinking_buf:
             self._in_thinking = False
+            self._thinking_entry = None
             return
         text = "".join(self._thinking_buf)
         self._thinking_buf.clear()
         self._in_thinking = False
+        self._thinking_entry = None
         if not text.strip():
             return
         self._thinking_blocks.append(text)
-        entry = TranscriptEntry(
-            kind=TranscriptKind.THINKING,
-            runs=[StyledRun(text=text, style=_STYLE_THINKING)],
-        )
-        self._state.append_transcript(entry)
+        # Entry already committed live to the transcript during streaming —
+        # do not append a second copy.
 
     # ------------------------------------------------------------------
     # Tool / error emission
@@ -615,14 +868,36 @@ class TUIRenderer:
     def _emit_tool_call(self, event: AgentEvent) -> None:
         """Emit a TOOL_USE transcript entry from a TOOL_CALL event."""
         name = event.tool_name or "tool"
-        # Thin formatting — the dedicated formatter module will replace
-        # this with richer styling when wired in.
-        summary = self._summarize_tool_call(name, event.tool_input)
-        runs: list[StyledRun] = [
-            StyledRun(text=name, style=f"{_STYLE_TOOL_CALL} bold"),
-        ]
+        # Use the shared summariser so the TUI matches the bordered
+        # REPL exactly: ``read_text_file {"path": "x.py"}`` →
+        # ``Reading x.py``; ``run_command {"command": "ls"}`` →
+        # ``$ ls``; MCP shadows render as ``server.tool — arg``.
+        try:
+            summary = summarize_tool_call(name, dict(event.tool_input or {}))
+            kind = classify_tool(name)
+        except Exception:
+            logger.debug("suppressed exception in _emit_tool_call", exc_info=True)
+            summary = ""
+            kind = "native"
+
+        # Per-kind tag mirrors the modern renderer's ``_TOOL_KIND_STYLES``
+        # so MCP / shell / plugin / delegation tools are scannable at a
+        # glance even on a busy transcript.
+        kind_tag = {
+            "shell": "$",
+            "mcp": "MCP",
+            "plugin": "PLUG",
+            "delegation": "TASK",
+        }.get(kind, "")
+
+        runs: list[StyledRun] = []
+        if kind_tag:
+            runs.append(
+                StyledRun(text=f"{kind_tag} ", style=f"{_STYLE_TOOL_CALL} italic"),
+            )
+        runs.append(StyledRun(text=name, style=f"{_STYLE_TOOL_CALL} bold"))
         if summary:
-            runs.append(StyledRun(text=" "))
+            runs.append(StyledRun(text="  "))
             runs.append(StyledRun(text=summary, style=_STYLE_TOOL_CALL))
         entry = TranscriptEntry(
             kind=TranscriptKind.TOOL_USE,
@@ -638,19 +913,27 @@ class TUIRenderer:
         live = self._state.live
         live.kind = LiveRegionKind.TOOL_RUNNING
         live.label = f"running {name}"
-        live.preview = summary
+        # Cap the live preview at ~50 chars so it never wraps the
+        # single-row live region on narrow terminals. The truncation
+        # in :func:`live_region_text` is a backstop, but trimming here
+        # also keeps ``state.live.preview`` lean for callers that
+        # render it elsewhere.
+        live.preview = summary[:50] if summary else ""
         live.started_at_monotonic = time.monotonic()
 
     def _emit_tool_result(self, event: AgentEvent) -> None:
         """Emit a TOOL_RESULT transcript entry from a TOOL_RESULT event."""
         raw = (event.tool_result or "").rstrip()
-        snippet = raw[:300]
-        style = _STYLE_TOOL_RESULT_ERR if event.is_error else _STYLE_TOOL_RESULT
-        runs: list[StyledRun] = []
-        if snippet:
-            runs.append(StyledRun(text=snippet, style=style))
-        else:
-            runs.append(StyledRun(text="(empty result)", style=style))
+        # Build the styled body via the shared formatter — sanitises
+        # ANSI, decodes JSON envelopes (``{"ok": true, "stdout": …}``),
+        # splits multi-line output, and caps at OBSCURA_TOOL_OUTPUT_MAX_LINES.
+        runs = _format_tool_result_runs(
+            event,
+            error_style=_STYLE_TOOL_RESULT_ERR,
+            success_style=_STYLE_TOOL_RESULT,
+            detail_style=_STYLE_TOOL_RESULT,
+            muted_style=f"fg:{_OVERLAY_FOR_TRUNCATION}",
+        )
         entry = TranscriptEntry(
             kind=TranscriptKind.TOOL_RESULT,
             runs=runs,
@@ -718,7 +1001,9 @@ class TUIRenderer:
             live.started_at_monotonic = time.monotonic()
             live.reveal_pos = 0
         if live.kind != LiveRegionKind.THINKING:
-            live.reveal_pos = 0
+            # Clamp: never let reveal_pos jump backwards on a kind
+            # transition (e.g. STREAMING → THINKING mid-turn).
+            live.reveal_pos = max(live.reveal_pos, 0)
         live.kind = LiveRegionKind.THINKING
         live.label = "thinking"
         live.full_text = "".join(self._thinking_buf)
@@ -735,32 +1020,12 @@ class TUIRenderer:
             live.started_at_monotonic = time.monotonic()
             live.reveal_pos = 0
         if live.kind != LiveRegionKind.STREAMING:
-            live.reveal_pos = 0
+            # Clamp: never let reveal_pos jump backwards on a kind
+            # transition (e.g. THINKING → STREAMING mid-turn).
+            live.reveal_pos = max(live.reveal_pos, 0)
         live.kind = LiveRegionKind.STREAMING
         live.label = "streaming"
         live.full_text = "".join(self._text_buf)
-
-    # ------------------------------------------------------------------
-    # Tool-call summary (thin placeholder — formatter will replace)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _summarize_tool_call(name: str, args: dict[str, object]) -> str:
-        """Produce a one-line summary of ``args`` for the TOOL_USE entry.
-
-        Intentionally minimal — the formatter module will replace this
-        with the richer per-tool summarisation once wired in.
-        """
-        if not args:
-            return ""
-        # Common path-bearing keys — surface the most informative one.
-        for key in ("path", "file_path", "command", "url", "query"):
-            value = args.get(key)
-            if isinstance(value, str) and value:
-                return f"{key}={value}"
-        # Fall back to a short comma-joined list of keys.
-        keys = ", ".join(sorted(str(k) for k in args)[:4])
-        return f"({keys})" if keys else ""
 
     # ------------------------------------------------------------------
     # Misc

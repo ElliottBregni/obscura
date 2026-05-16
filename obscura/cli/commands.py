@@ -389,6 +389,13 @@ class REPLContext:
     ui_right_menu_enabled: bool = field(default=True, repr=False)
     ui_menu_items: dict[str, bool] = field(default_factory=_empty_bool_dict, repr=False)
 
+    # TUI display mode for the SignalNormalizer — "normal" hides
+    # provider/runtime debug noise, "debug" surfaces raw payloads,
+    # adapter decisions, and full tool args/results. Default is set
+    # from env (OBSCURA_TUI_DEBUG=1 → debug) or the --debug-tui CLI
+    # flag in obscura.cli.__init__.main.
+    tui_display_mode: str = field(default="normal", repr=False)
+
     def get_mode_manager(self) -> Any:
         """Get or create the ModeManager."""
         if self.mode_manager is None:
@@ -5572,6 +5579,44 @@ async def cmd_fast(_args: str, ctx: REPLContext) -> str | None:
     return None
 
 
+async def cmd_tui(args: str, ctx: REPLContext) -> str | None:
+    """Switch the TUI display mode. Usage: /tui [normal|debug]."""
+    val = args.strip().lower()
+    current = getattr(ctx, "tui_display_mode", "normal") or "normal"
+
+    if not val:
+        print_info(f"TUI display mode: {current}")
+        print_info(
+            "Use /tui debug for raw payloads + traces, /tui normal for clean output."
+        )
+        return None
+
+    if val not in ("normal", "debug"):
+        print_error("Usage: /tui normal|debug")
+        return None
+
+    ctx.tui_display_mode = val
+
+    # If a renderer is currently active (mid-stream), update its
+    # mode in place so the next event uses the new visibility rules.
+    try:
+        from obscura.cli.render import get_active_renderer
+
+        active = get_active_renderer()
+    except Exception:
+        active = None
+    if active is not None:
+        setter = getattr(active, "set_display_mode", None)
+        if callable(setter):
+            try:
+                setter(val)
+            except Exception:
+                logger.debug("suppressed exception in cmd_tui", exc_info=True)
+
+    print_ok(f"TUI display mode: {val}")
+    return None
+
+
 async def cmd_caffeinate(args: str, _ctx: REPLContext) -> str | None:
     """Prevent macOS from sleeping while Obscura is running.
 
@@ -6296,11 +6341,10 @@ async def cmd_tool_summary(_args: str, ctx: REPLContext) -> str | None:
         print_info("No tool usage recorded yet.")
         return None
     # Show a summary of all tool calls from the session.
-    if hasattr(collapser, "_group") or True:
-        tracker = get_cost_tracker()
-        print_info(
-            tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.",
-        )
+    tracker = get_cost_tracker()
+    print_info(
+        tracker.summary() if tracker.turn_count() > 0 else "No turns recorded yet.",
+    )
     return None
 
 
@@ -10038,6 +10082,8 @@ COMMANDS: dict[str, CommandHandler] = {
     "fast": cmd_fast,
     "debug": cmd_debug,
     "caffeinate": cmd_caffeinate,
+    # TUI display
+    "tui": cmd_tui,
     # KAIROS & automation
     "arbiter": cmd_arbiter,
     "kairos": cmd_kairos,

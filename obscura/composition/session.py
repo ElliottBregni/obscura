@@ -780,7 +780,10 @@ class AgentSession:
                 last_turn_text = []
             elif event.kind == AgentEventKind.TEXT_DELTA:
                 last_turn_text.append(event.text or "")
-            elif event.kind == AgentEventKind.TURN_COMPLETE:
+            elif event.kind in (
+                AgentEventKind.TURN_COMPLETE,
+                AgentEventKind.AGENT_DONE,
+            ):
                 chunks = last_turn_text  # keep only final turn's text
         return "".join(chunks)
 

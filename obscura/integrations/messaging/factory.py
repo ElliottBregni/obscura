@@ -31,7 +31,44 @@ def _build_imessage_adapter(*, contacts: list[str], account_id: str = "default")
     return IMessageAdapter(contacts, account_id=account_id)
 
 
+def _read_whatsapp_transport() -> str:
+    """Look up ``[messaging.whatsapp] transport`` in ``~/.obscura/config.toml``.
+
+    Returns ``"twilio"`` (the default) when the file or section is missing.
+    Supported values: ``"twilio"`` (Twilio Business API, paid; the default
+    for backwards-compat) or ``"wuzapi"`` (free, personal WhatsApp Web via
+    the wuzapi sidecar; opt-in).
+    """
+    import tomllib
+
+    cfg_path = resolve_obscura_home() / "config.toml"
+    if not cfg_path.is_file():
+        return "twilio"
+    try:
+        with cfg_path.open("rb") as fh:
+            raw = tomllib.load(fh)
+    except Exception:
+        return "twilio"
+    messaging = raw.get("messaging", {})
+    whatsapp = messaging.get("whatsapp", {}) if isinstance(messaging, dict) else {}
+    value = (
+        str(whatsapp.get("transport", "twilio")).strip().lower()
+        if isinstance(whatsapp, dict)
+        else "twilio"
+    )
+    return value if value in ("twilio", "wuzapi") else "twilio"
+
+
 def _build_whatsapp_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    transport = _read_whatsapp_transport()
+    if transport == "wuzapi":
+        from obscura.integrations.whatsapp.wuzapi.adapter import WuzapiAdapter
+        from obscura.integrations.whatsapp.wuzapi.client import WuzapiClient
+        from obscura.integrations.whatsapp.wuzapi.setup import load_user_token
+
+        client = WuzapiClient(token=load_user_token())
+        return WuzapiAdapter(client, account_id=account_id)
+
     from obscura.integrations.whatsapp import WhatsAppAdapter
 
     return WhatsAppAdapter(contacts, account_id=account_id)
@@ -47,6 +84,12 @@ def _build_slack_adapter(*, contacts: list[str], account_id: str = "default") ->
     from obscura.integrations.slack import SlackAdapter
 
     return SlackAdapter(contacts, account_id=account_id)
+
+
+def _build_discord_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
+    from obscura.integrations.discord import DiscordAdapter
+
+    return DiscordAdapter(contacts, account_id=account_id)
 
 
 def _build_webhook_adapter(*, contacts: list[str], account_id: str = "default") -> Any:
@@ -72,6 +115,7 @@ _ADAPTER_BUILDERS: dict[str, AdapterBuilder] = {
     "whatsapp": _build_whatsapp_adapter,
     "signal": _build_signal_adapter,
     "slack": _build_slack_adapter,
+    "discord": _build_discord_adapter,
     "webhook": _build_webhook_adapter,
     "push": _build_push_adapter,
     "telegram": _build_telegram_adapter,
@@ -104,10 +148,12 @@ def get_adapter(
 
 
 def _parse_mode(value: str) -> str:
-    """Normalise a mode string to 'chat' or 'kairos'."""
+    """Normalise a mode string to 'chat', 'kairos', or 'channel_inject'."""
     v = value.strip().lower()
     if v in ("kairos", "k"):
         return "kairos"
+    if v in ("inject", "channel_inject"):
+        return "channel_inject"
     return "chat"
 
 
@@ -119,6 +165,7 @@ async def build_channel_router(
     backend_name: str | None = None,
     default_mode: str = "chat",
     platform_modes: dict[str, str] | None = None,
+    inject_platforms: list[str] | None = None,
 ) -> Any:
     """Build a fully-wired ChannelRouter from environment variables.
 
@@ -205,6 +252,14 @@ async def build_channel_router(
 
     def _apply_platform_mode(platform: str) -> None:
         """Resolve and apply the correct mode for a registered platform."""
+        # 0. inject_platforms kwarg takes highest priority
+        if inject_platforms and platform in inject_platforms:
+            channel_router.set_platform_mode(platform, ChannelMode.CHANNEL_INJECT)
+            logger.info(
+                "Platform %s → channel_inject mode (inject_platforms)", platform
+            )
+            return
+
         # 1. Explicit kwarg dict
         if platform_modes and platform in platform_modes:
             mode_str = _parse_mode(platform_modes[platform])
@@ -213,6 +268,11 @@ async def build_channel_router(
             env_key = f"OBSCURA_{platform.upper()}_MODE"
             env_val = os.environ.get(env_key, "")
             mode_str = _parse_mode(env_val) if env_val else resolved_default
+
+        if mode_str == "channel_inject":
+            channel_router.set_platform_mode(platform, ChannelMode.CHANNEL_INJECT)
+            logger.info("Platform %s → channel_inject mode", platform)
+            return
 
         if mode_str == "kairos":
             kr = _get_kairos_runner()
@@ -268,6 +328,23 @@ async def build_channel_router(
         except Exception:
             logger.warning(
                 "WhatsApp adapter failed to initialise; WhatsApp webhooks disabled",
+                exc_info=True,
+            )
+
+    # --- Discord ---
+    discord_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+    if discord_token:
+        try:
+            from obscura.integrations.discord.adapter import DiscordAdapter
+
+            dc_raw = os.environ.get("DISCORD_CHANNEL_IDS", "")
+            dc_contacts = [c.strip() for c in dc_raw.split(",") if c.strip()]
+            dc_adapter = DiscordAdapter(contacts=dc_contacts, bot_token=discord_token)
+            channel_router.register("discord", dc_adapter)
+            _apply_platform_mode("discord")
+        except Exception:
+            logger.warning(
+                "Discord adapter failed to initialise; Discord webhooks disabled",
                 exc_info=True,
             )
 

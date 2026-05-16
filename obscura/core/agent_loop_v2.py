@@ -1163,7 +1163,17 @@ class AgentLoopV2:
         if refusal is not None:
             return _ToolEnvelopeV2(
                 tool_use_id=node.tool_use_id,
-                content=[ContentBlock(kind="text", text=refusal_text(refusal))],
+                content=[
+                    ContentBlock(
+                        kind="text",
+                        text=refusal_text(refusal),
+                        # See exception handler below: scheduler-rebuilt
+                        # envelopes read is_error from each ContentBlock,
+                        # so a refusal must mark its block to survive
+                        # the rebuild and render as ✗.
+                        is_error=True,
+                    ),
+                ],
                 is_error=True,
             )
 
@@ -1182,6 +1192,16 @@ class AgentLoopV2:
                     ContentBlock(
                         kind="text",
                         text=f"{type(exc).__name__}: {exc}",
+                        # is_error must travel on the ContentBlock too:
+                        # the scheduler rebuilds the envelope at the
+                        # outer layer using `content_has_error` (which
+                        # walks each block's is_error) OR-ed with
+                        # `not result.success`. Since the handler
+                        # *returns* an envelope rather than re-raising,
+                        # result.success is True from the scheduler's
+                        # POV — so without is_error here the rebuilt
+                        # envelope shows ✓ for a crashed tool call.
+                        is_error=True,
                     ),
                 ],
                 is_error=True,

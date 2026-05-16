@@ -277,6 +277,7 @@ class CopilotBackend(BackendToolHostMixin):
         from copilot import CopilotClient, SubprocessConfig
 
         await register_external_mcp_tools(self, self._mcp_servers)
+        await self._init_openclaw_bridge()
 
         # ``--allow-all-tools`` is required by Copilot CLI 1.0.40+ in
         # non-interactive (``--headless``) mode. Without it, the runtime

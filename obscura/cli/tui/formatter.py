@@ -29,6 +29,7 @@ import logging
 import re
 from typing import Any
 
+from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 from obscura.cli.renderer.channels import Banner as ChannelBanner
 from obscura.cli.renderer.channels import Notification as ChannelNotification
 from obscura.cli.renderer.channels import StatusEvent
@@ -97,6 +98,7 @@ _TOOL_KIND_STYLES: dict[str, tuple[str, str]] = {
 _STYLE_TOOL_RESULT = f"fg:{MUTED_HEX}"
 _STYLE_ERROR = f"fg:{ERROR_HEX} bold"
 _STYLE_SYSTEM = f"fg:{MUTED_HEX} italic"
+_STYLE_SLASH = f"fg:{SAPPHIRE.hex}"
 
 # Glyph alphabet from the legacy renderer; kept in sync with
 # ``obscura/cli/render.py`` so the visuals match across renderers.
@@ -113,7 +115,7 @@ _RESULT_PREVIEW_LEN = 80
 # ANSI->styled-run conversion is out of scope for the first cut.
 _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)")
-_C0_CONTROL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+")
+_C0_CONTROL_RE = re.compile(r"[\x00-\x08\x0B-\x1F\x7F]+")
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +269,27 @@ def _strip_ansi(text: str) -> str:
     cleaned = _ANSI_OSC_RE.sub("", cleaned)
     cleaned = _C0_CONTROL_RE.sub("", cleaned)
     return cleaned
+
+
+def _ansi_to_runs(text: str, fallback_style: str = "") -> list[StyledRun]:
+    """Parse Rich/ANSI console output into styled runs for the transcript."""
+    if not text:
+        return []
+    text = text.replace("\r", "")
+    try:
+        fragments = to_formatted_text(ANSI(text))
+        runs: list[StyledRun] = []
+        for frag in fragments:
+            style = str(frag[0]) if len(frag) > 0 else fallback_style
+            run_text = str(frag[1]) if len(frag) > 1 else ""
+            if not run_text:
+                continue
+            runs.append(StyledRun(text=run_text, style=style or fallback_style))
+        return runs
+    except Exception:
+        logger.debug("ansi parse failed; falling back to stripped text", exc_info=True)
+        cleaned = _strip_ansi(text)
+        return [StyledRun(text=cleaned, style=fallback_style)] if cleaned else []
 
 
 # ---------------------------------------------------------------------------
@@ -460,16 +483,19 @@ def format_slash_output(rich_capture: str) -> TranscriptEntry:
     """Build a :class:`TranscriptKind.SLASH_OUTPUT` entry from captured
     Rich console output.
 
-    ``rich_capture`` may contain ANSI escape codes (Rich emits CSI
-    sequences when colour is forced). The first cut here strips the
-    codes and emits a single plain run — full ANSI-to-StyledRun parsing
-    is left for a follow-up; this still preserves the *content* of the
-    slash command exactly while remaining lossless when the input is
-    plain text.
+    ``rich_capture`` may contain ANSI escape codes from Rich. Parse them
+    back into styled runs so slash-command output stays visually native
+    inside the full-screen TUI instead of collapsing to plain text.
     """
-    cleaned = _strip_ansi(rich_capture or "")
+    runs = _ansi_to_runs(rich_capture or "", _STYLE_SLASH)
+    if not runs:
+        cleaned = _strip_ansi(rich_capture or "")
+        runs = _runs_for_text(cleaned, _STYLE_SLASH)
     return TranscriptEntry(
         kind=TranscriptKind.SLASH_OUTPUT,
-        runs=_runs_for_text(cleaned),
-        metadata={"raw_text": rich_capture or ""},
+        runs=runs,
+        metadata={
+            "raw_text": rich_capture or "",
+            "plain_text": _strip_ansi(rich_capture or ""),
+        },
     )

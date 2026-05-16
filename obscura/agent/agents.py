@@ -526,7 +526,13 @@ class Agent:
         # Narrow types for the rest of start() — both must be set if we
         # reached here without raising.
         assert self._session is not None
-        assert self._client is not None
+        # Composition path: _client is None; backend is in _session._owned_backend.
+        # Legacy path: _client is an ObscuraClient instance.
+        # Require EITHER a live _client OR an owned backend via the session.
+        assert self._client is not None or self._session.backend is not None, (
+            "Agent.start(): neither _client nor session backend is initialised. "
+            "build_core_session must have failed silently."
+        )
 
         # Create ToolBroker as the authoritative tool registry
         policy_engine = PluginPolicyEngine()
@@ -902,7 +908,9 @@ class Agent:
 
         Stores context in memory, runs the agent, captures result.
         """
-        assert self._client is not None, "Agent.start() must be called before run()"
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before run()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -963,7 +971,9 @@ class Agent:
 
     async def stream(self, prompt: str, **context: Any) -> AsyncIterator[str]:
         """Stream the agent's response."""
-        assert self._client is not None, "Agent.start() must be called before stream()"
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before stream()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -1017,9 +1027,9 @@ class Agent:
 
         Returns the concatenated text output from all turns.
         """
-        assert self._client is not None, (
-            "Agent.start() must be called before run_loop()"
-        )
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before run_loop()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()
@@ -1095,9 +1105,9 @@ class Agent:
         that happens: text deltas, tool calls, tool results, turn
         boundaries, and final completion.
         """
-        assert self._client is not None, (
-            "Agent.start() must be called before stream_loop()"
-        )
+        assert self._client is not None or (
+            self._session is not None and self._session.backend is not None
+        ), "Agent.start() must be called before stream_loop()"
         self._current_prompt = prompt
         self.status = AgentStatus.RUNNING
         self._update_state()

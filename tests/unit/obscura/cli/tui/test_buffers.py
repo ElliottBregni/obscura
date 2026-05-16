@@ -39,7 +39,8 @@ def test_transcript_text_empty_state_renders_welcome_hint() -> None:
     assert list(out)
     flat = "".join(text for _, text in out)
     assert "Welcome to Obscura" in flat
-    assert "Enter" in flat
+    assert "Enter sends" in flat
+    assert "Ctrl+K command palette" in flat
 
 
 def test_transcript_text_with_entries_returns_styled_tuples() -> None:
@@ -106,3 +107,6 @@ def test_header_text_contains_model_name_and_short_session_id() -> None:
     assert state.hud.session_id[:8] in flat
     # Backend label appears too.
     assert "copilot" in flat
+    # Mode + permission mode are shown in the footer header.
+    assert "chat" in flat
+    assert "confirm" in flat

@@ -128,8 +128,10 @@ async def build_core_session(
 
     # 5. MCP server routing — Codex gets configs forwarded to its SDK,
     # everyone else gets MCP via MCPBackend (connected below).
-    codex_native_mcp = backend_kind == Backend.CODEX
-    backend_mcp_servers = config.mcp_servers if codex_native_mcp else None
+    from obscura.core.backend_features import backend_routes_mcp_natively
+
+    native_mcp = backend_routes_mcp_natively(backend_kind)
+    backend_mcp_servers = config.mcp_servers if native_mcp else None
 
     # 6. Construct backend (composition.backend_factory.create_backend
     # extracted from ObscuraClient._create_backend earlier)

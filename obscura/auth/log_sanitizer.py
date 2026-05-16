@@ -41,6 +41,18 @@ _BEARER_RE = re.compile(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=\-]{8,}")
 _GITHUB_TOKEN_RE = re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{16,})")
 _SUPABASE_PAT_RE = re.compile(r"\b(sbp_[A-Za-z0-9]{16,})")
 
+# Additional patterns for channel/platform credential field values
+_CRED_FIELD_PATTERNS = [
+    # key: value in JSON/log output
+    re.compile(r'("bot_token"\s*:\s*)"[^"]{8,}"', re.IGNORECASE),
+    re.compile(r'("auth_token"\s*:\s*)"[^"]{8,}"', re.IGNORECASE),
+    re.compile(r'("app_secret"\s*:\s*)"[^"]{8,}"', re.IGNORECASE),
+    re.compile(r'("webhook_secret"\s*:\s*)"[^"]{8,}"', re.IGNORECASE),
+    re.compile(r'("api_key"\s*:\s*)"[^"]{8,}"', re.IGNORECASE),
+    re.compile(r'("phone_number_id"\s*:\s*)"[^"]{6,}"', re.IGNORECASE),
+    re.compile(r'("account_sid"\s*:\s*)"[^"]{8,}"', re.IGNORECASE),
+]
+
 
 def sanitize_headers(headers: Mapping[str, str]) -> dict[str, str]:
     """Return a copy of *headers* with sensitive values replaced by a sentinel."""
@@ -57,6 +69,8 @@ def sanitize_text(text: str) -> str:
     text = _BEARER_RE.sub(r"\1" + REDACTED, text)
     text = _GITHUB_TOKEN_RE.sub(REDACTED, text)
     text = _SUPABASE_PAT_RE.sub(REDACTED, text)
+    for pat in _CRED_FIELD_PATTERNS:
+        text = pat.sub(r'\1"<redacted>"', text)
     return text
 
 

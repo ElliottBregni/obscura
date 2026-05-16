@@ -11,10 +11,26 @@ Start the server via::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
+
+# Load .env files BEFORE any auth imports so that OBSCURA_API_KEYS and other
+# env vars are present when obscura.auth.rbac calls _load_api_keys() at
+# module-import time (rbac.py line: `_load_api_keys()` runs on import).
+# Priority: shell env > ~/.obscura/.env > project .obscura/.env > CWD .env
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    from pathlib import Path as _Path
+
+    _global_env = _Path.home() / ".obscura" / ".env"
+    if _global_env.is_file():
+        _load_dotenv(_global_env, override=False)
+    _load_dotenv(override=False)  # CWD .env (e.g. obscura-main/.env)
+except Exception:
+    pass  # dotenv is optional; fall back to shell env
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -135,6 +151,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             exc_info=True,
         )
 
+    # Start network gateway as a background task when enabled
+    app.state.network_gateway_task = None
+    if config.network_gateway_enabled:
+        try:
+            import uvicorn
+
+            from obscura.integrations.network_gateway.app import create_gateway_app
+            from obscura.integrations.network_gateway.config import GatewayConfig
+
+            gw_config = GatewayConfig.from_obscura_config()
+            gw_app = create_gateway_app(gw_config)
+            uv_config = uvicorn.Config(
+                gw_app,
+                host=gw_config.host,
+                port=gw_config.port,
+                log_level="warning",
+            )
+            uv_server = uvicorn.Server(uv_config)
+
+            async def _run_gateway() -> None:
+                await uv_server.serve()
+
+            app.state.network_gateway_task = asyncio.create_task(_run_gateway())
+            logger.info(
+                "Network gateway started on %s:%d",
+                gw_config.host,
+                gw_config.port,
+            )
+        except Exception:
+            logger.warning(
+                "Could not start network gateway; continuing without it",
+                exc_info=True,
+            )
+
     # Apply any spec-driven channel configs persisted in the DB.
     # This runs regardless of whether env-var credentials were found — DB configs
     # can register additional channels (or override env-var channels) at startup.
@@ -174,6 +224,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     yield
 
+    # Cleanup network gateway
+    gw_task: asyncio.Task[None] | None = getattr(
+        app.state, "network_gateway_task", None
+    )
+    if gw_task is not None and not gw_task.done():
+        try:
+            gw_task.cancel()
+            await asyncio.shield(asyncio.gather(gw_task, return_exceptions=True))
+            logger.info("Network gateway stopped")
+        except Exception:
+            logger.debug("suppressed exception in lifespan", exc_info=True)
+
     # Cleanup A2A server
     if hasattr(app.state, "a2a_server"):
         try:
@@ -200,9 +262,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 def create_app(config: ObscuraConfig | None = None) -> FastAPI:
     """Build and return the FastAPI application."""
-    from dotenv import load_dotenv
-
-    load_dotenv()
+    # Note: .env is loaded at module import time (top of file) so that
+    # obscura.auth.rbac._load_api_keys() sees OBSCURA_API_KEYS on first
+    # import. The extra load_dotenv() call here was removed to avoid a
+    # redundant load that arrived too late for the module-level key init.
 
     if config is None:
         config = ObscuraConfig.load()

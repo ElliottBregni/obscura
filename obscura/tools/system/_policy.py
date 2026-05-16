@@ -127,24 +127,23 @@ class Policy:
     def resolve_path(path: str) -> Path:
         """Resolve a tool-provided file path.
 
-        Absolute paths and ``~/`` paths are used as-is. Relative paths are
-        resolved against ``~/.obscura/output/`` (NOT the working directory)
-        so agent-generated files land in the Obscura data dir instead of
-        polluting the project tree.
+        Absolute paths and ``~/`` paths are used as-is. Relative paths resolve
+        against the current working directory so code agents can inspect and
+        edit repository files with paths like ``tests/unit`` or ``README.md``.
 
-        Set ``OBSCURA_TOOLS_RELATIVE_TO_CWD=1`` to restore the old cwd
-        behaviour when explicitly desired.
+        Set ``OBSCURA_TOOLS_RELATIVE_TO_OUTPUT=1`` for artifact-only flows that
+        intentionally want relative paths to land under ``~/.obscura/output/``.
         """
         candidate = Path(path).expanduser()
         if not candidate.is_absolute():
-            if os.environ.get("OBSCURA_TOOLS_RELATIVE_TO_CWD", "").lower() in (
+            if os.environ.get("OBSCURA_TOOLS_RELATIVE_TO_OUTPUT", "").lower() in (
                 "1",
                 "true",
                 "yes",
             ):
-                candidate = Path.cwd() / candidate
-            else:
                 candidate = resolve_obscura_output_dir() / candidate
+            else:
+                candidate = Path.cwd() / candidate
         return candidate.resolve()
 
     @classmethod

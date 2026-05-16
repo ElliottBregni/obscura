@@ -1,0 +1,433 @@
+"""obscura.integrations.network_gateway.auth — Bearer auth + rate limiting.
+
+Three middlewares:
+
+* :class:`GatewayBearerAuthMiddleware` — requires ``Authorization: Bearer
+  <token>`` on all protected paths.  Skips ``/health`` and
+  ``/.well-known/``.  When no token is configured auth is bypassed (warn
+  logged once).  Uses timing-safe comparison to prevent timing attacks.
+* :class:`GatewayRateLimitMiddleware` — sliding-window per-IP rate limiter.
+  Exempt paths: ``/health``, ``/.well-known/``.  GC's stale buckets every
+  1000 requests to prevent unbounded memory growth.
+* :class:`RequestSizeLimitMiddleware` — rejects requests whose
+  ``Content-Length`` exceeds ``max_bytes`` (default 1 MB) with 413 before
+  auth/rate-limit processing reaches the route handler.
+"""
+
+from __future__ import annotations
+
+import hmac
+import logging
+import threading
+import time as _time
+from typing import Any, override
+
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import JSONResponse, Response
+
+logger = logging.getLogger(__name__)
+
+# Paths exempt from bearer-token authentication.
+# /webhook/ — A2A push notification callbacks; uses HMAC-SHA256 instead.
+# /channels/telegram/webhook — Telegram Bot API updates; signed by Telegram.
+# /channels/whatsapp/ — covers both /webhook (Meta HMAC) and /verify (hub challenge).
+# /peers/ exposes synthetic A2A cards for bridge-only peers (e.g. OpenClaw).
+_AUTH_EXEMPT_PREFIXES: tuple[str, ...] = (
+    "/health",
+    "/.well-known/",
+    "/peers/",
+    "/webhook/",
+    "/channels/telegram/webhook",
+    "/channels/whatsapp/",
+)
+
+# Paths exempt from rate limiting and request-size enforcement.
+# /webhook/ is intentionally absent — it must be rate-limited to prevent
+# queue floods and CPU exhaustion via unauthenticated bulk delivery.
+_RATE_EXEMPT_PREFIXES: tuple[str, ...] = ("/health", "/.well-known/", "/peers/")
+
+_RATE_WINDOW_SECONDS = 60
+
+
+def _client_ip(request: Any) -> str:
+    """Best-effort client IP — trust X-Forwarded-For only on loopback."""
+    client = getattr(request, "client", None)
+    host: str = client.host if client else ""
+    if host in ("127.0.0.1", "::1"):
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip()
+    return host
+
+
+def _extract_bearer(request: Any) -> str | None:
+    header: str = (
+        request.headers.get("Authorization")
+        or request.headers.get("authorization")
+        or ""
+    )
+    if not header.lower().startswith("bearer "):
+        return None
+    token = header[7:].strip()
+    return token or None
+
+
+class GatewayBearerAuthMiddleware(BaseHTTPMiddleware):
+    """Require ``Authorization: Bearer <token>`` on all non-public paths.
+
+    The token is taken from ``GatewayConfig.token`` at app build time. If
+    no token is configured, the middleware logs a warning and passes every
+    request (permissive-no-auth mode, useful for fully-private deployments).
+    """
+
+    def __init__(self, app: Any, *, token: str) -> None:
+        super().__init__(app)
+        self._token: str = token
+        if not token:
+            logger.warning(
+                "Network gateway: no bearer token configured — all requests will be accepted. "
+                "Set OBSCURA_NETWORK_TOKEN or create ~/.obscura/network-gateway.token to enable auth."
+            )
+
+    @override
+    async def dispatch(
+        self,
+        request: Any,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        path: str = request.url.path
+
+        if any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES) or path == "/health":
+            return await call_next(request)
+
+        # Tailscale identity bypass: if Tailscale Serve is active and the request
+        # carries a valid tailscale-user-login header, treat the user as authenticated.
+        import re as _re_ts
+
+        ts_login = request.headers.get("tailscale-user-login", "")
+        if (
+            ts_login
+            and getattr(request.app.state, "gateway_config", None)
+            and getattr(request.app.state.gateway_config, "tailscale_enabled", False)
+        ):
+            # Basic sanity: header must look like an email or Tailscale user ID
+            if _re_ts.match(r"^[\w.+\-]+@[\w.\-]+$", ts_login):
+                logger.debug(
+                    "GatewayBearerAuth: tailnet user %s auto-approved", ts_login
+                )
+                response = await call_next(request)
+                response.headers["X-Tailscale-User"] = ts_login
+                return response
+
+        # No token configured → open access
+        if not self._token:
+            return await call_next(request)
+
+        token = _extract_bearer(request)
+        if token and hmac.compare_digest(token, self._token):
+            return await call_next(request)
+
+        logger.warning(
+            "Gateway auth rejected: ip=%s path=%s reason=%s",
+            _client_ip(request),
+            path,
+            "missing_token" if not token else "invalid_token",
+        )
+        return JSONResponse(
+            status_code=401,
+            content={"error": "unauthorized"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+class GatewayRateLimitMiddleware(BaseHTTPMiddleware):
+    """Sliding-window per-IP rate limiter (60 req / min by default).
+
+    Returns ``429 {"error": "rate_limit_exceeded"}`` with a ``Retry-After``
+    header when the limit is breached. Public paths are exempt.
+
+    Every ``_GC_INTERVAL`` requests the stale-bucket GC runs to prevent
+    unbounded memory growth from idle IPs.
+    """
+
+    _GC_INTERVAL = 1000
+
+    def __init__(self, app: Any, *, max_requests: int = 60) -> None:
+        super().__init__(app)
+        self._max = max_requests
+        self._buckets: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+        self._gc_counter: int = 0
+
+    @override
+    async def dispatch(
+        self,
+        request: Any,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        path: str = request.url.path
+
+        if any(path.startswith(p) for p in _RATE_EXEMPT_PREFIXES) or path == "/health":
+            return await call_next(request)
+
+        ip = _client_ip(request)
+        if not ip:
+            return await call_next(request)
+
+        now = _time.monotonic()
+        cutoff = now - _RATE_WINDOW_SECONDS
+
+        with self._lock:
+            bucket = self._buckets.setdefault(ip, [])
+            fresh = [t for t in bucket if t > cutoff]
+            if len(fresh) >= self._max:
+                self._buckets[ip] = fresh
+                retry_after = int(_RATE_WINDOW_SECONDS - (now - fresh[0]) + 1)
+                logger.warning("Gateway rate limit exceeded: ip=%s path=%s", ip, path)
+                return JSONResponse(
+                    status_code=429,
+                    content={"error": "rate_limit_exceeded"},
+                    headers={"Retry-After": str(max(retry_after, 1))},
+                )
+            fresh.append(now)
+            self._buckets[ip] = fresh
+
+            # Periodic GC: remove buckets whose last timestamp is expired.
+            self._gc_counter += 1
+            if self._gc_counter >= self._GC_INTERVAL:
+                self._gc_counter = 0
+                stale_cutoff = now - _RATE_WINDOW_SECONDS
+                stale_keys = [
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
+                ]
+                for k in stale_keys:
+                    del self._buckets[k]
+
+        return await call_next(request)
+
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose ``Content-Length`` exceeds ``max_bytes``.
+
+    Checks the ``Content-Length`` header before auth or rate-limit processing
+    reaches the route handler.  Skips ``/health`` and ``/.well-known/``
+    paths.  Returns ``413 {"error": "request_too_large"}`` for oversized
+    requests.
+
+    Parameters
+    ----------
+    max_bytes:
+        Maximum allowed request body size in bytes.  Defaults to 1 MB.
+    """
+
+    def __init__(self, app: Any, *, max_bytes: int = 1 * 1024 * 1024) -> None:
+        super().__init__(app)
+        self._max_bytes = max_bytes
+
+    @override
+    async def dispatch(
+        self,
+        request: Any,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        path: str = request.url.path
+
+        # Skip public / health paths.
+        if any(path.startswith(p) for p in _RATE_EXEMPT_PREFIXES) or path == "/health":
+            return await call_next(request)
+
+        content_length = request.headers.get("Content-Length")
+        if content_length is not None:
+            try:
+                size = int(content_length)
+            except ValueError:
+                size = 0
+            if size > self._max_bytes:
+                logger.warning(
+                    "Gateway request too large: ip=%s path=%s size=%d max=%d",
+                    _client_ip(request),
+                    path,
+                    size,
+                    self._max_bytes,
+                )
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": "request_too_large"},
+                )
+
+        return await call_next(request)
+
+
+_WEBHOOK_RATE_PATHS: tuple[str, ...] = (
+    "/webhook/",
+    "/channels/telegram/webhook",
+    "/channels/whatsapp/",
+)
+
+
+class WebhookRateLimitMiddleware(BaseHTTPMiddleware):
+    """Sliding-window per-IP rate limiter scoped to webhook and channel paths.
+
+    Applies a tighter request budget (default 20 req / min) only to paths
+    listed in ``_WEBHOOK_RATE_PATHS``.  All other paths pass through
+    unconditionally so this middleware does not double-count against the
+    broader ``GatewayRateLimitMiddleware``.
+
+    Returns ``429 {"error": "rate_limit_exceeded"}`` with a ``Retry-After``
+    header when the limit is breached.
+    """
+
+    _GC_INTERVAL = 1000
+
+    def __init__(self, app: Any, *, max_requests: int = 20) -> None:
+        super().__init__(app)
+        self._max = max_requests
+        self._buckets: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+        self._gc_counter: int = 0
+
+    @override
+    async def dispatch(
+        self,
+        request: Any,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        path: str = request.url.path
+
+        if not any(path.startswith(p) for p in _WEBHOOK_RATE_PATHS):
+            return await call_next(request)
+
+        ip = _client_ip(request)
+        if not ip:
+            return await call_next(request)
+
+        now = _time.monotonic()
+        cutoff = now - _RATE_WINDOW_SECONDS
+
+        with self._lock:
+            bucket = self._buckets.setdefault(ip, [])
+            fresh = [t for t in bucket if t > cutoff]
+            if len(fresh) >= self._max:
+                self._buckets[ip] = fresh
+                retry_after = int(_RATE_WINDOW_SECONDS - (now - fresh[0]) + 1)
+                logger.warning("Webhook rate limit exceeded: ip=%s path=%s", ip, path)
+                return JSONResponse(
+                    status_code=429,
+                    content={"error": "rate_limit_exceeded"},
+                    headers={"Retry-After": str(max(retry_after, 1))},
+                )
+            fresh.append(now)
+            self._buckets[ip] = fresh
+
+            # Periodic GC: remove buckets whose last timestamp is expired.
+            self._gc_counter += 1
+            if self._gc_counter >= self._GC_INTERVAL:
+                self._gc_counter = 0
+                stale_cutoff = now - _RATE_WINDOW_SECONDS
+                stale_keys = [
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
+                ]
+                for k in stale_keys:
+                    del self._buckets[k]
+
+        return await call_next(request)
+
+
+_CONTROL_PLANE_PATHS: tuple[str, ...] = (
+    "/channels/configs",  # POST (create), matches prefix for all config writes
+)
+_CONTROL_PLANE_METHODS: frozenset[str] = frozenset({"POST", "PATCH", "DELETE"})
+
+
+class ControlPlaneRateLimitMiddleware(BaseHTTPMiddleware):
+    """Sliding-window per-IP rate limiter scoped to control-plane mutation paths.
+
+    Applies a tighter request budget (default 10 req / min) only when the
+    request path starts with a prefix in ``_CONTROL_PLANE_PATHS`` **and** the
+    method is in ``_CONTROL_PLANE_METHODS``.  All other requests pass through
+    unconditionally so this middleware does not double-count against the broader
+    rate limiters.
+
+    Returns ``429 {"error": "rate_limit_exceeded"}`` with a ``Retry-After``
+    header when the limit is breached.
+    """
+
+    _GC_INTERVAL = 1000
+
+    def __init__(self, app: Any, *, max_requests: int = 10) -> None:
+        super().__init__(app)
+        self._max = max_requests
+        self._buckets: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+        self._gc_counter: int = 0
+
+    @override
+    async def dispatch(
+        self,
+        request: Any,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        path: str = request.url.path
+        method: str = request.method.upper()
+
+        # Only intercept control-plane mutation requests.
+        if not (
+            any(path.startswith(p) for p in _CONTROL_PLANE_PATHS)
+            and method in _CONTROL_PLANE_METHODS
+        ):
+            return await call_next(request)
+
+        ip = _client_ip(request)
+        if not ip:
+            return await call_next(request)
+
+        now = _time.monotonic()
+        cutoff = now - _RATE_WINDOW_SECONDS
+
+        with self._lock:
+            bucket = self._buckets.setdefault(ip, [])
+            fresh = [t for t in bucket if t > cutoff]
+            if len(fresh) >= self._max:
+                self._buckets[ip] = fresh
+                retry_after = int(_RATE_WINDOW_SECONDS - (now - fresh[0]) + 1)
+                logger.warning(
+                    "Control-plane rate limit exceeded: ip=%s path=%s method=%s",
+                    ip,
+                    path,
+                    method,
+                )
+                return JSONResponse(
+                    status_code=429,
+                    content={"error": "rate_limit_exceeded"},
+                    headers={"Retry-After": str(max(retry_after, 1))},
+                )
+            fresh.append(now)
+            self._buckets[ip] = fresh
+
+            # Periodic GC: remove buckets whose last timestamp is expired.
+            self._gc_counter += 1
+            if self._gc_counter >= self._GC_INTERVAL:
+                self._gc_counter = 0
+                stale_cutoff = now - _RATE_WINDOW_SECONDS
+                stale_keys = [
+                    k
+                    for k, v in self._buckets.items()
+                    if not v or v[-1] <= stale_cutoff
+                ]
+                for k in stale_keys:
+                    del self._buckets[k]
+
+        return await call_next(request)
+
+
+__all__ = [
+    "GatewayBearerAuthMiddleware",
+    "GatewayRateLimitMiddleware",
+    "RequestSizeLimitMiddleware",
+    "WebhookRateLimitMiddleware",
+    "ControlPlaneRateLimitMiddleware",
+]

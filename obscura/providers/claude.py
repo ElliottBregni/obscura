@@ -281,6 +281,7 @@ class ClaudeBackend(BackendToolHostMixin):
         # via tool_search. Claude SDK still dispatches the actual calls
         # via mcp_servers passthrough — these specs are discovery-only.
         await register_external_mcp_tools(self, self._mcp_servers)
+        await self._init_openclaw_bridge()
 
         # Snapshot baseline MCP subprocess PIDs so we can identify (and
         # later reap) the ones Claude SDK spawns for *this* session. The

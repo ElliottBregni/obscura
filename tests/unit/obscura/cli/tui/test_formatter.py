@@ -59,6 +59,17 @@ def test_format_slash_output_strips_ansi_csi_sequences() -> None:
     assert "ok text" in full
     # raw is preserved in metadata for replay/copy.
     assert entry.metadata["raw_text"] == raw
+    assert entry.metadata["plain_text"] == "ok text"
+
+
+def test_format_slash_output_strips_carriage_returns() -> None:
+    raw = "line 1\rline 2\rline 3"
+    entry = format_slash_output(raw)
+    full = "".join(r.text for r in entry.runs)
+    assert "\r" not in full
+    assert "line 1" in full
+    assert "line 2" in full
+    assert "line 3" in full
 
 
 # ---------------------------------------------------------------------------

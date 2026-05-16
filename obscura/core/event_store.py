@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import threading
 from collections.abc import Mapping
@@ -38,6 +39,18 @@ from obscura.core.session_utils import list_active_sessions
 from obscura.core.types import AgentEvent
 
 logger = logging.getLogger(__name__)
+trace_logger = logging.getLogger("obscura.event_store.trace")
+
+
+def _trace_event_store_enabled() -> bool:
+    raw = os.environ.get("OBSCURA_TRACE_EVENT_STORE", "").strip().lower()
+    return raw in {"1", "true", "yes", "on", "debug", "trace"}
+
+
+def _trace_event_store(message: str, *args: Any) -> None:
+    if not _trace_event_store_enabled():
+        return
+    trace_logger.info(message, *args)
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +190,7 @@ class SQLiteEventStore:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
+        _trace_event_store("init db_path=%s", self._db_path)
         self._init_schema()
 
     # -- connection management -----------------------------------------------
@@ -188,6 +202,11 @@ class SQLiteEventStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             self._local.conn = conn
+            _trace_event_store(
+                "connect db_path=%s thread=%s",
+                self._db_path,
+                threading.get_ident(),
+            )
         return self._local.conn
 
     def _init_schema(self) -> None:
@@ -247,6 +266,7 @@ class SQLiteEventStore:
         ]:
             conn.execute(idx_sql)
         conn.commit()
+        _trace_event_store("schema_ready db_path=%s", self._db_path)
 
     # -- sync helpers (run in thread) ----------------------------------------
 
@@ -288,6 +308,15 @@ class SQLiteEventStore:
             ),
         )
         conn.commit()
+        _trace_event_store(
+            "create_session db_path=%s session_id=%s backend=%s model=%s source=%s project=%s",
+            self._db_path,
+            session_id,
+            backend,
+            model,
+            source,
+            project,
+        )
         return SessionRecord(
             id=session_id,
             status=SessionStatus.RUNNING,
@@ -344,6 +373,13 @@ class SQLiteEventStore:
             (status.value, now, session_id),
         )
         conn.commit()
+        _trace_event_store(
+            "update_status db_path=%s session_id=%s from=%s to=%s",
+            self._db_path,
+            session_id,
+            current.value,
+            status.value,
+        )
 
     def _update_session_sync(
         self,
@@ -379,6 +415,14 @@ class SQLiteEventStore:
             params,
         )
         conn.commit()
+        _trace_event_store(
+            "update_session db_path=%s session_id=%s summary=%s message_count=%s metadata=%s",
+            self._db_path,
+            session_id,
+            summary is not None,
+            message_count,
+            metadata is not None,
+        )
 
     def _append_sync(
         self,
@@ -404,8 +448,25 @@ class SQLiteEventStore:
                 (session_id, seq, event.kind.value, payload, now),
             )
             conn.commit()
+            _trace_event_store(
+                "append db_path=%s session_id=%s seq=%d kind=%s turn=%s text_len=%d tool_name=%s is_error=%s",
+                self._db_path,
+                session_id,
+                seq,
+                event.kind.value,
+                event.turn,
+                len(event.text or ""),
+                event.tool_name or "",
+                event.is_error,
+            )
         except Exception:
             conn.rollback()
+            _trace_event_store(
+                "append_failed db_path=%s session_id=%s kind=%s",
+                self._db_path,
+                session_id,
+                event.kind.value,
+            )
             raise
 
         return EventRecord(
@@ -600,5 +661,10 @@ class SQLiteEventStore:
     def close(self) -> None:
         """Close the thread-local connection."""
         if hasattr(self._local, "conn") and self._local.conn is not None:
+            _trace_event_store(
+                "close db_path=%s thread=%s",
+                self._db_path,
+                threading.get_ident(),
+            )
             self._local.conn.close()
             self._local.conn = None

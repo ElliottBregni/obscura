@@ -124,6 +124,11 @@ handler = "obscura.tools.providers.public_apis:PublicAPIsProvider"
 capability = "public.apis.create"
 side_effects = "read"
 
+[tools.parameters]
+type = "object"
+
+[tools.parameters.properties]
+
 [[tools]]
 name = "public_apis.remove_persisted"
 description = "Remove a persisted dynamic tool by name"

@@ -23,6 +23,8 @@ bold"``) come straight from
 
 from __future__ import annotations
 
+import os
+
 from prompt_toolkit.formatted_text import FormattedText
 
 from obscura.cli.renderer.modern.theme import (
@@ -67,8 +69,14 @@ __all__ = [
 # 5000, but the layout window only needs the recent tail.
 _TRANSCRIPT_RENDER_CAP = 1000
 
-# Maximum chars from the live region preview before we ellipsize.
-_LIVE_PREVIEW_MAX = 80
+# Maximum chars from the live region preview before we ellipsize. The
+# live region renders on a single row pinned by ``Dimension.exact(1)``
+# in :mod:`obscura.cli.tui.layout`; combined with ``wrap_lines=False``
+# on the live-region window this is now defence-in-depth (the window
+# would clip horizontally anyway), but a tighter cap keeps the spinner
+# legible on narrow terminals where the truncation point would otherwise
+# fall mid-word.
+_LIVE_PREVIEW_MAX = 60
 
 # Spinner frames. We pick the frame from ``state.live.spinner_idx`` so
 # the live region animates without re-rendering anything else.
@@ -150,6 +158,31 @@ def _format_elapsed(seconds: float) -> str:
     return f"{h}h{mins:02d}m"
 
 
+def _friendly_mode_label(raw: str) -> str:
+    """Render enum-ish mode strings as compact Codex-style labels."""
+    label = raw.replace("_", " ").strip()
+    return label if label else "chat"
+
+
+def _friendly_permission_mode(raw: str) -> str:
+    """Short human label for the active permission mode."""
+    labels = {
+        "default": "confirm",
+        "accept_edits": "auto-edit",
+        "plan": "plan",
+        "bypass": "full-access",
+    }
+    return labels.get(raw, raw.replace("_", "-"))
+
+
+def _workspace_label(path: str | None) -> str:
+    """Return the basename of the active workspace path, if any."""
+    if not path:
+        return ""
+    cleaned = path.rstrip("/").strip()
+    return os.path.basename(cleaned) or cleaned
+
+
 def _entry_runs(entry: TranscriptEntry) -> list[tuple[str, str]]:
     """Render a single :class:`TranscriptEntry` to (style, text) tuples.
 
@@ -195,9 +228,9 @@ def transcript_text(state: TUIState) -> FormattedText:
                 ("", "\n"),
                 (hint_style, "  Welcome to Obscura.\n"),
                 ("", "\n"),
-                (hint_style, "  Type a message and press Enter to send.\n"),
-                (hint_style, "  Esc+Enter or Ctrl+J inserts a newline.\n"),
-                (hint_style, "  /help for commands · Ctrl+C cancels · Ctrl+D exits.\n"),
+                (hint_style, "  Ask for a change, a review, or an explanation.\n"),
+                (hint_style, "  Enter sends · Esc+Enter inserts a newline.\n"),
+                (hint_style, "  /help for commands · Ctrl+K command palette.\n"),
             ]
         )
 
@@ -331,23 +364,36 @@ def header_text(state: TUIState) -> FormattedText:
     """
     hud = state.hud
     title = hud.session_title or f"session {hud.session_id[:8]}"
+    workspace = _workspace_label(hud.workspace)
+    mode_label = _friendly_mode_label(hud.mode.value)
+    permission_label = _friendly_permission_mode(hud.permission_mode)
 
     runs: list[tuple[str, str]] = [
         (f"{LAVENDER.hex} bold", title),
-        (f"{OVERLAY0.hex}", "  │  "),
-        (f"{TEAL.hex}", hud.backend),
-        (f"{OVERLAY0.hex}", "/"),
-        (f"{SAPPHIRE.hex}", hud.model),
     ]
+
+    if workspace:
+        runs.append((f"{OVERLAY0.hex}", "  ·  "))
+        runs.append((f"{TEXT.hex}", workspace))
+
+    runs.append((f"{OVERLAY0.hex}", "  │  "))
+    runs.append((f"{TEAL.hex}", hud.backend))
+    runs.append((f"{OVERLAY0.hex}", "/"))
+    runs.append((f"{SAPPHIRE.hex}", hud.model))
 
     if hud.branch:
         runs.append((f"{OVERLAY0.hex}", "  │  "))
         runs.append((f"{GREEN.hex}", f"⎇ {hud.branch}"))
 
+    runs.append((f"{OVERLAY0.hex}", "  │  "))
+    runs.append((f"{MAUVE.hex}", mode_label))
+    runs.append((f"{OVERLAY0.hex}", " "))
+    runs.append((f"{OVERLAY1.hex}", f"({permission_label})"))
+
     if hud.tool_count > 0:
         runs.append((f"{OVERLAY0.hex}", "  │  "))
-        runs.append((f"{YELLOW.hex}", "🔧 "))
-        runs.append((f"{TEXT.hex}", f"{hud.tool_count} tools"))
+        runs.append((f"{YELLOW.hex}", "tools "))
+        runs.append((f"{TEXT.hex}", str(hud.tool_count)))
 
     if hud.mcp_servers:
         runs.append((f"{OVERLAY0.hex}", "  │  "))
@@ -392,7 +438,6 @@ def header_text(state: TUIState) -> FormattedText:
                 )
                 runs.append((name_color, str(srv.get("name", "?"))))
 
-    runs.append((f"{OVERLAY0.hex}", "  │  "))
     ctx_color = (
         f"{RED.hex} bold"
         if hud.ctx_pct >= 90
@@ -400,10 +445,8 @@ def header_text(state: TUIState) -> FormattedText:
         if hud.ctx_pct >= 70
         else f"{SUBTEXT0.hex}"
     )
-    runs.append((ctx_color, f"ctx {hud.ctx_pct}%"))
-
     runs.append((f"{OVERLAY0.hex}", "  │  "))
-    runs.append((f"{MAUVE.hex}", hud.mode.value))
+    runs.append((ctx_color, f"ctx {hud.ctx_pct}%"))
 
     return FormattedText(runs)
 
@@ -416,16 +459,21 @@ def toolbar_text(state: TUIState) -> FormattedText:
     supervised agents.
     """
     hud = state.hud
+    stop_label = "stop" if hud.is_streaming else "cancel"
 
     runs: list[tuple[str, str]] = [
-        (f"{BLUE.hex} bold", "^C"),
-        (f"{SUBTEXT0.hex}", " quit  "),
+        (f"{BLUE.hex} bold", "Enter"),
+        (f"{SUBTEXT0.hex}", " send  "),
+        (f"{BLUE.hex} bold", "Esc+⏎"),
+        (f"{SUBTEXT0.hex}", " newline  "),
         (f"{BLUE.hex} bold", "^K"),
-        (f"{SUBTEXT0.hex}", " palette  "),
+        (f"{SUBTEXT0.hex}", " commands  "),
         (f"{BLUE.hex} bold", "F2"),
         (f"{SUBTEXT0.hex}", " agents  "),
-        (f"{BLUE.hex} bold", "Esc+⏎"),
-        (f"{SUBTEXT0.hex}", " newline"),
+        (f"{BLUE.hex} bold", "^C"),
+        (f"{SUBTEXT0.hex}", f" {stop_label}  "),
+        (f"{BLUE.hex} bold", "^D"),
+        (f"{SUBTEXT0.hex}", " quit"),
     ]
 
     runs.append((f"{OVERLAY0.hex}", "   │   "))

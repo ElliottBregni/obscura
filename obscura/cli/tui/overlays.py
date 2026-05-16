@@ -49,6 +49,7 @@ from obscura.cli.renderer.modern.theme import (
     SUBTEXT0,
     TEXT,
 )
+from obscura.cli.tool_summaries import classify_tool, summarize_tool_call
 from obscura.cli.tui.state import (
     ApprovalRisk,
     BannerState,
@@ -123,6 +124,38 @@ def _format_args(tool_input: dict[str, object]) -> str:
     return _truncate_lines(body, max_lines=20)
 
 
+def _tool_action_summary(req: ToolApprovalRequest) -> str:
+    """Short operator-facing summary of the pending tool action."""
+    if req.preview.strip():
+        return req.preview.strip()
+    try:
+        summary = summarize_tool_call(req.tool_name, dict(req.tool_input))
+    except Exception:
+        logger.debug("tui overlays: summarize_tool_call failed", exc_info=True)
+        summary = ""
+    return summary or "Review arguments before allowing this tool call."
+
+
+def _tool_access_label(req: ToolApprovalRequest) -> str:
+    """Coarse access label used in the approval modal."""
+    tool_name = req.tool_name
+    kind = classify_tool(tool_name)
+    if kind == "shell":
+        return "executes shell commands"
+    if kind == "delegation":
+        return "spawns or coordinates agent work"
+    if any(
+        tok in tool_name
+        for tok in ("write", "edit", "append", "remove", "delete", "move", "copy")
+    ):
+        return "modifies local files or persistent state"
+    if any(tok in tool_name for tok in ("read", "list", "find", "grep")):
+        return "reads local or project data"
+    if kind == "mcp":
+        return "calls an external MCP tool"
+    return "uses a registered tool"
+
+
 # ---------------------------------------------------------------------------
 # Tool approval overlay
 # ---------------------------------------------------------------------------
@@ -135,8 +168,8 @@ class ToolApprovalOverlay:
     Border colour reflects ``request.risk`` — green/peach/red.
     """
 
-    WIDTH = 80
-    HEIGHT = 18
+    WIDTH = 84
+    HEIGHT = 20
 
     def __init__(self, state: TUIState) -> None:
         self._state = state
@@ -202,21 +235,24 @@ class ToolApprovalOverlay:
             return FormattedText([])
 
         border = _risk_style(req.risk)
+        summary = _tool_action_summary(req)
+        access = _tool_access_label(req)
         body: list[tuple[str, str]] = []
         body.append((f"fg:{TEXT.hex} bold", f"{req.tool_name}\n"))
+        body.append(("", "\n"))
+        body.append((f"fg:{SUBTEXT0.hex}", "action:\n"))
+        body.append((f"fg:{TEXT.hex}", summary + "\n"))
+        body.append((f"fg:{SUBTEXT0.hex}", "scope: "))
+        body.append((f"fg:{TEXT.hex}", access + "\n"))
         body.append(("", "\n"))
         args = _format_args(req.tool_input)
         body.append((f"fg:{SUBTEXT0.hex}", "args:\n"))
         body.append((f"fg:{TEXT.hex}", args + "\n"))
-        if req.preview:
-            body.append(("", "\n"))
-            body.append((f"fg:{SUBTEXT0.hex}", "preview:\n"))
-            body.append((f"fg:{TEXT.hex}", _truncate_lines(req.preview, 8) + "\n"))
         body.append(("", "\n"))
         body.append(
             (
                 border,
-                "[y] allow   [n] deny   [a] always allow   [Esc] cancel",
+                "[y] allow once   [n] deny   [a] always allow   [Esc] cancel",
             )
         )
         return FormattedText(body)
@@ -288,8 +324,8 @@ class CommandPaletteOverlay:
     Hotkeys: Up/Down navigate, Enter selects, Esc cancels, type to filter.
     """
 
-    WIDTH = 60
-    HEIGHT = 16
+    WIDTH = 68
+    HEIGHT = 18
 
     def __init__(
         self,
@@ -381,22 +417,26 @@ class CommandPaletteOverlay:
 
     def _render_list(self) -> FormattedText:
         items = self._filtered()
+        query = self._buffer.text or "/"
+        out: list[tuple[str, str]] = [
+            (f"fg:{SUBTEXT0.hex}", "  command "),
+            (f"fg:{LAVENDER.hex} bold", query),
+            (f"fg:{SUBTEXT0.hex}", "   ↑↓ move  Enter run  Esc close\n\n"),
+        ]
         if not items:
-            return FormattedText(
-                [(f"fg:{SUBTEXT0.hex} italic", "  (no commands match)\n")]
-            )
+            out.append((f"fg:{SUBTEXT0.hex} italic", "  (no commands match)\n"))
+            return FormattedText(out)
 
-        out: list[tuple[str, str]] = []
-        max_show = self.HEIGHT - 4
+        max_show = self.HEIGHT - 6
         idx = max(0, min(self._selected, len(items) - 1))
         # Window the list around the selected index.
         start = max(0, idx - max_show + 1)
         end = min(len(items), start + max_show)
         for i, name in enumerate(items[start:end], start=start):
             if i == idx:
-                out.append((f"fg:{LAVENDER.hex} bold reverse", f"  {name}\n"))
+                out.append((f"fg:{LAVENDER.hex} bold reverse", f"  /{name}\n"))
             else:
-                out.append((f"fg:{TEXT.hex}", f"  {name}\n"))
+                out.append((f"fg:{TEXT.hex}", f"  /{name}\n"))
         return FormattedText(out)
 
     # ---- key bindings ------------------------------------------------------
@@ -471,8 +511,8 @@ class AskUserOverlay:
     Hotkeys: Enter submits, Esc cancels (returns "").
     """
 
-    WIDTH = 60
-    HEIGHT = 5
+    WIDTH = 68
+    HEIGHT = 7
 
     def __init__(self, state: TUIState) -> None:
         self._state = state
@@ -536,7 +576,10 @@ class AskUserOverlay:
 
     def _render_prompt(self) -> FormattedText:
         return FormattedText(
-            [(f"fg:{MAUVE.hex} bold", _truncate_lines(self._prompt, 3))]
+            [
+                (f"fg:{SUBTEXT0.hex}", "question\n"),
+                (f"fg:{MAUVE.hex} bold", _truncate_lines(self._prompt, 3)),
+            ]
         )
 
     # ---- key bindings ------------------------------------------------------
@@ -649,6 +692,9 @@ class PlanApprovalOverlay:
         body = _truncate_lines(b.body, 10)
         out.append((f"fg:{TEXT.hex}", body + "\n"))
         out.append(("", "\n"))
+        out.append(
+            (f"fg:{SUBTEXT0.hex}", "review the plan before leaving plan mode\n\n")
+        )
         out.append(
             (
                 f"fg:{GREEN.hex} bold",

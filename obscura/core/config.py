@@ -58,11 +58,43 @@ _RUNTIME_KEYS_FROM_SETTINGS: frozenset[str] = frozenset(
         "a2a_grpc_port",
         "a2a_agent_name",
         "a2a_agent_description",
+        "a2a_inbound_rate_limit",
+        "a2a_bridge_enabled",
+        "a2a_bridge_gateway_url",
+        "a2a_bridge_max_text_len",
         "kairos_enabled",
         "kairos_proactive",
         "kairos_dream",
         "undercover_enabled",
         "allow_unauthenticated",
+        "network_gateway_enabled",
+        "network_gateway_port",
+        "network_gateway_host",
+        "network_gateway_backend",
+        "network_gateway_rate_limit",
+        "network_gateway_tailscale_enabled",
+        "network_gateway_tailscale_url",
+        "network_gateway_request_timeout",
+        "network_gateway_ws_ping_interval",
+        "network_gateway_session_ttl",
+        "moltbook_url",
+        "moltbook_agent_username",
+        "moltbook_api_key",
+        "moltbook_auto_post_enabled",
+        "moltbook_auto_post_interval_hours",
+        "moltbook_monitor_enabled",
+        "moltbook_monitor_interval_minutes",
+        "moltbook_monitor_alert_response_ms",
+        "moltbook_competitors",
+        # agent_monitor
+        "agent_monitor_enabled",
+        "agent_monitor_interval_seconds",
+        "agent_monitor_message",
+        "agent_monitor_log_path",
+        # standalone agent
+        "standalone_agent_enabled",
+        "standalone_agent_port",
+        "standalone_agent_host",
     },
 )
 
@@ -168,6 +200,11 @@ class ObscuraConfig(BaseModel):
     a2a_agent_model: str = ""  # empty = backend's default
     a2a_agent_system_prompt: str = ""
     a2a_agent_max_turns: int = 10
+    # A2A hardening / bridge parameters
+    a2a_inbound_rate_limit: int = 60  # per-IP req/min for /a2a/* endpoints
+    a2a_bridge_enabled: bool = True  # auto-init OpenClawBridge on provider startup
+    a2a_bridge_gateway_url: str = "http://localhost:18789"  # OpenClaw gateway URL
+    a2a_bridge_max_text_len: int = 32000  # max input chars for bridge calls
 
     # Kairos background daemon (opt-out: set OBSCURA_KAIROS=false to disable)
     kairos_enabled: bool = True  # default on; OBSCURA_KAIROS=false to disable
@@ -181,6 +218,58 @@ class ObscuraConfig(BaseModel):
     # address with auth disabled, startup aborts unless this is explicitly
     # set to true. Intended only for isolated/air-gapped environments.
     allow_unauthenticated: bool = False
+
+    # Network gateway — standalone agent gateway for remote connections
+    # (analogous to OpenClaw's gateway on port 18789, but for Obscura).
+    # Start with: obscura gateway
+    # Token is loaded from OBSCURA_NETWORK_TOKEN env var or
+    # ~/.obscura/network-gateway.token (auto-generated on first run).
+    network_gateway_enabled: bool = False
+    network_gateway_port: int = 18790
+    network_gateway_host: str = "0.0.0.0"
+    network_gateway_backend: str = "claude"
+    network_gateway_token: str = ""  # loaded from env/file only — never settings.json
+    network_gateway_rate_limit: int = 60
+    network_gateway_tailscale_enabled: bool = False
+    network_gateway_tailscale_url: str = (
+        ""  # e.g. https://modernizedai.tail91e620.ts.net
+    )
+    network_gateway_request_timeout: float = (
+        120.0  # OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT
+    )
+    network_gateway_ws_ping_interval: float = (
+        30.0  # OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL
+    )
+    network_gateway_session_ttl: float = 3600.0  # OBSCURA_NETWORK_GATEWAY_SESSION_TTL
+
+    # Standalone agent — direct-chat server on port 18791 (LAN / Tailscale)
+    standalone_agent_enabled: bool = False
+    standalone_agent_port: int = 18792
+    standalone_agent_host: str = "0.0.0.0"
+
+    # ---------------------------------------------------------------------------
+    # Moltbook — AI agent social network platform
+    # ---------------------------------------------------------------------------
+    moltbook_url: str = "https://moltbook.com"
+    moltbook_agent_username: str = ""
+    moltbook_api_key: str = ""
+    moltbook_auto_post_enabled: bool = False
+    moltbook_auto_post_interval_hours: int = 6
+    moltbook_monitor_enabled: bool = True
+    moltbook_monitor_interval_minutes: int = 15
+    moltbook_monitor_alert_response_ms: int = 3000
+    moltbook_competitors: list = []
+
+    # Agent monitor — peer-session assistance broadcaster
+    agent_monitor_enabled: bool = True
+    agent_monitor_interval_seconds: int = 15
+    agent_monitor_message: str = (
+        "Hi — I am the Claude Code assistant monitoring this workspace. "
+        "Elliott has asked me to stay available to all running agents. "
+        "If you need help with any task — code, planning, debugging, research, tool calls — "
+        "reach me via the Obscura gateway at http://localhost:18790 or send a UDS peer message."
+    )
+    agent_monitor_log_path: str = ""  # empty = ~/.obscura/logs/agent-monitor.log
 
     def validate_deployment_safety(self) -> None:
         """No-op: the ``auth_enabled`` toggle was removed (see commit 97b1dddb).
@@ -362,6 +451,27 @@ class ObscuraConfig(BaseModel):
                 "a2a_agent_description",
                 "",
             ),
+            # A2A hardening / bridge
+            a2a_inbound_rate_limit=_int(
+                "OBSCURA_A2A_INBOUND_RATE_LIMIT",
+                "a2a_inbound_rate_limit",
+                60,
+            ),
+            a2a_bridge_enabled=_bool_optout(
+                "OBSCURA_A2A_BRIDGE_ENABLED",
+                "a2a_bridge_enabled",
+                default=True,
+            ),
+            a2a_bridge_gateway_url=_str(
+                "OBSCURA_A2A_BRIDGE_GATEWAY_URL",
+                "a2a_bridge_gateway_url",
+                "http://localhost:18789",
+            ),
+            a2a_bridge_max_text_len=_int(
+                "OBSCURA_A2A_BRIDGE_MAX_TEXT_LEN",
+                "a2a_bridge_max_text_len",
+                32000,
+            ),
             # Kairos (opt-out)
             kairos_enabled=_bool_optout(
                 "OBSCURA_KAIROS",
@@ -389,5 +499,132 @@ class ObscuraConfig(BaseModel):
                 "OBSCURA_ALLOW_UNAUTHENTICATED",
                 "allow_unauthenticated",
                 default=False,
+            ),
+            # Network gateway
+            network_gateway_enabled=_bool_optin(
+                "OBSCURA_NETWORK_GATEWAY_ENABLED",
+                "network_gateway_enabled",
+                default=False,
+            ),
+            network_gateway_port=_int(
+                "OBSCURA_NETWORK_GATEWAY_PORT",
+                "network_gateway_port",
+                18790,
+            ),
+            network_gateway_host=_str(
+                "OBSCURA_NETWORK_GATEWAY_HOST",
+                "network_gateway_host",
+                "0.0.0.0",
+            ),
+            network_gateway_backend=_str(
+                "OBSCURA_NETWORK_GATEWAY_BACKEND",
+                "network_gateway_backend",
+                "claude",
+            ),
+            # Token is a secret — env only, never loaded from settings.json.
+            network_gateway_token=os.environ.get("OBSCURA_NETWORK_TOKEN", ""),
+            network_gateway_rate_limit=_int(
+                "OBSCURA_NETWORK_GATEWAY_RATE_LIMIT",
+                "network_gateway_rate_limit",
+                60,
+            ),
+            network_gateway_tailscale_enabled=_bool_optin(
+                "OBSCURA_NETWORK_TAILSCALE_ENABLED",
+                "network_gateway_tailscale_enabled",
+                default=False,
+            ),
+            network_gateway_tailscale_url=_str(
+                "OBSCURA_NETWORK_TAILSCALE_URL",
+                "network_gateway_tailscale_url",
+                "",
+            ),
+            network_gateway_request_timeout=_float(
+                "OBSCURA_NETWORK_GATEWAY_REQUEST_TIMEOUT",
+                "network_gateway_request_timeout",
+                120.0,
+            ),
+            network_gateway_ws_ping_interval=_float(
+                "OBSCURA_NETWORK_GATEWAY_WS_PING_INTERVAL",
+                "network_gateway_ws_ping_interval",
+                30.0,
+            ),
+            network_gateway_session_ttl=_float(
+                "OBSCURA_NETWORK_GATEWAY_SESSION_TTL",
+                "network_gateway_session_ttl",
+                3600.0,
+            ),
+            # Standalone agent
+            standalone_agent_enabled=_bool_optin(
+                "OBSCURA_STANDALONE_AGENT_ENABLED",
+                "standalone_agent_enabled",
+                default=False,
+            ),
+            standalone_agent_port=_int(
+                "OBSCURA_STANDALONE_AGENT_PORT",
+                "standalone_agent_port",
+                18791,
+            ),
+            standalone_agent_host=_str(
+                "OBSCURA_STANDALONE_AGENT_HOST",
+                "standalone_agent_host",
+                "0.0.0.0",
+            ),
+            # Moltbook — AI agent social network platform
+            moltbook_url=_str("MOLTBOOK_URL", "moltbook_url", "https://moltbook.com"),
+            moltbook_agent_username=_str(
+                "MOLTBOOK_AGENT_USERNAME", "moltbook_agent_username", ""
+            ),
+            moltbook_api_key=_str("MOLTBOOK_API_KEY", "moltbook_api_key", ""),
+            moltbook_auto_post_enabled=_bool_optin(
+                "MOLTBOOK_AUTO_POST_ENABLED",
+                "moltbook_auto_post_enabled",
+                False,
+            ),
+            moltbook_auto_post_interval_hours=_int(
+                "MOLTBOOK_AUTO_POST_INTERVAL_HOURS",
+                "moltbook_auto_post_interval_hours",
+                6,
+            ),
+            moltbook_monitor_enabled=_bool_optin(
+                "MOLTBOOK_MONITOR_ENABLED",
+                "moltbook_monitor_enabled",
+                True,
+            ),
+            moltbook_monitor_interval_minutes=_int(
+                "MOLTBOOK_MONITOR_INTERVAL_MINUTES",
+                "moltbook_monitor_interval_minutes",
+                15,
+            ),
+            moltbook_monitor_alert_response_ms=_int(
+                "MOLTBOOK_MONITOR_ALERT_RESPONSE_MS",
+                "moltbook_monitor_alert_response_ms",
+                3000,
+            ),
+            moltbook_competitors=d.get("moltbook_competitors", []),
+            agent_monitor_enabled=_bool_optin(
+                "OBSCURA_AGENT_MONITOR_ENABLED",
+                "agent_monitor_enabled",
+                True,
+            ),
+            agent_monitor_interval_seconds=_int(
+                "OBSCURA_AGENT_MONITOR_INTERVAL",
+                "agent_monitor_interval_seconds",
+                15,
+            ),
+            agent_monitor_message=_str(
+                "OBSCURA_AGENT_MONITOR_MESSAGE",
+                "agent_monitor_message",
+                "",
+            )
+            or (
+                "Hi — I am the Claude Code assistant monitoring this workspace. "
+                "Elliott has asked me to stay available to all running agents. "
+                "If you need help with any task — code, planning, debugging, research, tool calls — "
+                "reach me via the Obscura gateway at http://localhost:18790 or send a UDS peer message."
+            ),
+            agent_monitor_log_path=_str(
+                "OBSCURA_AGENT_MONITOR_LOG_PATH",
+                "agent_monitor_log_path",
+                "",
             ),
         )
